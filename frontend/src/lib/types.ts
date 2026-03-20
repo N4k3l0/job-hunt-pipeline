@@ -1,0 +1,139 @@
+// Job types
+export interface Job {
+  id: string;
+  company: string;
+  title: string;
+  location: string | null;
+  country: string | null;
+  remote_type: string | null;
+  job_url: string | null;
+  apply_url: string | null;
+  salary_text: string | null;
+  salary_min: number | null;
+  salary_max: number | null;
+  salary_currency: string | null;
+  employment_type: string | null;
+  seniority: string | null;
+  application_type: string | null;
+  source_name: string | null;
+  status: string;
+  discovered_at: string;
+  expires_at: string | null;
+}
+
+export interface JobDetail extends Job {
+  raw_description: string | null;
+  entities: JobEntity | null;
+  score: JobScore | null;
+}
+
+export interface JobEntity {
+  skills: string[] | null;
+  requirements: string[] | null;
+  keywords: string[] | null;
+  nice_to_have: string[] | null;
+  visa_notes: string | null;
+  sponsorship_available: boolean | null;
+  application_questions: string[] | null;
+  years_experience_min: number | null;
+  years_experience_max: number | null;
+}
+
+export interface JobScore {
+  role_path: string;
+  title_score: number;
+  skill_score: number;
+  seniority_score: number;
+  industry_score: number;
+  geo_score: number;
+  remote_score: number;
+  salary_score: number;
+  visa_score: number;
+  overall_fit: number;
+  priority: string;
+  reasoning: Record<string, string> | null;
+  calculated_at: string;
+}
+
+export interface JobListResponse {
+  jobs: Job[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+// Candidate types
+export interface CandidateProfile {
+  id: string;
+  user_id: string;
+  headline: string | null;
+  master_summary: string | null;
+  target_roles: string[] | null;
+  preferred_countries: string[] | null;
+  visa_statuses: Record<string, string> | null;
+  remote_preference: string | null;
+  salary_min: number | null;
+  salary_max: number | null;
+  salary_currency: string;
+  links: Record<string, string> | null;
+}
+
+export interface Resume {
+  id: string;
+  version_name: string;
+  tags: string[] | null;
+  source_type: string;
+  file_url: string;
+  parsed_at: string | null;
+  created_at: string;
+}
+
+export interface Bullet {
+  id: string;
+  text: string;
+  domain_tags: string[] | null;
+  role_tags: string[] | null;
+  keywords: string[] | null;
+  used_count: number;
+}
+
+// Tailoring types
+export interface TailoredApplication {
+  id: string;
+  job_id: string;
+  tailored_summary: string | null;
+  cover_letter: string | null;
+  recruiter_message: string | null;
+  short_answers: Record<string, string> | null;
+  keyword_matches: {
+    matched: string[];
+    unmatched: string[];
+  } | null;
+  validation_notes: Record<string, string[]> | null;
+  approval_status: string;
+  tailored_resume_url: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// Tracking types
+export interface ApplicationTracking {
+  id: string;
+  job_id: string;
+  status: string;
+  applied_at: string | null;
+  follow_up_date: string | null;
+  notes: string | null;
+  created_at: string;
+  job?: Job;
+}
+
+// Analytics types
+export interface AnalyticsOverview {
+  jobs_discovered: number;
+  jobs_shortlisted: number;
+  applications_sent: number;
+  response_rate: number;
+  interview_rate: number;
+  applications_this_week: number;
+}
