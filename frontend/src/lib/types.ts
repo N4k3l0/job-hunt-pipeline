@@ -53,6 +53,17 @@ export interface JobScore {
   priority: string;
   reasoning: Record<string, string> | null;
   calculated_at: string;
+  deep_score: {
+    overall_fit_score: number;
+    strengths: string[];
+    gaps: string[];
+    experience_relevance: string;
+    relevant_roles: string[];
+    recommendation: string;
+    summary: string;
+    scored_at: string;
+    model: string;
+  } | null;
 }
 
 export interface JobListResponse {
