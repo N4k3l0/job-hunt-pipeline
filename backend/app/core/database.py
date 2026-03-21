@@ -13,7 +13,7 @@ if settings.is_production:
     engine_kwargs["connect_args"] = {"statement_cache_size": 0}
 
 engine = create_async_engine(
-    settings.database_url,
+    settings.async_database_url,
     echo=not settings.is_production,
     **engine_kwargs,
 )
@@ -40,7 +40,7 @@ def create_worker_session():
     so it needs its own engine to avoid loop conflicts.
     """
     worker_engine = create_async_engine(
-        settings.database_url,
+        settings.async_database_url,
         poolclass=NullPool,
         echo=not settings.is_production,
     )
