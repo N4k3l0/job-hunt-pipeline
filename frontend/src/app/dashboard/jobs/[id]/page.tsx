@@ -148,7 +148,7 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
             </CardContent>
           </Card>
 
-          {entities && (entities.skills?.length > 0 || entities.requirements?.length > 0) && (
+          {entities && ((entities.skills?.length ?? 0) > 0 || (entities.requirements?.length ?? 0) > 0) && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-sm">Requirements & Skills</CardTitle>
