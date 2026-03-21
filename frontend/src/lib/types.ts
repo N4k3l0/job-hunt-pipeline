@@ -125,6 +125,7 @@ export interface TailoredApplication {
   tailored_resume_url: string | null;
   created_at: string;
   updated_at: string;
+  job?: Job;
 }
 
 // Tracking types
