@@ -36,6 +36,17 @@ def create_app() -> FastAPI:
     async def health_check():
         return {"status": "healthy", "version": "0.1.0"}
 
+    @app.post("/trigger-discovery")
+    async def trigger_discovery():
+        from app.workers.discovery_tasks import (
+            run_adzuna_discovery, run_remoteok_discovery,
+            run_arbeitnow_discovery,
+        )
+        run_adzuna_discovery.delay()
+        run_remoteok_discovery.delay()
+        run_arbeitnow_discovery.delay()
+        return {"status": "queued", "sources": ["adzuna", "remoteok", "arbeitnow"]}
+
     @app.get("/health/db")
     async def db_health():
         try:
