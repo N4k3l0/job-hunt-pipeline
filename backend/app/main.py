@@ -36,6 +36,17 @@ def create_app() -> FastAPI:
     async def health_check():
         return {"status": "healthy", "version": "0.1.0"}
 
+    @app.get("/health/db")
+    async def db_health():
+        try:
+            from sqlalchemy import text
+            from app.core.database import engine
+            async with engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
+            return {"status": "connected"}
+        except Exception as e:
+            return {"status": "error", "error": str(e), "type": type(e).__name__}
+
     return app
 
 
