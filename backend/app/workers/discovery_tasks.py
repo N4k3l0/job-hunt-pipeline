@@ -259,9 +259,12 @@ def run_arbeitnow_discovery():
 async def _run_arbeitnow_async():
     from app.services.discovery.arbeitnow_service import fetch_jobs
 
+    keywords = await _collect_all_keywords()
     try:
-        # Fetch both with and without visa sponsorship filter
-        jobs = await fetch_jobs(visa_sponsorship=False)
+        jobs = await fetch_jobs(
+            visa_sponsorship=False,
+            keywords=set(keywords) if keywords else None,
+        )
         if jobs:
             await _ingest_raw_jobs(jobs)
     except Exception as e:

@@ -6,17 +6,10 @@ logger = logging.getLogger(__name__)
 
 ARBEITNOW_API = "https://www.arbeitnow.com/api/job-board-api"
 
-# Keywords for filtering
-TARGET_KEYWORDS = {
-    "product manager", "product owner", "product lead",
-    "ai", "automation", "machine learning", "ml engineer",
-    "artificial intelligence", "llm",
-}
-
-
 async def fetch_jobs(
     visa_sponsorship: bool = False,
     max_pages: int = 3,
+    keywords: set[str] | None = None,
 ) -> list[dict]:
     """Fetch European jobs from Arbeitnow API.
 
@@ -51,7 +44,8 @@ async def fetch_jobs(
                     tags = " ".join(t.lower() for t in (item.get("tags", []) or []))
                     searchable = f"{title} {description} {tags}"
 
-                    if any(kw in searchable for kw in TARGET_KEYWORDS):
+                    filter_kw = keywords or {"product manager", "ai automation", "automation engineer"}
+                    if any(kw in searchable for kw in filter_kw):
                         all_jobs.append(_normalize_arbeitnow_result(item))
 
                 logger.info("Arbeitnow page %d: %d raw results", page, len(jobs_raw))
