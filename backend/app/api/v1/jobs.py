@@ -323,6 +323,19 @@ async def deep_score_job(
         raise HTTPException(status_code=502, detail="Deep scoring failed — LLM did not return structured output")
 
 
+@router.post("/discover")
+async def trigger_discovery(user_id: CurrentUserId):
+    """Manually trigger job discovery from all sources."""
+    from app.workers.discovery_tasks import (
+        run_adzuna_discovery, run_remoteok_discovery,
+        run_arbeitnow_discovery,
+    )
+    run_adzuna_discovery.delay()
+    run_remoteok_discovery.delay()
+    run_arbeitnow_discovery.delay()
+    return {"status": "queued", "sources": ["adzuna", "remoteok", "arbeitnow"]}
+
+
 @router.post("/import/url")
 async def import_job_url(request: JobImportURL, user_id: CurrentUserId, db: DbSession):
     """Import a job by URL (Firecrawl + Claude parsing)."""
