@@ -1,21 +1,22 @@
+import logging
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
 
+logger = logging.getLogger(__name__)
 settings = get_settings()
 
-# Use NullPool in production (Supabase Transaction Mode) to avoid connection exhaustion
-# Always disable prepared statement cache for PgBouncer compatibility
-engine_kwargs = {"connect_args": {"statement_cache_size": 0}}
-if settings.is_production:
-    engine_kwargs["poolclass"] = NullPool
+logger.info(f"DB environment={settings.environment}, is_production={settings.is_production}")
+logger.info(f"DB URL host: {settings.async_database_url.split('@')[-1] if '@' in settings.async_database_url else 'no-host'}")
 
+# Always use NullPool and disable prepared statements for Supabase/PgBouncer
 engine = create_async_engine(
     settings.async_database_url,
+    poolclass=NullPool,
     echo=not settings.is_production,
-    **engine_kwargs,
+    connect_args={"statement_cache_size": 0},
 )
 
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
