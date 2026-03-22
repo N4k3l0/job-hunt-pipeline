@@ -72,6 +72,7 @@ async def _parse_resume_async(resume_id: str, user_id: str):
                 master_summary=parsed.get("summary"),
             )
             db.add(profile)
+            await db.flush()
         else:
             # Update headline/summary from parsed data
             if parsed.get("headline"):
