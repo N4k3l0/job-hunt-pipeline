@@ -7,10 +7,10 @@ from app.core.config import get_settings
 settings = get_settings()
 
 # Use NullPool in production (Supabase Transaction Mode) to avoid connection exhaustion
-engine_kwargs = {}
+# Always disable prepared statement cache for PgBouncer compatibility
+engine_kwargs = {"connect_args": {"statement_cache_size": 0}}
 if settings.is_production:
     engine_kwargs["poolclass"] = NullPool
-    engine_kwargs["connect_args"] = {"statement_cache_size": 0}
 
 engine = create_async_engine(
     settings.async_database_url,
@@ -43,5 +43,6 @@ def create_worker_session():
         settings.async_database_url,
         poolclass=NullPool,
         echo=not settings.is_production,
+        connect_args={"statement_cache_size": 0},
     )
     return async_sessionmaker(worker_engine, class_=AsyncSession, expire_on_commit=False)
