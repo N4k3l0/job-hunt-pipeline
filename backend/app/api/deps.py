@@ -4,6 +4,7 @@ from uuid import UUID
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import verify_token, decode_token_claims
@@ -33,7 +34,7 @@ async def get_current_user(
     user = result.scalar_one_or_none()
 
     if not user:
-        # First login — auto-create user record
+        # First login — auto-create user record via upsert
         claims = decode_token_claims(token)
         email = claims.get("email", "unknown@example.com")
 
@@ -41,15 +42,18 @@ async def get_current_user(
         count_result = await db.execute(select(User))
         is_first_user = len(count_result.scalars().all()) == 0
 
-        user = User(
+        stmt = pg_insert(User).values(
             id=user_id,
             email=email,
             name=email.split("@")[0],
             role="admin" if is_first_user else "user",
-        )
-        db.add(user)
+        ).on_conflict_do_nothing(index_elements=["id"])
+        await db.execute(stmt)
         await db.commit()
-        await db.refresh(user)
+
+        # Re-fetch the user
+        result = await db.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one()
 
     return user
 
