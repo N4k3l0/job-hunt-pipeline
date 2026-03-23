@@ -13,6 +13,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarFooter,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import {
   Briefcase,
@@ -44,6 +45,7 @@ const profileItems = [
 export function AppSidebar() {
   const pathname = usePathname();
   const router = useRouter();
+  const { setOpenMobile, isMobile } = useSidebar();
 
   async function handleSignOut() {
     const supabase = createClient();
@@ -72,6 +74,7 @@ export function AppSidebar() {
                     render={<Link href={item.href} />}
                     isActive={pathname === item.href}
                     className="text-[15px] py-3 px-3 gap-3"
+                    onClick={() => isMobile && setOpenMobile(false)}
                   >
                     <item.icon className="h-5 w-5" />
                     <span className="font-medium">{item.title}</span>
@@ -93,6 +96,7 @@ export function AppSidebar() {
                     render={<Link href={item.href} />}
                     isActive={pathname === item.href}
                     className="text-[15px] py-3 px-3 gap-3"
+                    onClick={() => isMobile && setOpenMobile(false)}
                   >
                     <item.icon className="h-5 w-5" />
                     <span className="font-medium">{item.title}</span>

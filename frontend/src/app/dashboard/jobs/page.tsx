@@ -377,7 +377,7 @@ export default function JobsInboxPage() {
                   )}
 
                   {/* Source */}
-                  <div className="flex items-center gap-1.5">
+                  <div className="hidden sm:flex items-center gap-1.5">
                     <span className={`h-2 w-2 rounded-full ${src.dot}`} />
                     <span className="text-xs text-muted-foreground">
                       {src.label}
@@ -385,12 +385,12 @@ export default function JobsInboxPage() {
                   </div>
 
                   {/* Time */}
-                  <span className="text-xs text-muted-foreground tabular-nums w-16 text-right">
+                  <span className="hidden sm:inline text-xs text-muted-foreground tabular-nums w-16 text-right">
                     {job.discovered_at ? timeAgo(job.discovered_at) : "—"}
                   </span>
 
                   {/* Actions (visible on hover) */}
-                  <div className="flex items-center gap-0.5 w-16 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="hidden sm:flex items-center gap-0.5 w-16 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
                       onClick={(e) => {
                         e.preventDefault();
@@ -413,7 +413,7 @@ export default function JobsInboxPage() {
                     </button>
                   </div>
 
-                  {/* Arrow (always visible but subtle) */}
+                  {/* Arrow */}
                   <ArrowUpRight className="h-4 w-4 text-white/[0.06] group-hover:text-amber-400/60 transition-colors shrink-0" />
                 </div>
               </Link>

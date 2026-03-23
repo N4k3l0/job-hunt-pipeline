@@ -292,10 +292,10 @@ export default function DashboardPage() {
                         : "bg-white/10"
                   }`} />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold">{action.label}</p>
-                    <p className="text-sm text-muted-foreground truncate mt-0.5">{action.target}</p>
+                    <p className="text-sm font-semibold truncate">{action.label}</p>
+                    <p className="text-xs sm:text-sm text-muted-foreground truncate mt-0.5">{action.target}</p>
                   </div>
-                  <span className="text-xs text-muted-foreground shrink-0 mt-0.5">
+                  <span className="text-[10px] sm:text-xs text-muted-foreground shrink-0 mt-0.5">
                     {action.time}
                   </span>
                 </div>
@@ -329,7 +329,7 @@ export default function DashboardPage() {
                 Pipeline
               </span>
             </div>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-3 gap-2 sm:gap-3">
               {[
                 { label: "Review", count: stats.review_queue, color: "text-amber-400", bg: "bg-amber-500/5", border: "border-amber-500/15", glow: "shadow-[0_0_20px_rgba(251,191,36,0.08)]" },
                 { label: "Applied", count: stats.applications_sent, color: "text-emerald-400", bg: "bg-emerald-500/5", border: "border-emerald-500/15", glow: "shadow-[0_0_20px_rgba(52,211,153,0.08)]" },
@@ -337,9 +337,9 @@ export default function DashboardPage() {
               ].map((stage) => (
                 <div
                   key={stage.label}
-                  className={`text-center py-6 rounded-xl border ${stage.bg} ${stage.border} ${stage.glow}`}
+                  className={`text-center py-4 sm:py-6 rounded-xl border ${stage.bg} ${stage.border} ${stage.glow}`}
                 >
-                  <span className={`font-mono text-3xl font-bold block ${stage.color}`}>
+                  <span className={`font-mono text-2xl sm:text-3xl font-bold block ${stage.color}`}>
                     {stage.count}
                   </span>
                   <span className="text-sm text-muted-foreground block mt-2 font-medium">
