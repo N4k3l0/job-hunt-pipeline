@@ -86,6 +86,7 @@ export interface CandidateProfile {
   salary_min: number | null;
   salary_max: number | null;
   salary_currency: string;
+  blocked_sources: string[] | null;
   links: Record<string, string> | null;
 }
 

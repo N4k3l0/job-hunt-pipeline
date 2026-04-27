@@ -130,6 +130,7 @@ export default function ProfilePage() {
   const [salaryCurrency, setSalaryCurrency] = useState("USD");
   const [remotePref, setRemotePref] = useState("any");
   const [searchKeywords, setSearchKeywords] = useState<string[]>([]);
+  const [blockedSources, setBlockedSources] = useState<string[]>([]);
   const [newRole, setNewRole] = useState("");
   const [newCountry, setNewCountry] = useState("");
   const [newKeyword, setNewKeyword] = useState("");
@@ -154,6 +155,7 @@ export default function ProfilePage() {
       setSalaryCurrency(profile.salary_currency || "USD");
       setRemotePref(profile.remote_preference || "any");
       setSearchKeywords((profile as any).search_keywords || []);
+      setBlockedSources(profile.blocked_sources || []);
     }
   }, [profile]);
 
@@ -204,6 +206,7 @@ export default function ProfilePage() {
       salary_max: salaryMax ? parseInt(salaryMax) : null,
       salary_currency: salaryCurrency,
       remote_preference: remotePref,
+      blocked_sources: blockedSources,
     };
 
     if (profile) {
@@ -745,6 +748,74 @@ export default function ProfilePage() {
                   <Plus className="h-4 w-4" />
                 </Button>
               </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <X className="h-5 w-5" />
+                Hide sources
+              </CardTitle>
+              <CardDescription>
+                Skip jobs from boards that don&apos;t match your search. The PM
+                role usually wants to hide Adzuna (US-heavy); the AI role
+                usually keeps it on.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {[
+                  { key: "adzuna", label: "Adzuna", note: "US/UK aggregator" },
+                  { key: "linkedin", label: "LinkedIn", note: "Apify-scraped" },
+                  { key: "indeed", label: "Indeed", note: "Apify-scraped" },
+                  { key: "google_jobs", label: "Google Jobs", note: "Apify-scraped" },
+                  { key: "jsearch", label: "JSearch", note: "RapidAPI aggregator" },
+                  { key: "remoteok", label: "RemoteOK", note: "Remote-only board" },
+                  { key: "arbeitnow", label: "Arbeitnow", note: "Europe + visa" },
+                  { key: "himalayas", label: "Himalayas", note: "Worldwide remote" },
+                  { key: "remotive", label: "Remotive", note: "Remote-only board" },
+                  { key: "weworkremotely", label: "WeWorkRemotely", note: "Remote-only board" },
+                  { key: "crossover", label: "Crossover", note: "Crossover.com only" },
+                ].map((src) => {
+                  const blocked = blockedSources.includes(src.key);
+                  return (
+                    <label
+                      key={src.key}
+                      className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors ${
+                        blocked
+                          ? "border-red-500/20 bg-red-500/[0.03]"
+                          : "border-white/[0.06] hover:border-white/[0.12]"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={blocked}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setBlockedSources([...blockedSources, src.key]);
+                          } else {
+                            setBlockedSources(blockedSources.filter((s) => s !== src.key));
+                          }
+                        }}
+                        className="h-4 w-4 accent-red-500"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-sm font-medium ${blocked ? "line-through text-muted-foreground" : ""}`}>
+                          {src.label}
+                        </p>
+                        <p className="text-xs text-muted-foreground/70">{src.note}</p>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+              {blockedSources.length > 0 && (
+                <p className="text-xs text-muted-foreground mt-3">
+                  Hiding {blockedSources.length} source{blockedSources.length === 1 ? "" : "s"}.
+                  Save preferences below to apply.
+                </p>
+              )}
             </CardContent>
           </Card>
 
