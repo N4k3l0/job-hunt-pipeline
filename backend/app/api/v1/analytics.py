@@ -1,36 +1,17 @@
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func, and_
 
 from app.api.deps import CurrentUserId, DbSession
-from app.models.job import Job
+from app.models.job import Job, JobSource
 from app.models.scoring import JobScore
 from app.models.tracking import ApplicationTracking
 from app.models.tailoring import TailoredApplication
 from app.models.candidate import CandidateProfile
+from app.services.jobs_filter import apply_user_filters
 
 router = APIRouter()
-
-
-def _build_role_keywords(target_roles: list[str] | None) -> list[str]:
-    """Build title keywords from target roles."""
-    if not target_roles:
-        return []
-    keywords = []
-    for role in target_roles:
-        role_lower = role.lower()
-        keywords.append(f"%{role_lower}%")
-        if "product" in role_lower:
-            keywords.extend([
-                "%product manager%", "%product lead%", "%product owner%",
-                "%head of product%", "%product strateg%", "%product director%",
-            ])
-        if "data" in role_lower:
-            keywords.extend(["%data scientist%", "%data analyst%", "%data engineer%"])
-        if "design" in role_lower:
-            keywords.extend(["%ux design%", "%ui design%", "%product design%"])
-    return list(set(keywords))
 
 
 @router.get("/overview")
@@ -39,17 +20,32 @@ async def get_overview(user_id: CurrentUserId, db: DbSession):
     now = datetime.now(timezone.utc)
     week_ago = now - timedelta(days=7)
 
-    # Get user's target roles
+    # Get user's profile (same fields the inbox uses for filtering)
     profile_result = await db.execute(
-        select(CandidateProfile.target_roles).where(CandidateProfile.user_id == user_id)
+        select(
+            CandidateProfile.target_roles,
+            CandidateProfile.blocked_sources,
+            CandidateProfile.remote_preference,
+        ).where(CandidateProfile.user_id == user_id)
     )
-    target_roles = profile_result.scalar_one_or_none()
-    role_keywords = _build_role_keywords(target_roles)
+    profile_row = profile_result.first()
+    target_roles = profile_row[0] if profile_row else None
+    blocked_sources = profile_row[1] if profile_row else None
+    remote_preference = profile_row[2] if profile_row else None
 
-    # Jobs discovered (filtered by target roles — same logic as inbox)
-    jobs_query = select(func.count(Job.id)).where(Job.status.notin_(["duplicate", "raw"]))
-    if role_keywords:
-        jobs_query = jobs_query.where(or_(*[func.lower(Job.title).like(kw) for kw in role_keywords]))
+    # Jobs discovered — exact same filter chain the inbox applies, so the
+    # number on the dashboard always matches what the user actually sees.
+    jobs_query = (
+        select(func.count(func.distinct(Job.id)))
+        .outerjoin(JobSource, JobSource.id == Job.source_id)
+        .where(Job.status.notin_(["duplicate", "raw"]))
+    )
+    jobs_query = apply_user_filters(
+        jobs_query,
+        target_roles=target_roles,
+        blocked_sources=blocked_sources,
+        remote_preference=remote_preference,
+    )
     jobs_result = await db.execute(jobs_query)
     jobs_discovered = jobs_result.scalar() or 0
 
