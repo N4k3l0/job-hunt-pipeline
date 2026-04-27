@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,6 +18,17 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
+  // Surface any auth callback failure in the URL — instead of silently
+  // dropping the user back here, show what Supabase actually said.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const sp = new URLSearchParams(window.location.search);
+    const cbError = sp.get("error");
+    const cbDetail = sp.get("detail");
+    if (cbError) {
+      setError(cbDetail ? `${cbError}: ${cbDetail}` : `Sign-in failed: ${cbError}`);
+    }
+  }, []);
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
