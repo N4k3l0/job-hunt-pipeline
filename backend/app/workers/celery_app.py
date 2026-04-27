@@ -50,6 +50,27 @@ celery_app.conf.beat_schedule = {
         "task": "app.workers.discovery_tasks.run_jsearch_discovery",
         "schedule": crontab(hour=7, minute=0, day_of_week="mon,thu"),
     },
+    # Nigeria-friendly remote sources — staggered across the morning so each
+    # source's rate limits aren't co-opted. Remotive is intentionally slow
+    # (their API throttles aggressively above ~few polls/day).
+    "discover-himalayas-twice-daily": {
+        "task": "app.workers.discovery_tasks.run_himalayas_discovery",
+        "schedule": crontab(hour="6,18", minute=45),
+    },
+    "discover-remotive-daily": {
+        "task": "app.workers.discovery_tasks.run_remotive_discovery",
+        "schedule": crontab(hour=7, minute=15),
+    },
+    "discover-weworkremotely-daily": {
+        "task": "app.workers.discovery_tasks.run_weworkremotely_discovery",
+        "schedule": crontab(hour=7, minute=30),
+    },
+    # Crossover catalog is small + slow-moving; once daily is plenty and keeps
+    # Firecrawl spend bounded.
+    "discover-crossover-daily": {
+        "task": "app.workers.discovery_tasks.run_crossover_discovery",
+        "schedule": crontab(hour=7, minute=45),
+    },
     "check-follow-up-reminders": {
         "task": "app.workers.reminder_tasks.check_due_reminders",
         "schedule": crontab(hour=8, minute=0),

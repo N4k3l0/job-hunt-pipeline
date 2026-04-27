@@ -58,7 +58,7 @@ export function AppSidebar() {
       <SidebarHeader className="border-b px-6 py-5">
         <Link href="/dashboard" className="flex items-center gap-2.5">
           <Briefcase className="h-7 w-7" />
-          <span className="text-xl font-bold tracking-tight">Job Hunt</span>
+          <span className="font-display text-xl font-semibold tracking-tight">Job Hunt</span>
         </Link>
       </SidebarHeader>
       <SidebarContent>

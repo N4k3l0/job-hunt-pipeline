@@ -25,20 +25,19 @@ async def generate_tailored_application(
     db: AsyncSession,
     job_id: str,
     user_id: str,
+    tailored_id: str | None = None,
+    progress_callback=None,
 ) -> TailoredApplication:
     """Run the full tailoring pipeline for a job.
 
-    Steps:
-    1. Load job + profile data
-    2. Select best base resume
-    3. Generate tailored resume content
-    4. Generate cover letter
-    5. Generate recruiter outreach
-    6. Generate screening question answers (if applicable)
-    7. Store all materials
-
-    Returns the TailoredApplication record.
+    If `tailored_id` is provided, updates that placeholder row in-place instead
+    of inserting a new one. `progress_callback(step: str)` is awaited between
+    major steps so the UI can show live progress.
     """
+    async def _step(label: str):
+        if progress_callback:
+            await progress_callback(label)
+
     # Load job with entities
     job_result = await db.execute(
         select(Job).where(Job.id == job_id).options(selectinload(Job.entities))
@@ -79,6 +78,7 @@ async def generate_tailored_application(
 
     # ── Step 1: Tailor resume ─────────────────────────────────────────────
     logger.info("Tailoring resume for job %s", job_id)
+    await _step("Tailoring resume")
 
     resume_prompt = TAILOR_RESUME_PROMPT.format(
         job_title=job.title,
@@ -101,6 +101,7 @@ async def generate_tailored_application(
 
     # ── Step 2: Generate cover letter ─────────────────────────────────────
     logger.info("Generating cover letter for job %s", job_id)
+    await _step("Writing cover letter")
 
     top_exp = "\n".join(
         f"- {e.get('company')}: {'; '.join(e.get('bullets', [])[:2])}"
@@ -121,6 +122,7 @@ async def generate_tailored_application(
 
     # ── Step 3: Generate recruiter outreach ───────────────────────────────
     logger.info("Generating outreach for job %s", job_id)
+    await _step("Drafting outreach")
 
     outreach = await llm_client.generate(
         task_type="tailoring",
@@ -137,6 +139,7 @@ async def generate_tailored_application(
     short_answers = {}
     if job_questions:
         logger.info("Generating %d screening answers for job %s", len(job_questions), job_id)
+        await _step("Answering screening questions")
         relevant_exp = top_exp
         for q in job_questions[:5]:  # Limit to 5 questions
             answer = await llm_client.generate(
@@ -154,26 +157,48 @@ async def generate_tailored_application(
             short_answers[q] = answer
 
     # ── Store results ─────────────────────────────────────────────────────
-    application = TailoredApplication(
-        job_id=job_id,
-        user_id=user_id,
-        base_resume_id=base_resume.id if base_resume else None,
-        tailored_resume_json=tailored_resume,
-        tailored_summary=tailored_resume.get("tailored_summary"),
-        cover_letter=cover_letter,
-        recruiter_message=outreach,
-        short_answers=short_answers if short_answers else None,
-        keyword_matches={
-            "matched": tailored_resume.get("matched_keywords", []),
-            "unmatched": tailored_resume.get("unmatched_keywords", []),
-        },
-        validation_notes={
-            "strongest_matches": tailored_resume.get("strongest_matches", []),
-            "gaps": tailored_resume.get("gaps", []),
-        },
-        approval_status="ready",
-    )
-    db.add(application)
+    keyword_matches = {
+        "matched": tailored_resume.get("matched_keywords", []),
+        "unmatched": tailored_resume.get("unmatched_keywords", []),
+    }
+    validation_notes = {
+        "strongest_matches": tailored_resume.get("strongest_matches", []),
+        "gaps": tailored_resume.get("gaps", []),
+    }
+
+    if tailored_id:
+        # Update placeholder row created by the API endpoint.
+        existing = await db.execute(
+            select(TailoredApplication).where(TailoredApplication.id == tailored_id)
+        )
+        application = existing.scalar_one_or_none()
+        if not application:
+            raise ValueError(f"Placeholder tailored application {tailored_id} not found")
+        application.base_resume_id = base_resume.id if base_resume else None
+        application.tailored_resume_json = tailored_resume
+        application.tailored_summary = tailored_resume.get("tailored_summary")
+        application.cover_letter = cover_letter
+        application.recruiter_message = outreach
+        application.short_answers = short_answers if short_answers else None
+        application.keyword_matches = keyword_matches
+        application.validation_notes = validation_notes
+        application.approval_status = "ready"
+        application.progress_step = None
+    else:
+        application = TailoredApplication(
+            job_id=job_id,
+            user_id=user_id,
+            base_resume_id=base_resume.id if base_resume else None,
+            tailored_resume_json=tailored_resume,
+            tailored_summary=tailored_resume.get("tailored_summary"),
+            cover_letter=cover_letter,
+            recruiter_message=outreach,
+            short_answers=short_answers if short_answers else None,
+            keyword_matches=keyword_matches,
+            validation_notes=validation_notes,
+            approval_status="ready",
+        )
+        db.add(application)
     await db.flush()
 
     logger.info(

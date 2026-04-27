@@ -240,6 +240,12 @@ export function useReviewQueue() {
     queryKey: ["tailoring", "queue"],
     queryFn: () => api.get<TailoredApplication[]>("/api/v1/tailoring/queue"),
     staleTime: 2 * 60 * 1000,
+    // Poll while a tailoring task is in flight so the UI shows live progress
+    // without the user having to refresh.
+    refetchInterval: (query) => {
+      const data = query.state.data as TailoredApplication[] | undefined;
+      return data?.some((t) => t.approval_status === "generating") ? 2500 : false;
+    },
   });
 }
 
@@ -248,6 +254,20 @@ export function useTailoredApplication(id: string) {
     queryKey: ["tailoring", id],
     queryFn: () => api.get<TailoredApplication>(`/api/v1/tailoring/${id}`),
     enabled: !!id,
+  });
+}
+
+export type RegeneratableSection = "tailored_summary" | "cover_letter" | "recruiter_message";
+
+export function useRegenerateSection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, section, guidance }: { id: string; section: RegeneratableSection; guidance?: string }) =>
+      api.post<{ section: RegeneratableSection; content: string }>(
+        `/api/v1/tailoring/${id}/regenerate-section`,
+        { section, guidance: guidance || null },
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["tailoring"] }),
   });
 }
 
@@ -260,10 +280,18 @@ export function useUpdateTailored() {
   });
 }
 
+export interface ApproveResponse {
+  id: string;
+  job_id: string;
+  approval_status: string;
+  approved_at: string | null;
+  tracking_id: string;
+}
+
 export function useApproveTailored() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api.post(`/api/v1/tailoring/${id}/approve`),
+    mutationFn: (id: string) => api.post<ApproveResponse>(`/api/v1/tailoring/${id}/approve`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["tailoring"] });
       qc.invalidateQueries({ queryKey: ["tracking"] });

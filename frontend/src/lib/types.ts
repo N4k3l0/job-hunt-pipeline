@@ -109,6 +109,8 @@ export interface Bullet {
 }
 
 // Tailoring types
+export type ApprovalStatus = "pending" | "generating" | "ready" | "approved" | "rejected" | "failed";
+
 export interface TailoredApplication {
   id: string;
   job_id: string;
@@ -121,7 +123,8 @@ export interface TailoredApplication {
     unmatched: string[];
   } | null;
   validation_notes: Record<string, string[]> | null;
-  approval_status: string;
+  approval_status: ApprovalStatus;
+  progress_step: string | null;
   tailored_resume_url: string | null;
   created_at: string;
   updated_at: string;

@@ -34,3 +34,4 @@ Thumbs.db
 # Alembic
 alembic/versions/__pycache__/
 backend/celerybeat-schedule*
+.claude/

@@ -74,7 +74,7 @@ export default function AdminPage() {
   return (
     <div className="space-y-6 max-w-3xl">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Admin</h1>
+        <h1 className="font-display text-3xl font-semibold tracking-tight">Admin</h1>
         <p className="text-muted-foreground">
           Manage users and system settings
         </p>

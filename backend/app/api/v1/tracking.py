@@ -1,5 +1,7 @@
 from uuid import UUID
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
+
+DEFAULT_FOLLOW_UP_DAYS = 7
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -94,6 +96,9 @@ async def update_status(
         tracking.follow_up_date = update.follow_up_date
     if update.status == "applied":
         tracking.applied_at = datetime.now(timezone.utc)
+        # Default a follow-up reminder 7 days out so the inbox surfaces it later.
+        if not update.follow_up_date and not tracking.follow_up_date:
+            tracking.follow_up_date = date.today() + timedelta(days=DEFAULT_FOLLOW_UP_DAYS)
 
     # Log the event
     event = PipelineEvent(

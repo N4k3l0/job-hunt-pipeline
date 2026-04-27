@@ -156,12 +156,81 @@ def compute_canonical_hash(company: str, title: str, city: str | None, country: 
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
+# Words that some sources use in the location field but are not real cities.
+# We strip these out so they don't pollute the canonical hash (otherwise
+# "Worldwide" jobs from Himalayas and "Anywhere" jobs from Remotive get
+# different hashes for the same role).
+_NON_PLACE_TERMS = {
+    "worldwide", "anywhere", "remote", "global", "any country", "any location",
+    "all countries", "everywhere", "all", "n/a", "none", "various",
+    "fully remote", "100% remote", "remote-first", "emea", "americas",
+    "africa", "asia", "europe",
+}
+
+
 def extract_city(location: str | None) -> str | None:
-    """Extract city from a location string like 'San Francisco, CA' or 'London, UK'."""
+    """Extract city from a location string like 'San Francisco, CA' or 'London, UK'.
+
+    Returns None for placeholder strings like 'Worldwide' / 'Anywhere' so the
+    canonical hash stays stable across sources that use different wording for
+    'no specific city'.
+    """
     if not location:
         return None
-    parts = location.split(",")
-    return parts[0].strip() if parts else None
+    first = location.split(",")[0].strip()
+    if not first:
+        return None
+    if first.lower() in _NON_PLACE_TERMS:
+        return None
+    return first
+
+
+# Known tracking / session params that shouldn't differentiate the same job URL.
+_TRACKING_PARAMS: frozenset[str] = frozenset({
+    "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+    "ref", "src", "source", "referrer", "trk", "trkid",
+    "fbclid", "gclid", "msclkid", "mc_cid", "mc_eid",
+    "_hsenc", "_hsmi", "hsCtaTracking",
+})
+
+
+def normalize_url(url: str | None) -> str | None:
+    """Normalize a job URL for dedup comparison.
+
+    - Lowercase scheme + host
+    - Strip fragment
+    - Drop common tracking query params (but preserve real query params like
+      LinkedIn's `currentJobId` that actually identify the posting)
+    - Strip trailing slash
+    Returns None for empty input.
+    """
+    if not url:
+        return None
+    from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode
+
+    try:
+        parsed = urlparse(url.strip())
+    except Exception:
+        return url.strip().rstrip("/").lower() or None
+
+    if not parsed.scheme or not parsed.netloc:
+        return url.strip().rstrip("/").lower() or None
+
+    kept = [(k, v) for k, v in parse_qsl(parsed.query, keep_blank_values=False)
+            if k.lower() not in _TRACKING_PARAMS]
+    # Strip trailing slash from the path itself (so trailing-slash differences
+    # don't survive into URLs like `.../view/?id=1` vs `.../view?id=1`).
+    path = parsed.path
+    if len(path) > 1 and path.endswith("/"):
+        path = path.rstrip("/")
+    cleaned = parsed._replace(
+        scheme=parsed.scheme.lower(),
+        netloc=parsed.netloc.lower(),
+        path=path,
+        query=urlencode(kept),
+        fragment="",
+    )
+    return urlunparse(cleaned)
 
 
 async def get_or_create_source(db: AsyncSession, source_name: str, source_type: str = "manual") -> JobSource:

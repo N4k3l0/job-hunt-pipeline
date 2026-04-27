@@ -4,7 +4,6 @@ import { useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
   DropdownMenu,
@@ -29,7 +28,10 @@ import {
   Inbox,
   Shield,
 } from "lucide-react";
-import { useJobs, useShortlistJob, useDismissJob } from "@/hooks/use-api";
+import { useJobs } from "@/hooks/use-api";
+import { useToast } from "@/components/ui/toast";
+import { useQueryClient } from "@tanstack/react-query";
+import { api } from "@/lib/api-client";
 
 const SOURCE_COLORS: Record<string, { dot: string; label: string }> = {
   linkedin: { dot: "bg-blue-500", label: "LinkedIn" },
@@ -39,6 +41,10 @@ const SOURCE_COLORS: Record<string, { dot: string; label: string }> = {
   remoteok: { dot: "bg-emerald-500", label: "RemoteOK" },
   jsearch: { dot: "bg-rose-500", label: "JSearch" },
   google_jobs: { dot: "bg-sky-500", label: "Google" },
+  himalayas: { dot: "bg-fuchsia-500", label: "Himalayas" },
+  remotive: { dot: "bg-cyan-500", label: "Remotive" },
+  weworkremotely: { dot: "bg-indigo-500", label: "WeWorkRemotely" },
+  crossover: { dot: "bg-lime-500", label: "Crossover" },
   manual: { dot: "bg-amber-500/60", label: "Manual" },
 };
 
@@ -115,8 +121,57 @@ export default function JobsInboxPage() {
     sortBy,
   });
 
-  const shortlist = useShortlistJob();
-  const dismiss = useDismissJob();
+  const toast = useToast();
+  const qc = useQueryClient();
+
+  /**
+   * Apply an optimistic status change to the cached job list, then commit (or
+   * roll back) after the toast's undo window. We call the network directly
+   * instead of via `useMutation` so the request can be cancelled inside the
+   * 5-second window without leaving a stale mutation in flight.
+   */
+  const optimisticJobAction = (
+    job: any,
+    nextStatus: "shortlisted" | "dismissed",
+    label: string,
+    endpoint: "shortlist" | "dismiss",
+  ) => {
+    const queryKeys = qc.getQueryCache().findAll({ queryKey: ["jobs"] });
+    const snapshots = queryKeys.map((q) => ({ key: q.queryKey, data: q.state.data }));
+
+    const patch = (data: any) => {
+      if (!data?.jobs) return data;
+      return {
+        ...data,
+        jobs: data.jobs.map((j: any) =>
+          j.id === job.id ? { ...j, status: nextStatus } : j,
+        ),
+      };
+    };
+    queryKeys.forEach((q) => {
+      qc.setQueryData(q.queryKey, (old: any) => patch(old));
+    });
+
+    toast.action({
+      message: label,
+      description: job.title ? `${job.company} — ${job.title}` : undefined,
+      actionLabel: "Undo",
+      duration: 5000,
+      onCommit: async () => {
+        try {
+          await api.post(`/api/v1/jobs/${job.id}/${endpoint}`);
+        } catch (err: any) {
+          snapshots.forEach((s) => qc.setQueryData(s.key, s.data));
+          toast.error(`Couldn't ${endpoint}`, { description: err?.message });
+        } finally {
+          qc.invalidateQueries({ queryKey: ["jobs"] });
+        }
+      },
+      onUndo: () => {
+        snapshots.forEach((s) => qc.setQueryData(s.key, s.data));
+      },
+    });
+  };
 
   const jobs = data?.jobs ?? [];
   const total = data?.total ?? 0;
@@ -137,7 +192,7 @@ export default function JobsInboxPage() {
       {/* Header */}
       <div className="flex items-end justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Inbox</h1>
+          <h1 className="font-display text-3xl font-semibold tracking-tight">Inbox</h1>
           <p className="text-xs text-muted-foreground mt-1 font-mono tabular-nums">
             {total} jobs
             {activeFilters > 0 && ` · ${filtered.length} matching`}
@@ -154,19 +209,20 @@ export default function JobsInboxPage() {
         </Button>
       </div>
 
-      {/* Filters */}
-      <div className="flex items-center gap-1.5 rounded-lg bg-white/[0.02] border border-white/[0.04] px-2 py-1.5">
-        <div className="relative flex-1 max-w-[240px]">
-          <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/40" />
+      {/* Filters — stacks on mobile, inline on tablet+ */}
+      <div className="rounded-lg bg-white/[0.02] border border-white/[0.04] p-2 space-y-2 sm:space-y-0 sm:flex sm:items-center sm:gap-1.5">
+        <div className="relative w-full sm:max-w-[240px]">
+          <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/40" />
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search..."
-            className="pl-7 h-7 text-xs bg-transparent border-transparent focus:border-white/10 focus:bg-white/[0.02]"
+            placeholder="Search company or title…"
+            className="pl-8 h-9 sm:h-7 text-sm sm:text-xs bg-transparent border-transparent focus:border-white/10 focus:bg-white/[0.02]"
           />
         </div>
 
-        <Separator orientation="vertical" className="h-4 mx-0.5" />
+        <div className="flex items-center gap-1.5 overflow-x-auto -mx-1 px-1 sm:contents">
+        <Separator orientation="vertical" className="h-4 mx-0.5 hidden sm:block" />
 
         <Button
           variant={roleFilter === "pm" ? "default" : "ghost"}
@@ -177,7 +233,7 @@ export default function JobsInboxPage() {
           PM
         </Button>
 
-        <Separator orientation="vertical" className="h-4 mx-0.5" />
+        <Separator orientation="vertical" className="h-4 mx-0.5 hidden sm:block" />
 
         <DropdownMenu>
           <DropdownMenuTrigger
@@ -297,6 +353,7 @@ export default function JobsInboxPage() {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        </div>
       </div>
 
       {/* Job List */}
@@ -322,99 +379,83 @@ export default function JobsInboxPage() {
         <div className="space-y-1.5">
           {filtered.map((job: any) => {
             const score = job.score?.overall_fit ?? null;
-            const rolePath = job.score?.role_path;
             const src = SOURCE_COLORS[job.source_name] || SOURCE_COLORS.manual;
 
             return (
               <Link
                 key={job.id}
                 href={`/dashboard/jobs/${job.id}`}
-                className="group flex items-stretch gap-3 rounded-xl border border-white/[0.04] bg-white/[0.01] px-4 py-3.5 transition-all hover:bg-white/[0.03] hover:border-white/[0.08]"
+                className="group relative flex items-start gap-3 rounded-xl border border-white/[0.04] bg-white/[0.01] px-3 py-3 sm:px-4 sm:py-3.5 transition-all hover:bg-white/[0.03] hover:border-white/[0.08]"
               >
-                {/* Accent edge */}
                 <AccentEdge score={score} />
-
-                {/* Score */}
                 <ScoreBadge score={score} />
 
-                {/* Main content */}
-                <div className="flex-1 min-w-0 flex flex-col justify-center gap-1">
-                  {/* Title row */}
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold truncate leading-tight">
+                {/* Main content — always shown, wraps gracefully on mobile */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="text-sm font-semibold leading-snug line-clamp-2 sm:truncate">
                       {job.title}
                     </span>
-{/* Role badge removed — single target role */}
+                    {/* Action buttons: always visible on touch, fade in on hover for desktop */}
+                    <div className="flex items-center gap-0.5 shrink-0 opacity-100 sm:opacity-40 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          optimisticJobAction(job, "shortlisted", "Shortlisted", "shortlist");
+                        }}
+                        className="p-2 sm:p-1.5 -my-1 rounded-md hover:bg-amber-500/10 text-muted-foreground/60 hover:text-amber-400 transition-colors"
+                        aria-label="Shortlist"
+                      >
+                        <Star className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          optimisticJobAction(job, "dismissed", "Dismissed", "dismiss");
+                        }}
+                        className="p-2 sm:p-1.5 -my-1 rounded-md hover:bg-white/5 text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+                        aria-label="Dismiss"
+                      >
+                        <Archive className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                      </button>
+                      <ArrowUpRight className="hidden sm:block h-4 w-4 ml-1 text-white/[0.08] group-hover:text-amber-400/60 transition-colors" />
+                    </div>
                   </div>
 
-                  {/* Meta row */}
-                  <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                    <span className="font-medium text-foreground/60 truncate max-w-[200px]">
-                      {job.company}
-                    </span>
+                  {/* Meta row 1: company always shown, prominent */}
+                  <div className="text-xs sm:text-sm font-medium text-foreground/70 truncate mt-0.5">
+                    {job.company}
+                  </div>
+
+                  {/* Meta row 2: chips that wrap; everything visible on every screen */}
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 text-xs text-muted-foreground">
                     {job.location && (
-                      <span className="flex items-center gap-1 truncate max-w-[200px]">
-                        <MapPin className="h-3.5 w-3.5 opacity-50 shrink-0" />
-                        {job.location}
+                      <span className="inline-flex items-center gap-1 min-w-0">
+                        <MapPin className="h-3 w-3 opacity-50 shrink-0" />
+                        <span className="truncate max-w-[180px]">{job.location}</span>
                       </span>
                     )}
                     {job.remote_type === "full_remote" && (
-                      <span className="flex items-center gap-1 text-emerald-400 shrink-0">
-                        <Globe className="h-3.5 w-3.5" />
+                      <span className="inline-flex items-center gap-1 text-emerald-400">
+                        <Globe className="h-3 w-3" />
                         Remote
                       </span>
                     )}
-                  </div>
-                </div>
-
-                {/* Right side */}
-                <div className="flex items-center gap-4 shrink-0">
-                  {/* Salary */}
-                  {job.salary_text && (
-                    <span className="font-mono text-[11px] text-muted-foreground/60 tabular-nums hidden lg:inline">
-                      {job.salary_text}
+                    {job.salary_text && (
+                      <span className="font-mono tabular-nums text-muted-foreground/80">
+                        {job.salary_text}
+                      </span>
+                    )}
+                    <span className="inline-flex items-center gap-1">
+                      <span className={`h-1.5 w-1.5 rounded-full ${src.dot}`} />
+                      <span className="text-muted-foreground/60">{src.label}</span>
                     </span>
-                  )}
-
-                  {/* Source */}
-                  <div className="hidden sm:flex items-center gap-1.5">
-                    <span className={`h-2 w-2 rounded-full ${src.dot}`} />
-                    <span className="text-xs text-muted-foreground">
-                      {src.label}
-                    </span>
+                    {job.discovered_at && (
+                      <span className="text-muted-foreground/50 tabular-nums ml-auto sm:ml-0">
+                        {timeAgo(job.discovered_at)}
+                      </span>
+                    )}
                   </div>
-
-                  {/* Time */}
-                  <span className="hidden sm:inline text-xs text-muted-foreground tabular-nums w-16 text-right">
-                    {job.discovered_at ? timeAgo(job.discovered_at) : "—"}
-                  </span>
-
-                  {/* Actions (visible on hover) */}
-                  <div className="hidden sm:flex items-center gap-0.5 w-16 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
-                      onClick={(e) => {
-                        e.preventDefault();
-                        shortlist.mutate(job.id);
-                      }}
-                      className="p-1.5 rounded-md hover:bg-amber-500/10 text-muted-foreground/40 hover:text-amber-400 transition-colors"
-                      title="Shortlist"
-                    >
-                      <Star className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.preventDefault();
-                        dismiss.mutate(job.id);
-                      }}
-                      className="p-1.5 rounded-md hover:bg-white/5 text-muted-foreground/40 hover:text-muted-foreground transition-colors"
-                      title="Dismiss"
-                    >
-                      <Archive className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-
-                  {/* Arrow */}
-                  <ArrowUpRight className="h-4 w-4 text-white/[0.06] group-hover:text-amber-400/60 transition-colors shrink-0" />
                 </div>
               </Link>
             );

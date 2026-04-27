@@ -12,13 +12,97 @@ import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   User, Upload, FileText, Plus, X, Globe, DollarSign, Search,
-  Briefcase, GraduationCap, Loader2, CheckCircle2, Trash2,
+  Briefcase, GraduationCap, Loader2, CheckCircle2, Trash2, Circle, ArrowRight,
 } from "lucide-react";
 import {
   useProfile, useCreateProfile, useUpdateProfile,
   useResumes, useUploadResume, useDeleteResume,
   useWorkHistory, useSkills, useBullets,
 } from "@/hooks/use-api";
+
+type SetupStep = {
+  id: string;
+  label: string;
+  done: boolean;
+  tab: "profile" | "resumes" | "preferences";
+};
+
+function SetupChecklist({
+  steps,
+  onJump,
+  dismissed,
+  onDismiss,
+}: {
+  steps: SetupStep[];
+  onJump: (tab: SetupStep["tab"]) => void;
+  dismissed: boolean;
+  onDismiss: () => void;
+}) {
+  const doneCount = steps.filter((s) => s.done).length;
+  const total = steps.length;
+  if (doneCount === total || dismissed) return null;
+  const pct = Math.round((doneCount / total) * 100);
+  const next = steps.find((s) => !s.done);
+  return (
+    <div className="rounded-xl border border-amber-500/15 bg-gradient-to-br from-amber-500/[0.06] via-amber-500/[0.02] to-transparent p-4 sm:p-5 relative">
+      <button
+        onClick={onDismiss}
+        className="absolute top-3 right-3 text-muted-foreground/40 hover:text-muted-foreground transition-colors"
+        aria-label="Dismiss setup checklist"
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
+      <div className="flex items-center gap-2 mb-1">
+        <span className="text-[11px] uppercase tracking-[0.1em] text-amber-400 font-semibold">
+          Set up your profile
+        </span>
+        <span className="text-xs text-muted-foreground tabular-nums">
+          {doneCount} of {total}
+        </span>
+      </div>
+      <p className="text-sm text-muted-foreground mb-3">
+        {next
+          ? <>Next: <span className="text-foreground font-medium">{next.label}</span> — better matches and tailored applications.</>
+          : "All set."}
+      </p>
+      {/* progress bar */}
+      <div className="h-1 w-full rounded-full bg-white/[0.05] overflow-hidden mb-4">
+        <div
+          className="h-full bg-amber-400 transition-all duration-500"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <ul className="grid gap-1.5 sm:grid-cols-2">
+        {steps.map((s) => (
+          <li key={s.id}>
+            <button
+              onClick={() => onJump(s.tab)}
+              className="w-full flex items-center gap-2 text-left text-sm py-1.5 group"
+            >
+              {s.done ? (
+                <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+              ) : (
+                <Circle className="h-4 w-4 text-muted-foreground/40 shrink-0" />
+              )}
+              <span
+                className={
+                  s.done
+                    ? "text-muted-foreground line-through decoration-emerald-500/30"
+                    : "text-foreground/80 group-hover:text-amber-400 transition-colors"
+                }
+              >
+                {s.label}
+              </span>
+              {!s.done && (
+                <ArrowRight className="h-3 w-3 ml-auto opacity-0 group-hover:opacity-100 text-amber-400 transition-opacity" />
+              )}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 export default function ProfilePage() {
   // Profile data
@@ -75,6 +159,20 @@ export default function ProfilePage() {
 
   const [profileSaved, setProfileSaved] = useState(false);
   const [prefsSaved, setPrefsSaved] = useState(false);
+  const [activeTab, setActiveTab] = useState<"profile" | "resumes" | "preferences">("profile");
+  const [setupDismissed, setSetupDismissed] = useState(false);
+
+  // Compute completeness — drives the setup checklist banner. Each step is a
+  // "best practice" so partial setups still get matches but the user knows
+  // what's missing.
+  const setupSteps: SetupStep[] = [
+    { id: "resume", label: "Upload your resume", done: !!resumes && resumes.length > 0, tab: "resumes" },
+    { id: "headline", label: "Add a professional headline", done: !!profile?.headline?.trim(), tab: "profile" },
+    { id: "summary", label: "Write a master summary", done: !!profile?.master_summary?.trim(), tab: "profile" },
+    { id: "roles", label: "Pick target roles", done: (profile?.target_roles?.length ?? 0) > 0, tab: "preferences" },
+    { id: "regions", label: "Pick preferred regions", done: (profile?.preferred_countries?.length ?? 0) > 0, tab: "preferences" },
+    { id: "salary", label: "Set salary expectations", done: !!profile?.salary_min || !!profile?.salary_max, tab: "preferences" },
+  ];
 
   async function handleSaveProfile() {
     const data = {
@@ -147,15 +245,29 @@ export default function ProfilePage() {
   const isSavingProfile = createProfile.isPending || updateProfile.isPending;
 
   return (
-    <div className="space-y-6 max-w-4xl">
+    <div className="space-y-5 sm:space-y-6 max-w-4xl">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Profile</h1>
-        <p className="text-muted-foreground">
-          Your candidate profile powers job scoring and resume tailoring
+        <h1 className="font-display text-2xl sm:text-3xl font-semibold tracking-tight">Profile</h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          Powers job scoring and resume tailoring.
         </p>
       </div>
 
-      <Tabs defaultValue="profile">
+      <SetupChecklist
+        steps={setupSteps}
+        onJump={(tab) => {
+          setActiveTab(tab);
+          // Make sure the user sees the tab — scroll the main pane to top so
+          // the form is in view, not buried below the checklist.
+          requestAnimationFrame(() => {
+            document.querySelector("main")?.scrollTo({ top: 0, behavior: "smooth" });
+          });
+        }}
+        dismissed={setupDismissed}
+        onDismiss={() => setSetupDismissed(true)}
+      />
+
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "profile" | "resumes" | "preferences")}>
         <TabsList>
           <TabsTrigger value="profile">
             <User className="h-4 w-4 mr-1.5" />
@@ -644,7 +756,9 @@ export default function ProfilePage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-3 gap-4">
+              {/* Stack Min/Max/Currency on phones (3 columns @ 375px = squashed
+                  inputs); 3-up only at sm and above. */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
                 <div className="space-y-2">
                   <Label>Min Salary</Label>
                   <Input
@@ -663,7 +777,7 @@ export default function ProfilePage() {
                     placeholder="200000"
                   />
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-2 col-span-2 sm:col-span-1">
                   <Label>Currency</Label>
                   <Input
                     value={salaryCurrency}
@@ -675,7 +789,7 @@ export default function ProfilePage() {
               <Separator className="my-4" />
               <div className="space-y-2">
                 <Label>Remote Preference</Label>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   {[
                     { label: "Any", value: "any" },
                     { label: "Remote Only", value: "full_remote" },

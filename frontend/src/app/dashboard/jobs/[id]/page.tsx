@@ -2,6 +2,7 @@
 
 import { use } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
   Card, CardContent, CardHeader, CardTitle, CardDescription,
@@ -13,6 +14,7 @@ import {
   Briefcase, Star, Sparkles, Loader2, CheckCircle2, AlertCircle,
 } from "lucide-react";
 import { useJob, useShortlistJob, useGenerateTailored, useDeepScore } from "@/hooks/use-api";
+import { useToast } from "@/components/ui/toast";
 
 function ScoreRing({ score, size = 56 }: { score: number; size?: number }) {
   const strokeWidth = 4;
@@ -38,6 +40,8 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
   const shortlist = useShortlistJob();
   const generateTailored = useGenerateTailored();
   const deepScore = useDeepScore();
+  const toast = useToast();
+  const router = useRouter();
 
   if (isLoading) {
     return (
@@ -69,51 +73,73 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
         <ArrowLeft className="h-4 w-4" /> Back to inbox
       </Button>
 
-      {/* Header */}
-      <div className="flex items-start gap-5">
-        {score && <ScoreRing score={overallFit} />}
-        <div className="flex-1">
-          <div className="flex items-center gap-2 mb-1">
-            <h1 className="text-2xl font-bold tracking-tight">{job.title}</h1>
-            {score && (
-              <Badge variant="outline" className={`font-mono text-[10px] ${
-                score.role_path === "pm" ? "border-blue-500/20 text-blue-400" : "border-emerald-500/20 text-emerald-400"
-              }`}>
-                {score.role_path === "pm" ? "PM" : "AI"}
-              </Badge>
-            )}
-          </div>
-          <div className="flex items-center gap-4 text-sm text-muted-foreground">
-            <span className="flex items-center gap-1.5">
-              <Building2 className="h-4 w-4 opacity-50" />
-              {job.company}
-            </span>
-            {job.location && (
+      {/* Header — meta on top, actions below; both rows wrap cleanly on phone */}
+      <div className="space-y-4">
+        <div className="flex items-start gap-4 sm:gap-5">
+          {score && <ScoreRing score={overallFit} />}
+          <div className="flex-1 min-w-0">
+            <h1 className="font-display text-2xl sm:text-3xl font-semibold tracking-tight leading-snug">{job.title}</h1>
+            <div className="flex items-center flex-wrap gap-x-4 gap-y-1 mt-1.5 text-sm text-muted-foreground">
               <span className="flex items-center gap-1.5">
-                <MapPin className="h-4 w-4 opacity-50" />
-                {job.location}
+                <Building2 className="h-4 w-4 opacity-50" />
+                {job.company}
               </span>
-            )}
-            {job.remote_type === "full_remote" && (
-              <span className="flex items-center gap-1.5 text-emerald-400">
-                <Globe className="h-4 w-4" />
-                Remote
-              </span>
-            )}
+              {job.location && (
+                <span className="flex items-center gap-1.5">
+                  <MapPin className="h-4 w-4 opacity-50" />
+                  {job.location}
+                </span>
+              )}
+              {job.remote_type === "full_remote" && (
+                <span className="flex items-center gap-1.5 text-emerald-400">
+                  <Globe className="h-4 w-4" />
+                  Remote
+                </span>
+              )}
+              {job.salary_text && (
+                <span className="font-mono text-xs text-muted-foreground/80">
+                  {job.salary_text}
+                </span>
+              )}
+            </div>
           </div>
-          {job.salary_text && (
-            <span className="font-mono text-sm text-muted-foreground mt-1 block">
-              {job.salary_text}
-            </span>
-          )}
         </div>
-        <div className="flex gap-2 shrink-0">
-          <Button variant="outline" size="sm" onClick={() => shortlist.mutate(id)}>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              shortlist.mutate(id, {
+                onSuccess: () => toast.success("Shortlisted"),
+                onError: (e: any) => toast.error("Couldn't shortlist", { description: e?.message }),
+              })
+            }
+          >
             <Star className="h-4 w-4" /> Shortlist
           </Button>
-          <Button size="sm" onClick={() => generateTailored.mutate(id)} disabled={generateTailored.isPending}>
+          {job.job_url && (
+            <Button variant="outline" size="sm" nativeButton={false}
+              render={<a href={job.job_url} target="_blank" rel="noopener noreferrer" />}>
+              <ExternalLink className="h-4 w-4" /> View posting
+            </Button>
+          )}
+          <Button
+            size="sm"
+            onClick={() =>
+              generateTailored.mutate(id, {
+                onSuccess: () => {
+                  toast.success("Tailoring started", {
+                    description: "Live progress in the Review Queue.",
+                  });
+                  router.push("/dashboard/review");
+                },
+                onError: (e: any) => toast.error("Couldn't queue tailoring", { description: e?.message }),
+              })
+            }
+            disabled={generateTailored.isPending}
+          >
             {generateTailored.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-            {generateTailored.isPending ? "Generating..." : "Generate application"}
+            {generateTailored.isPending ? "Generating…" : "Generate application"}
           </Button>
         </div>
       </div>
@@ -204,31 +230,24 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
             <CardContent className="space-y-4">
               {score?.deep_score ? (
                 <>
-                  {/* Score + Recommendation */}
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <span className="font-mono text-2xl font-bold">
-                        {score.deep_score.overall_fit_score}
-                      </span>
-                      <span className="text-muted-foreground text-sm">/100</span>
-                    </div>
-                    <Badge
-                      variant="secondary"
-                      className={`text-xs ${
-                        score.deep_score.recommendation === "strong_apply"
-                          ? "bg-emerald-500/10 text-emerald-400"
-                          : score.deep_score.recommendation === "apply"
-                            ? "bg-amber-500/10 text-amber-400"
-                            : score.deep_score.recommendation === "maybe"
-                              ? "bg-orange-500/10 text-orange-400"
-                              : "bg-red-500/10 text-red-400"
-                      }`}
-                    >
-                      {score.deep_score.recommendation === "strong_apply" ? "Strong Apply" :
-                       score.deep_score.recommendation === "apply" ? "Apply" :
-                       score.deep_score.recommendation === "maybe" ? "Maybe" : "Skip"}
-                    </Badge>
-                  </div>
+                  {/* Score is already shown as the ring in the page header — show
+                      only the recommendation badge here to avoid duplication. */}
+                  <Badge
+                    variant="secondary"
+                    className={`text-xs self-start ${
+                      score.deep_score.recommendation === "strong_apply"
+                        ? "bg-emerald-500/10 text-emerald-400"
+                        : score.deep_score.recommendation === "apply"
+                          ? "bg-amber-500/10 text-amber-400"
+                          : score.deep_score.recommendation === "maybe"
+                            ? "bg-orange-500/10 text-orange-400"
+                            : "bg-red-500/10 text-red-400"
+                    }`}
+                  >
+                    {score.deep_score.recommendation === "strong_apply" ? "Strong Apply" :
+                     score.deep_score.recommendation === "apply" ? "Apply" :
+                     score.deep_score.recommendation === "maybe" ? "Maybe" : "Skip"}
+                  </Badge>
 
                   {/* Summary */}
                   <p className="text-sm text-muted-foreground leading-relaxed">
@@ -275,7 +294,12 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
                     variant="ghost"
                     size="sm"
                     className="text-xs w-full"
-                    onClick={() => deepScore.mutate(id)}
+                    onClick={() =>
+                      deepScore.mutate(id, {
+                        onSuccess: () => toast.success("Fit analysis updated"),
+                        onError: (e: any) => toast.error("Analysis failed", { description: e?.message }),
+                      })
+                    }
                     disabled={deepScore.isPending}
                   >
                     {deepScore.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
@@ -289,7 +313,12 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
                   </p>
                   <Button
                     size="sm"
-                    onClick={() => deepScore.mutate(id)}
+                    onClick={() =>
+                      deepScore.mutate(id, {
+                        onSuccess: () => toast.success("Fit analysis updated"),
+                        onError: (e: any) => toast.error("Analysis failed", { description: e?.message }),
+                      })
+                    }
                     disabled={deepScore.isPending}
                   >
                     {deepScore.isPending ? (
@@ -342,11 +371,6 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
             </CardContent>
           </Card>
 
-          {job.job_url && (
-            <Button variant="outline" className="w-full" render={<a href={job.job_url} target="_blank" rel="noopener noreferrer" />}>
-              <ExternalLink className="h-4 w-4" /> View original posting
-            </Button>
-          )}
         </div>
       </div>
     </div>

@@ -14,6 +14,7 @@ from app.services.parsing.normalizer import (
     normalize_country,
     classify_remote,
     get_or_create_source,
+    normalize_url,
 )
 from app.services.deduplication.dedup_service import check_duplicate
 
@@ -44,25 +45,29 @@ async def _ingest_raw_jobs(jobs: list[dict]):
                 location = raw.get("location")
                 country = normalize_country(raw.get("country"))
                 city = extract_city(location)
+                external_id = raw.get("external_id")
 
-                # Compute canonical hash for dedup
-                canonical_hash = compute_canonical_hash(company, title, city, country)
-
-                # Check duplicates
-                is_dup, _ = await check_duplicate(
-                    db, canonical_hash, raw.get("raw_description", ""),
-                    title=title, company=company,
-                )
-                if is_dup:
-                    skipped += 1
-                    continue
-
-                # Get or create source
+                # Resolve source first so we can dedup on (source, external_id).
                 source = await get_or_create_source(
                     db,
                     raw.get("source_name", "unknown"),
                     raw.get("source_type", "api"),
                 )
+
+                # Normalize URL once so both dedup and storage use the same value.
+                normalized_url = normalize_url(raw.get("job_url"))
+
+                canonical_hash = compute_canonical_hash(company, title, city, country)
+
+                is_dup, _ = await check_duplicate(
+                    db, canonical_hash, raw.get("raw_description", ""),
+                    title=title, company=company,
+                    source_id=source.id, external_id=external_id,
+                    job_url=normalized_url,
+                )
+                if is_dup:
+                    skipped += 1
+                    continue
 
                 remote_type = (
                     raw.get("remote_type")
@@ -73,14 +78,14 @@ async def _ingest_raw_jobs(jobs: list[dict]):
 
                 # Create job
                 job = Job(
-                    external_id=raw.get("external_id"),
+                    external_id=external_id,
                     source_id=source.id,
                     company=company,
                     title=title,
                     location=location,
                     country=country,
                     remote_type=remote_type,
-                    job_url=raw.get("job_url"),
+                    job_url=normalized_url,
                     apply_url=raw.get("apply_url"),
                     salary_text=raw.get("salary_text"),
                     salary_min=raw.get("salary_min"),
@@ -290,3 +295,105 @@ async def _run_jsearch_async():
             await _ingest_raw_jobs(jobs)
     except Exception as e:
         logger.error("JSearch discovery failed: %s", e)
+
+
+# ── Himalayas (Nigeria-friendly remote board) ────────────────────────────────
+
+
+@celery_app.task(name="app.workers.discovery_tasks.run_himalayas_discovery")
+def run_himalayas_discovery():
+    """Run scheduled Himalayas API discovery — biased toward Nigeria-eligible roles."""
+    _run_async(_run_himalayas_async())
+
+
+async def _run_himalayas_async():
+    from app.services.discovery.himalayas_service import fetch_jobs
+
+    keywords = await _collect_all_keywords()
+    try:
+        jobs = await fetch_jobs(keywords=set(keywords) if keywords else None)
+        if jobs:
+            await _ingest_raw_jobs(jobs)
+    except Exception as e:
+        logger.error("Himalayas discovery failed: %s", e)
+
+
+# ── Remotive (Nigeria-friendly remote board) ─────────────────────────────────
+
+
+@celery_app.task(name="app.workers.discovery_tasks.run_remotive_discovery")
+def run_remotive_discovery():
+    """Run scheduled Remotive API discovery — filters to candidate-location-friendly roles."""
+    _run_async(_run_remotive_async())
+
+
+async def _run_remotive_async():
+    from app.services.discovery.remotive_service import fetch_jobs
+
+    keywords = await _collect_all_keywords()
+    try:
+        jobs = await fetch_jobs(keywords=set(keywords) if keywords else None)
+        if jobs:
+            await _ingest_raw_jobs(jobs)
+    except Exception as e:
+        logger.error("Remotive discovery failed: %s", e)
+
+
+# ── WeWorkRemotely (RSS) ─────────────────────────────────────────────────────
+
+
+@celery_app.task(name="app.workers.discovery_tasks.run_weworkremotely_discovery")
+def run_weworkremotely_discovery():
+    """Run scheduled WeWorkRemotely RSS discovery."""
+    _run_async(_run_weworkremotely_async())
+
+
+async def _run_weworkremotely_async():
+    from app.services.discovery.weworkremotely_service import fetch_jobs
+
+    keywords = await _collect_all_keywords()
+    try:
+        jobs = await fetch_jobs(keywords=set(keywords) if keywords else None)
+        if jobs:
+            await _ingest_raw_jobs(jobs)
+    except Exception as e:
+        logger.error("WeWorkRemotely discovery failed: %s", e)
+
+
+# ── Crossover (Firecrawl scrape; small, Nigeria-friendly catalog) ────────────
+
+
+@celery_app.task(name="app.workers.discovery_tasks.run_crossover_discovery")
+def run_crossover_discovery():
+    """Run scheduled Crossover discovery via Firecrawl scraping."""
+    _run_async(_run_crossover_async())
+
+
+async def _run_crossover_async():
+    from app.services.discovery.crossover_service import fetch_jobs
+    from app.services.parsing.normalizer import normalize_url
+
+    keywords = await _collect_all_keywords()
+
+    # Pull URLs we already have for Crossover and skip them — saves Firecrawl
+    # credits since the catalog moves slowly.
+    skip_urls: set[str] = set()
+    async with create_worker_session()() as db:
+        result = await db.execute(
+            select(Job.job_url).join(JobSource, Job.source_id == JobSource.id)
+            .where(JobSource.name == "crossover", Job.job_url.is_not(None))
+        )
+        for row in result.all():
+            normalized = normalize_url(row[0])
+            if normalized:
+                skip_urls.add(normalized)
+
+    try:
+        jobs = await fetch_jobs(
+            keywords=set(keywords) if keywords else None,
+            skip_urls=skip_urls,
+        )
+        if jobs:
+            await _ingest_raw_jobs(jobs)
+    except Exception as e:
+        logger.error("Crossover discovery failed: %s", e)

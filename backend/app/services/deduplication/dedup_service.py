@@ -28,9 +28,16 @@ async def check_duplicate(
     similarity_threshold: float = 0.7,
     title: str = "",
     company: str = "",
+    source_id: str | None = None,
+    external_id: str | None = None,
+    job_url: str | None = None,
 ) -> tuple[bool, str | None]:
     """Check if a job is a duplicate using multi-layer deduplication.
 
+    Layer 0a: same (source_id, external_id) — fastest, most reliable; also
+              prevents IntegrityError on the unique index when a source
+              re-emits the same job.
+    Layer 0b: same normalized job_url — catches re-runs with shifted titles.
     Layer 1: Exact canonical hash match
     Layer 1.5: Same title + company (catches location variants)
     Layer 2: Description similarity for near-matches
@@ -38,6 +45,32 @@ async def check_duplicate(
     Returns:
         (is_duplicate, duplicate_of_job_id)
     """
+    # Layer 0a: same (source, external_id) — guaranteed dup when present.
+    if source_id and external_id:
+        result = await db.execute(
+            select(Job).where(
+                Job.source_id == source_id,
+                Job.external_id == external_id,
+            ).limit(1)
+        )
+        existing = result.scalar_one_or_none()
+        if existing:
+            logger.debug("source+external_id match: %s", existing.id)
+            return True, str(existing.id)
+
+    # Layer 0b: same job URL (after stripping trailing slashes / tracking params).
+    if job_url:
+        from app.services.parsing.normalizer import normalize_url
+        normalized = normalize_url(job_url)
+        if normalized:
+            result = await db.execute(
+                select(Job).where(Job.job_url == normalized).limit(1)
+            )
+            existing = result.scalar_one_or_none()
+            if existing:
+                logger.debug("job_url match: %s", existing.id)
+                return True, str(existing.id)
+
     # Layer 1: Exact hash match
     result = await db.execute(
         select(Job).where(Job.canonical_hash == canonical_hash).limit(1)

@@ -21,10 +21,12 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { useImportJobUrl, useImportJobText } from "@/hooks/use-api";
+import { useToast } from "@/components/ui/toast";
 
 export default function ImportPage() {
   const [url, setUrl] = useState("");
   const [text, setText] = useState("");
+  const toast = useToast();
 
   const importUrl = useImportJobUrl();
   const importText = useImportJobText();
@@ -32,7 +34,11 @@ export default function ImportPage() {
   async function handleUrlImport() {
     if (!url.trim()) return;
     importUrl.mutate(url.trim(), {
-      onSuccess: () => setUrl(""),
+      onSuccess: () => {
+        setUrl("");
+        toast.success("Import queued", { description: "It'll appear in your inbox once parsed." });
+      },
+      onError: (err: any) => toast.error("Import failed", { description: err?.message }),
     });
   }
 
@@ -40,14 +46,20 @@ export default function ImportPage() {
     if (!text.trim()) return;
     importText.mutate(
       { text: text.trim(), source: "manual" },
-      { onSuccess: () => setText("") },
+      {
+        onSuccess: () => {
+          setText("");
+          toast.success("Parsing queued", { description: "Job will land in your inbox shortly." });
+        },
+        onError: (err: any) => toast.error("Parse failed", { description: err?.message }),
+      },
     );
   }
 
   return (
     <div className="space-y-6 max-w-3xl">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Import Job</h1>
+        <h1 className="font-display text-3xl font-semibold tracking-tight">Import Job</h1>
         <p className="text-muted-foreground">
           Add a job manually by URL or by pasting the description
         </p>

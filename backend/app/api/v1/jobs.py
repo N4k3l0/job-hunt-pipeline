@@ -325,15 +325,27 @@ async def deep_score_job(
 
 @router.post("/discover")
 async def trigger_discovery(user_id: CurrentUserId):
-    """Manually trigger job discovery from all sources."""
+    """Manually trigger job discovery from all free/no-key sources."""
     from app.workers.discovery_tasks import (
         run_adzuna_discovery, run_remoteok_discovery,
-        run_arbeitnow_discovery,
+        run_arbeitnow_discovery, run_himalayas_discovery,
+        run_remotive_discovery, run_weworkremotely_discovery,
+        run_crossover_discovery,
     )
     run_adzuna_discovery.delay()
     run_remoteok_discovery.delay()
     run_arbeitnow_discovery.delay()
-    return {"status": "queued", "sources": ["adzuna", "remoteok", "arbeitnow"]}
+    run_himalayas_discovery.delay()
+    run_remotive_discovery.delay()
+    run_weworkremotely_discovery.delay()
+    run_crossover_discovery.delay()
+    return {
+        "status": "queued",
+        "sources": [
+            "adzuna", "remoteok", "arbeitnow",
+            "himalayas", "remotive", "weworkremotely", "crossover",
+        ],
+    }
 
 
 @router.post("/import/url")

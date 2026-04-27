@@ -132,6 +132,28 @@ Title: {job_title} at {job_company}
 - Professional but human tone
 - NEVER fabricate anything"""
 
+SUMMARY_REGEN_PROMPT = """Write only the professional summary (2-3 sentences) for this candidate's resume, tailored to this job:
+
+## Job
+Title: {job_title} at {job_company}
+Key Requirements: {job_requirements}
+Required Skills: {job_skills}
+
+## Candidate
+Headline: {candidate_headline}
+Master summary: {candidate_summary}
+Top experience: {top_experience}
+
+{guidance_block}
+
+## Instructions
+- 2-3 sentences only — no preamble, no explanation, no quotes
+- Position the candidate for THIS specific role using their real background
+- Use the job's terminology where truthful
+- NEVER fabricate experience, metrics, tools, or employers
+- Return only the summary text"""
+
+
 ANSWER_PROMPT = """Answer this screening question for a job application:
 
 ## Job
