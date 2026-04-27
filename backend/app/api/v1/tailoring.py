@@ -18,11 +18,16 @@ router = APIRouter()
 async def generate_tailored_materials(
     job_id: UUID, user_id: CurrentUserId, db: DbSession
 ):
-    """Trigger the tailoring pipeline for a job. Creates a placeholder row in
-    `generating` state immediately so the frontend can render a live progress
-    card while the worker runs."""
+    """Run the tailoring pipeline synchronously inside the request. We create
+    a placeholder row first so the Review page (polling on a different request)
+    can render a live "generating" card while this function does its 30-60s
+    of LLM work, then refresh once we mark it ready.
+
+    PDF generation is intentionally skipped — frontend renders a print-friendly
+    HTML view instead (Vercel can't ship the WeasyPrint system libs)."""
     job_result = await db.execute(select(Job).where(Job.id == job_id))
-    if not job_result.scalar_one_or_none():
+    job = job_result.scalar_one_or_none()
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
     existing = await db.execute(
@@ -45,10 +50,43 @@ async def generate_tailored_materials(
     await db.commit()
     await db.refresh(placeholder)
 
-    from app.workers.tailoring_tasks import generate_tailored_application
-    generate_tailored_application.delay(str(job_id), str(user_id), str(placeholder.id))
+    # Update progress in-line between LLM steps so the Review page's polling
+    # can show the live timeline. Each commit is small — sub-millisecond.
+    async def report(step: str) -> None:
+        placeholder.progress_step = step
+        await db.commit()
+
+    try:
+        await report("Fetching job description")
+        from app.services.discovery.firecrawl_service import scrape_url
+        if (not job.raw_description or len(job.raw_description) < 500) and job.job_url:
+            try:
+                full = await scrape_url(job.job_url)
+                if full and len(full) > len(job.raw_description or ""):
+                    job.raw_description = full
+                    await db.flush()
+            except Exception as enrich_err:
+                # Non-fatal — tailor with what we have.
+                import logging
+                logging.getLogger(__name__).warning("Description enrich failed: %s", enrich_err)
+
+        from app.services.tailoring.tailor_service import generate_tailored_application as tailor
+        application = await tailor(
+            db, str(job_id), str(user_id),
+            tailored_id=str(placeholder.id),
+            progress_callback=report,
+        )
+        application.progress_step = None
+        await db.commit()
+    except Exception as e:
+        # Mark as failed so the UI can show a retry button rather than spinning.
+        placeholder.approval_status = "failed"
+        placeholder.progress_step = str(e)[:500]
+        await db.commit()
+        raise HTTPException(status_code=502, detail=f"Tailoring failed: {e}") from e
+
     return {
-        "status": "queued",
+        "status": "complete",
         "job_id": str(job_id),
         "tailored_id": str(placeholder.id),
     }

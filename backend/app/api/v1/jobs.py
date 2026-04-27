@@ -325,27 +325,33 @@ async def deep_score_job(
 
 @router.post("/discover")
 async def trigger_discovery(user_id: CurrentUserId):
-    """Manually trigger job discovery from all free/no-key sources."""
+    """Run all free/no-key discovery sources synchronously inside this request.
+
+    Vercel-friendly: returns when each source finishes (or errors). At ~3-8s
+    per source the total stays within the 60s limit. Crossover (slowest) is
+    excluded here because it can blow the limit alone — it has its own cron
+    endpoint at /api/v1/cron/discover-slow."""
     from app.workers.discovery_tasks import (
-        run_adzuna_discovery, run_remoteok_discovery,
-        run_arbeitnow_discovery, run_himalayas_discovery,
-        run_remotive_discovery, run_weworkremotely_discovery,
-        run_crossover_discovery,
+        _run_adzuna_async, _run_remoteok_async, _run_arbeitnow_async,
+        _run_himalayas_async, _run_remotive_async, _run_weworkremotely_async,
     )
-    run_adzuna_discovery.delay()
-    run_remoteok_discovery.delay()
-    run_arbeitnow_discovery.delay()
-    run_himalayas_discovery.delay()
-    run_remotive_discovery.delay()
-    run_weworkremotely_discovery.delay()
-    run_crossover_discovery.delay()
-    return {
-        "status": "queued",
-        "sources": [
-            "adzuna", "remoteok", "arbeitnow",
-            "himalayas", "remotive", "weworkremotely", "crossover",
-        ],
-    }
+    runners = [
+        ("adzuna", _run_adzuna_async),
+        ("remoteok", _run_remoteok_async),
+        ("arbeitnow", _run_arbeitnow_async),
+        ("himalayas", _run_himalayas_async),
+        ("remotive", _run_remotive_async),
+        ("weworkremotely", _run_weworkremotely_async),
+    ]
+    results: dict[str, str] = {}
+    for name, runner in runners:
+        try:
+            await runner()
+            results[name] = "ok"
+        except Exception as e:
+            logger.error("Discovery '%s' failed: %s", name, e)
+            results[name] = f"error: {type(e).__name__}: {e}"
+    return {"status": "complete", "results": results}
 
 
 @router.post("/import/url")

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import {
   Card, CardContent, CardHeader, CardTitle,
 } from "@/components/ui/card";
@@ -784,12 +785,10 @@ export default function ReviewQueuePage() {
           <Card>
             <CardContent className="flex flex-wrap items-center gap-2 py-3 sm:justify-between">
               <div className="flex gap-2">
-                {review.tailored_resume_url && (
-                  <Button variant="outline" size="sm" nativeButton={false}
-                    render={<a href={review.tailored_resume_url} target="_blank" rel="noopener" />}>
-                    <Download className="h-3.5 w-3.5" /> PDF
-                  </Button>
-                )}
+                <Button variant="outline" size="sm" nativeButton={false}
+                  render={<Link href={`/dashboard/review/${review.id}/print`} target="_blank" />}>
+                  <Download className="h-3.5 w-3.5" /> Print / PDF
+                </Button>
               </div>
               <div className="flex flex-wrap gap-2 ml-auto">
                 <Button

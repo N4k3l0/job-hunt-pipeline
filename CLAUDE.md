@@ -20,7 +20,7 @@ A private, invite-only, multi-user web application that automatically discovers 
 - **Page Parsing:** Firecrawl API
 - **AI/LLM:** Claude API (Sonnet for parsing/scoring, Opus for tailoring)
 - **PDF Generation:** WeasyPrint (HTML/CSS → PDF)
-- **Hosting:** Vercel (frontend) + Railway (backend + workers + Redis) + Supabase (DB/auth/storage)
+- **Hosting:** Vercel (both frontend AND backend as separate projects) + Supabase (DB/auth/storage). Background jobs run synchronously inside FastAPI request handlers; scheduled discovery runs via Vercel Cron. Celery + Redis are no longer used in production but remain in the codebase for optional local-only use.
 
 ### Monorepo Structure
 ```
@@ -63,7 +63,8 @@ cp .env.example .env.local  # Fill in Supabase keys
 npm run dev
 ```
 
-### Running Workers
+### Running Workers (optional, local-only)
+Production deploys do not use Celery — discovery runs via Vercel Cron and tailoring runs synchronously inside FastAPI requests. The Celery setup remains for local development if you want to keep work off the request thread.
 ```bash
 # Celery worker
 celery -A app.workers.celery_app worker --loglevel=info
@@ -125,4 +126,30 @@ See `backend/.env.example` and `frontend/.env.example` for all required variable
 - In production, connect to Supabase PostgreSQL via Transaction Mode (port 6543) with NullPool
 - Apify actors trigger via webhooks to `/api/webhooks/apify` — verify HMAC signature
 - All tailored application materials require human approval before use
-- Follow-up reminders run via Celery Beat daily check
+
+## Deployment (Vercel)
+
+Both frontend and backend deploy as **separate Vercel projects** pointing at the same GitHub repo.
+
+### Backend project
+- **Root directory**: `backend`
+- **Framework preset**: Other (Vercel auto-detects Python via `vercel.json`)
+- **Required env vars**: `DATABASE_URL` (Supabase pooler, port 6543), `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_KEY`, `SUPABASE_JWT_SECRET`, `ANTHROPIC_API_KEY`, `FIRECRAWL_API_KEY`, `ADZUNA_APP_ID`, `ADZUNA_APP_KEY`, `JSEARCH_RAPIDAPI_KEY`, `CORS_ORIGINS`, `CRON_SECRET`
+- **Cron jobs** are defined in `backend/vercel.json` (fast/slow discovery — Vercel Hobby allows max 2)
+- **Set `CRON_SECRET`** to any random string; Vercel automatically sends it as `Authorization: Bearer <secret>` to cron endpoints
+
+### Frontend project
+- **Root directory**: `frontend`
+- **Required env vars**: `NEXT_PUBLIC_API_URL` (the backend's Vercel URL), `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+
+### After first deploy
+Run the alembic migration once against the production DB:
+```bash
+cd backend && source venv/bin/activate
+DATABASE_URL=<your-supabase-pooler-url> alembic upgrade head
+```
+
+### Constraints to know
+- Vercel Hobby function timeout is **60 seconds** — tailoring (3-5 LLM calls) usually fits but ~10% of generations may need a retry. Upgrade to Pro for 5-minute timeouts.
+- PDF generation is removed in this deploy — replaced with `/dashboard/review/[id]/print` (browser print-to-PDF). To restore PDFs, run the backend on a host that supports cairo/pango (Railway, Fly, Render web services).
+- Vercel Hobby allows max 2 Cron jobs.

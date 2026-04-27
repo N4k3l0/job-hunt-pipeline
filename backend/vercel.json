@@ -1,0 +1,19 @@
+{
+  "version": 2,
+  "builds": [
+    { "src": "api/index.py", "use": "@vercel/python" }
+  ],
+  "routes": [
+    { "src": "/(.*)", "dest": "/api/index.py" }
+  ],
+  "crons": [
+    {
+      "path": "/api/v1/cron/discover-fast",
+      "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/v1/cron/discover-slow",
+      "schedule": "0 7 * * *"
+    }
+  ]
+}

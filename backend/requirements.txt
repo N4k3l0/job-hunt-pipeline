@@ -9,7 +9,9 @@ asyncpg>=0.30.0
 alembic>=1.14.0
 greenlet>=3.1.0
 
-# Redis + Celery
+# Redis + Celery — only needed if you run the worker locally for legacy
+# Celery-based jobs. Vercel deploys do not invoke the worker; all task code
+# runs inside FastAPI request handlers / Vercel Cron endpoints.
 celery[redis]>=5.4.0
 redis>=5.2.0
 
@@ -23,8 +25,10 @@ httpx>=0.28.0
 # AI/LLM
 anthropic>=0.40.0
 
-# PDF generation
-weasyprint>=63.0
+# PDF generation — REMOVED for Vercel deploy. WeasyPrint requires cairo/pango
+# system libraries that Vercel's Python runtime does not provide. Tailored
+# resumes are now rendered as a print-friendly HTML page on the frontend.
+# To restore PDF generation locally: `pip install weasyprint==63.0`.
 
 # Document parsing
 python-docx>=1.1.0
