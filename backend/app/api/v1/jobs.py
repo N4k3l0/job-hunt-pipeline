@@ -54,19 +54,27 @@ async def list_jobs(
     # Auto-filter by user's target roles (only show relevant jobs)
     from sqlalchemy import or_
     profile_result = await db.execute(
-        select(CandidateProfile.target_roles, CandidateProfile.blocked_sources).where(
-            CandidateProfile.user_id == user_id
-        )
+        select(
+            CandidateProfile.target_roles,
+            CandidateProfile.blocked_sources,
+            CandidateProfile.remote_preference,
+        ).where(CandidateProfile.user_id == user_id)
     )
     profile_row = profile_result.first()
     target_roles = profile_row[0] if profile_row else None
     blocked_sources = profile_row[1] if profile_row else None
+    profile_remote_pref = profile_row[2] if profile_row else None
 
     # Per-user source blocklist — e.g. PM user can hide noisy adzuna jobs.
     if blocked_sources:
         query = query.where(
             JobSource.name.notin_(blocked_sources) | (JobSource.name.is_(None))
         )
+
+    # Honor profile's remote_preference unless an explicit filter was passed.
+    # `any` means "no preference", we don't filter at all.
+    if not remote_type and not remote_only and profile_remote_pref and profile_remote_pref != "any":
+        query = query.where(Job.remote_type == profile_remote_pref)
     role_keywords = []
     keywords = []
     if target_roles and not role_type:
@@ -140,6 +148,8 @@ async def list_jobs(
         count_base = count_base.where(
             JobSource.name.notin_(blocked_sources) | (JobSource.name.is_(None))
         )
+    if not remote_type and not remote_only and profile_remote_pref and profile_remote_pref != "any":
+        count_base = count_base.where(Job.remote_type == profile_remote_pref)
     if target_roles and not role_type:
         count_base = count_base.where(or_(*[func.lower(Job.title).like(kw) for kw in role_keywords]))
     if country:
