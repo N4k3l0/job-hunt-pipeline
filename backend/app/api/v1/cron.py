@@ -41,22 +41,31 @@ async def _run_one(name: str, runner) -> tuple[str, str]:
 
 @router.get("/discover-fast")
 async def cron_discover_fast(authorization: str | None = Header(None)):
-    """Run the API/RSS-based discovery sources. ~25-40s total.
+    """Run the heavy paginated sources (Adzuna across many countries +
+    Arbeitnow with pagination). These two alone can approach the 60s limit."""
+    _verify_cron(authorization)
 
-    Adzuna, RemoteOK, Arbeitnow, Himalayas, Remotive, WeWorkRemotely.
-    Each is a single HTTP call (or a few paginated calls), so total time
-    stays well under the 60s Vercel limit even at peak."""
+    from app.workers.discovery_tasks import _run_adzuna_async, _run_arbeitnow_async
+
+    results = {}
+    for name, runner in [("adzuna", _run_adzuna_async), ("arbeitnow", _run_arbeitnow_async)]:
+        n, status = await _run_one(name, runner)
+        results[n] = status
+    return {"status": "complete", "results": results}
+
+
+@router.get("/discover-remote")
+async def cron_discover_remote(authorization: str | None = Header(None)):
+    """Run the remote-only single-call sources. Fast enough to fit together."""
     _verify_cron(authorization)
 
     from app.workers.discovery_tasks import (
-        _run_adzuna_async, _run_remoteok_async, _run_arbeitnow_async,
-        _run_himalayas_async, _run_remotive_async, _run_weworkremotely_async,
+        _run_remoteok_async, _run_himalayas_async,
+        _run_remotive_async, _run_weworkremotely_async,
     )
 
     runners = [
-        ("adzuna", _run_adzuna_async),
         ("remoteok", _run_remoteok_async),
-        ("arbeitnow", _run_arbeitnow_async),
         ("himalayas", _run_himalayas_async),
         ("remotive", _run_remotive_async),
         ("weworkremotely", _run_weworkremotely_async),

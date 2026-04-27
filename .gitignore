@@ -35,3 +35,4 @@ Thumbs.db
 alembic/versions/__pycache__/
 backend/celerybeat-schedule*
 .claude/
+.vercel

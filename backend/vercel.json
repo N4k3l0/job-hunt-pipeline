@@ -12,8 +12,8 @@
       "schedule": "0 6 * * *"
     },
     {
-      "path": "/api/v1/cron/discover-slow",
-      "schedule": "0 7 * * *"
+      "path": "/api/v1/cron/discover-remote",
+      "schedule": "30 6 * * *"
     }
   ]
 }
