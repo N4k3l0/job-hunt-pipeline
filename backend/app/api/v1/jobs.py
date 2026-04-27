@@ -54,9 +54,19 @@ async def list_jobs(
     # Auto-filter by user's target roles (only show relevant jobs)
     from sqlalchemy import or_
     profile_result = await db.execute(
-        select(CandidateProfile.target_roles).where(CandidateProfile.user_id == user_id)
+        select(CandidateProfile.target_roles, CandidateProfile.blocked_sources).where(
+            CandidateProfile.user_id == user_id
+        )
     )
-    target_roles = profile_result.scalar_one_or_none()
+    profile_row = profile_result.first()
+    target_roles = profile_row[0] if profile_row else None
+    blocked_sources = profile_row[1] if profile_row else None
+
+    # Per-user source blocklist — e.g. PM user can hide noisy adzuna jobs.
+    if blocked_sources:
+        query = query.where(
+            JobSource.name.notin_(blocked_sources) | (JobSource.name.is_(None))
+        )
     role_keywords = []
     keywords = []
     if target_roles and not role_type:
@@ -126,6 +136,10 @@ async def list_jobs(
         .where(Job.status.notin_(["duplicate", "raw"]))
     )
     # Apply same filters to count
+    if blocked_sources:
+        count_base = count_base.where(
+            JobSource.name.notin_(blocked_sources) | (JobSource.name.is_(None))
+        )
     if target_roles and not role_type:
         count_base = count_base.where(or_(*[func.lower(Job.title).like(kw) for kw in role_keywords]))
     if country:

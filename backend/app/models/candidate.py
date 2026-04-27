@@ -27,6 +27,7 @@ class CandidateProfile(Base):
     salary_max: Mapped[int | None] = mapped_column(Integer)
     salary_currency: Mapped[str | None] = mapped_column(String(10), default="USD")
     search_keywords: Mapped[list[str] | None] = mapped_column(ARRAY(String))  # Custom job search queries
+    blocked_sources: Mapped[list[str] | None] = mapped_column(ARRAY(String))  # source names to hide from this user's inbox
     links: Mapped[dict | None] = mapped_column(JSONB)  # linkedin, github, portfolio, etc.
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
