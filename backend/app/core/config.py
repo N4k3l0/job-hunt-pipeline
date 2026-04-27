@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     firecrawl_api_key: str = ""
     anthropic_api_key: str = ""
 
+    # Frontend URL — used to build the magic-link redirect_to in the invite
+    # flow. Falls back to the first cors_origin if unset.
+    frontend_url: str = ""
+
     @property
     def async_database_url(self) -> str:
         """Convert standard postgresql:// URL to asyncpg format."""

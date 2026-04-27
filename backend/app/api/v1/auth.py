@@ -47,17 +47,29 @@ async def get_current_user(user: CurrentUser, db: DbSession):
 async def invite_user(request: InviteRequest, admin: AdminUser, db: DbSession):
     """Invite a new user by email (admin only).
 
-    Creates the user in Supabase Auth and sends an invite email.
-    """
+    Creates the user in Supabase Auth and sends an invite email. Passes an
+    explicit `redirect_to` so the user lands on OUR /auth/callback page
+    instead of whatever default Site URL the Supabase project happens to
+    have configured (which is often stale across redeploys)."""
     from supabase import create_client
 
     supabase = create_client(settings.supabase_url, settings.supabase_service_key)
 
+    # Resolve the frontend URL: prefer FRONTEND_URL env, fall back to first cors_origin.
+    frontend = (settings.frontend_url
+                or (settings.cors_origin_list[0] if settings.cors_origin_list else "")
+                ).rstrip("/")
+    redirect_to = f"{frontend}/auth/callback" if frontend else None
+
     try:
-        result = supabase.auth.admin.invite_user_by_email(request.email)
+        kwargs = {}
+        if redirect_to:
+            kwargs["options"] = {"redirect_to": redirect_to}
+        result = supabase.auth.admin.invite_user_by_email(request.email, **kwargs)
         return {
             "status": "invited",
             "email": request.email,
+            "redirect_to": redirect_to,
             "message": "Invite email sent. User will appear after they accept.",
         }
     except Exception as e:

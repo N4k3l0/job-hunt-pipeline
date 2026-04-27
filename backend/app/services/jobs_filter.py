@@ -4,10 +4,28 @@ Analytics overview. Keeping a single source of truth means the dashboard's
 
 from __future__ import annotations
 
-from sqlalchemy import or_, func
+from sqlalchemy import or_, and_, not_, func
 
 from app.models.job import Job
 from app.models.job import JobSource
+
+
+# Title patterns that imply a Product role. We exclude these from the inbox
+# unless the user's target roles explicitly include "product" — otherwise an
+# AI Engineer search picks up "Senior Product Manager, AI Platform" via the
+# generic "% ai " expansion.
+_PRODUCT_PATTERNS = (
+    "%product manager%", "%product lead%", "%product owner%",
+    "%head of product%", "%director of product%", "%vp of product%",
+    "%group product manager%", "%principal product manager%",
+    "%staff product manager%", "%product strateg%",
+)
+
+
+def _user_wants_product(target_roles: list[str] | None) -> bool:
+    if not target_roles:
+        return False
+    return any("product" in r.lower() for r in target_roles)
 
 
 def build_role_keywords(target_roles: list[str] | None) -> list[str]:
@@ -56,6 +74,15 @@ def apply_user_filters(
     role_keywords = build_role_keywords(target_roles)
     if role_keywords:
         query = query.where(or_(*[func.lower(Job.title).like(kw) for kw in role_keywords]))
+
+    # Exclude product-management titles unless the user actually targets product.
+    # Without this, an AI/ML user gets "Sr. PM, AI Platform" leaking in via the
+    # generic "% ai " expansion.
+    if not _user_wants_product(target_roles):
+        query = query.where(
+            and_(*[not_(func.lower(Job.title).like(p)) for p in _PRODUCT_PATTERNS])
+        )
+
     if blocked_sources:
         query = query.where(
             JobSource.name.notin_(blocked_sources) | (JobSource.name.is_(None))

@@ -51,8 +51,11 @@ async def list_jobs(
         .where(Job.status.notin_(["duplicate", "raw"]))
     )
 
-    # Auto-filter by user's target roles (only show relevant jobs)
-    from sqlalchemy import or_
+    # Pull profile preferences once and run them through the shared filter
+    # (same code path the dashboard's /analytics/overview uses, so the counts
+    # always agree).
+    from sqlalchemy import or_  # still used by role_type override below
+    from app.services.jobs_filter import apply_user_filters
     profile_result = await db.execute(
         select(
             CandidateProfile.target_roles,
@@ -65,39 +68,19 @@ async def list_jobs(
     blocked_sources = profile_row[1] if profile_row else None
     profile_remote_pref = profile_row[2] if profile_row else None
 
-    # Per-user source blocklist — e.g. PM user can hide noisy adzuna jobs.
-    if blocked_sources:
-        query = query.where(
-            JobSource.name.notin_(blocked_sources) | (JobSource.name.is_(None))
-        )
+    # role_type query param overrides the profile's target_roles.
+    apply_target_roles = target_roles if not role_type else None
+    # Explicit remote_type / remote_only query params override profile pref.
+    effective_remote_pref = (
+        None if (remote_type or remote_only) else profile_remote_pref
+    )
 
-    # Honor profile's remote_preference unless an explicit filter was passed.
-    # `any` means "no preference", we don't filter at all.
-    if not remote_type and not remote_only and profile_remote_pref and profile_remote_pref != "any":
-        query = query.where(Job.remote_type == profile_remote_pref)
-    role_keywords = []
-    keywords = []
-    if target_roles and not role_type:
-        # Build keywords from target roles
-        from sqlalchemy import or_
-        role_keywords = []
-        for role in target_roles:
-            role_lower = role.lower()
-            role_keywords.append(f"%{role_lower}%")
-            # Add related keywords for common roles
-            if "product" in role_lower:
-                role_keywords.extend([
-                    "%product manager%", "%product lead%", "%product owner%",
-                    "%head of product%", "%product strateg%", "%product director%",
-                ])
-            if "ai" in role_lower or "automation" in role_lower:
-                role_keywords.extend([
-                    "%ai %", "% ai", "%artificial intelligence%", "%machine learning%",
-                    "%automation%", "%llm%", "%ml engineer%",
-                ])
-        # Deduplicate
-        role_keywords = list(set(role_keywords))
-        query = query.where(or_(*[func.lower(Job.title).like(kw) for kw in role_keywords]))
+    query = apply_user_filters(
+        query,
+        target_roles=apply_target_roles,
+        blocked_sources=blocked_sources,
+        remote_preference=effective_remote_pref,
+    )
 
     # Apply filters
     if country:
@@ -135,7 +118,7 @@ async def list_jobs(
     if status:
         query = query.where(Job.status == status)
 
-    # Count total — build a parallel count query with same filters
+    # Count total — apply identical filter chain through the shared helper.
     count_base = (
         select(func.count(func.distinct(Job.id)))
         .outerjoin(JobScore, and_(JobScore.job_id == Job.id, JobScore.user_id == user_id))
@@ -143,15 +126,12 @@ async def list_jobs(
         .outerjoin(JobEntity, JobEntity.job_id == Job.id)
         .where(Job.status.notin_(["duplicate", "raw"]))
     )
-    # Apply same filters to count
-    if blocked_sources:
-        count_base = count_base.where(
-            JobSource.name.notin_(blocked_sources) | (JobSource.name.is_(None))
-        )
-    if not remote_type and not remote_only and profile_remote_pref and profile_remote_pref != "any":
-        count_base = count_base.where(Job.remote_type == profile_remote_pref)
-    if target_roles and not role_type:
-        count_base = count_base.where(or_(*[func.lower(Job.title).like(kw) for kw in role_keywords]))
+    count_base = apply_user_filters(
+        count_base,
+        target_roles=apply_target_roles,
+        blocked_sources=blocked_sources,
+        remote_preference=effective_remote_pref,
+    )
     if country:
         count_base = count_base.where(Job.country == country.upper())
     if remote_type:
