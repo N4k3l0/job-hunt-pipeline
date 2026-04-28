@@ -1,8 +1,8 @@
 import logging
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Query, HTTPException
-from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import select, func, and_
 from sqlalchemy.orm import selectinload
@@ -11,7 +11,8 @@ from app.api.deps import CurrentUserId, DbSession
 from app.models.job import Job, JobEntity, JobSource
 from app.models.scoring import JobScore
 from app.models.candidate import CandidateProfile
-from app.services.discovery.ats_resolver import is_ats_url, resolve_ats_url
+from app.models.tracking import ApplicationTracking
+from app.services.discovery.ats_resolver import find_direct_apply, is_ats_url
 
 logger = logging.getLogger(__name__)
 
@@ -402,46 +403,79 @@ async def dismiss_job(job_id: UUID, user_id: CurrentUserId, db: DbSession):
     return {"status": "dismissed", "job_id": str(job_id)}
 
 
-@router.get("/{job_id}/apply")
-async def apply_redirect(job_id: UUID, db: DbSession):
-    """Resolve and 302-redirect to the company's direct ATS posting.
+@router.post("/{job_id}/apply")
+async def apply_to_job(job_id: UUID, user_id: CurrentUserId, db: DbSession):
+    """Resolve the best apply URL AND record the click as an application.
 
-    The Apply button on the frontend is a plain `<a href>` so it opens in a
-    new tab — that means we can't send an Authorization header, so this
-    endpoint is intentionally PUBLIC. Job IDs are random UUIDs and the
-    destination URLs are themselves public-facing job postings, so there's
-    no leak.
+    The frontend opens a placeholder window first (so the popup blocker is
+    happy), then POSTs here to get back `{ url, tracking_id }`, then
+    rewrites the popup to that URL. End result: one click → company's
+    direct ATS posting → application is already in the user's pipeline.
 
-    Routing logic:
-      1. If the existing job_url / apply_url is already on a known free ATS
-         (Greenhouse, Lever, Ashby, Workable, etc.) → 302 there immediately.
-      2. Otherwise call the ATS resolver: probe Greenhouse / Lever / Ashby
-         for the company's slug, find a title match, return the direct
-         posting URL. Cache the result on the row so the next click is
-         instant.
-      3. If nothing resolves → 302 to the original source URL (no signup
-         wall avoidance, but at least the user lands on the posting).
+    Resolution order (cheapest first):
+      1. apply_url / job_url is already on a known free ATS → use it.
+      2. Follow the source URL's redirect chain — many aggregators 30x
+         straight to the ATS for free.
+      3. Slug-guess across Greenhouse → Lever → Ashby → SmartRecruiters
+         using the company name. Cache on the job row.
+      4. Fall back to whatever source URL we have.
+
+    Side effect: creates / updates an ApplicationTracking row with status
+    'applied'. The user can edit/correct status from the Applications page
+    (e.g. roll it back if they decided not to submit). This is the price
+    of doing the actual application outside the pipeline — we treat the
+    click as the tracked event.
     """
     result = await db.execute(select(Job).where(Job.id == job_id))
     job = result.scalar_one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    # Step 1: existing URL already on a known ATS.
-    for raw in (job.apply_url, job.job_url):
-        if raw and is_ats_url(raw):
-            return RedirectResponse(raw, status_code=302)
-
-    # Step 2: server-side resolve via ATS APIs.
-    resolved = await resolve_ats_url(job.company or "", job.title or "")
-    if resolved:
-        # Cache on the row so subsequent clicks skip the resolver entirely.
+    # ── Resolve URL ────────────────────────────────────────────────────
+    source = job.apply_url or job.job_url
+    resolved = await find_direct_apply(
+        company=job.company or "",
+        title=job.title or "",
+        source_url=source,
+    )
+    if resolved and resolved != job.apply_url and is_ats_url(resolved):
+        # Cache the better URL on the job so the next click skips resolution.
         job.apply_url = resolved
-        await db.commit()
-        return RedirectResponse(resolved, status_code=302)
+    final_url = resolved or source
+    if not final_url:
+        raise HTTPException(status_code=404, detail="No URL available for this job")
 
-    # Step 3: fallback to whatever URL the source gave us.
-    fallback = job.apply_url or job.job_url
-    if fallback:
-        return RedirectResponse(fallback, status_code=302)
-    raise HTTPException(status_code=404, detail="No URL available for this job")
+    # ── Record / update the application ────────────────────────────────
+    existing = await db.execute(
+        select(ApplicationTracking).where(
+            ApplicationTracking.job_id == job_id,
+            ApplicationTracking.user_id == user_id,
+        )
+    )
+    tracking = existing.scalar_one_or_none()
+    if tracking is None:
+        tracking = ApplicationTracking(
+            job_id=job_id,
+            user_id=user_id,
+            status="applied",
+            applied_at=datetime.now(timezone.utc),
+        )
+        db.add(tracking)
+    else:
+        # Re-clicking shouldn't downgrade an interview / offer back to applied.
+        if tracking.status not in ("interviewing", "offered", "rejected"):
+            tracking.status = "applied"
+            if not tracking.applied_at:
+                tracking.applied_at = datetime.now(timezone.utc)
+
+    # Also flip the job to 'applied' so the inbox stops surfacing it as fresh.
+    if job.status not in ("applied", "shortlisted"):
+        job.status = "applied"
+
+    await db.commit()
+    await db.refresh(tracking)
+    return {
+        "url": final_url,
+        "is_direct_ats": is_ats_url(final_url),
+        "tracking_id": str(tracking.id),
+    }

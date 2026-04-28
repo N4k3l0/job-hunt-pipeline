@@ -18,7 +18,9 @@ import {
   useProfile, useCreateProfile, useUpdateProfile,
   useResumes, useUploadResume, useDeleteResume,
   useWorkHistory, useSkills, useBullets,
+  useCurrentUser, useUpdateMe,
 } from "@/hooks/use-api";
+import { useToast } from "@/components/ui/toast";
 
 type SetupStep = {
   id: string;
@@ -109,6 +111,13 @@ export default function ProfilePage() {
   const { data: profile, isLoading: profileLoading } = useProfile();
   const createProfile = useCreateProfile();
   const updateProfile = useUpdateProfile();
+  const { data: currentUser } = useCurrentUser();
+  const updateMe = useUpdateMe();
+  const toast = useToast();
+  const [displayName, setDisplayName] = useState("");
+  useEffect(() => {
+    if (currentUser?.name) setDisplayName(currentUser.name);
+  }, [currentUser?.name]);
 
   // Resume data
   const { data: resumes, isLoading: resumesLoading } = useResumes();
@@ -288,6 +297,44 @@ export default function ProfilePage() {
 
         {/* ── Profile Tab ────────────────────────────────────────── */}
         <TabsContent value="profile" className="space-y-4 mt-4">
+          {/* Display name — drives the dashboard greeting. Without this set,
+              we fall back to nothing rather than the email local-part. */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <User className="h-5 w-5" />
+                Display Name
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="space-y-2">
+                <Label htmlFor="displayName">Your name</Label>
+                <Input
+                  id="displayName"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  placeholder="e.g. Olalekan Oderinlo"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Shown in the dashboard greeting. Just your first name will be used.
+                </p>
+              </div>
+              <Button
+                size="sm"
+                disabled={updateMe.isPending || !displayName.trim() || displayName.trim() === currentUser?.name}
+                onClick={() =>
+                  updateMe.mutate(displayName.trim(), {
+                    onSuccess: () => toast.success("Name updated"),
+                    onError: (e: any) => toast.error("Couldn't save name", { description: e?.message }),
+                  })
+                }
+              >
+                {updateMe.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                {updateMe.isPending ? "Saving…" : "Save name"}
+              </Button>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">

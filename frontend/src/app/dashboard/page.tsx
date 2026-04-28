@@ -149,10 +149,25 @@ export default function DashboardPage() {
       : now.getHours() < 18 ? "Good afternoon"
         : "Good evening";
   // First name only — friendlier than the full name on a personal command center.
-  // Falls back to the email's local part if no name on the user record.
-  const firstName = currentUser?.name?.split(/\s+/)[0]
-    ?? currentUser?.email?.split("@")[0]
-    ?? "";
+  // The previous fallback used the email local-part, which on
+  // `olalekanoderinlo@gmail.com` becomes the mashed string "olalekanoderinlo".
+  // Now: only show a name if it's actually a name (has a space, OR is a single
+  // short word). Otherwise drop the name and just greet the time of day.
+  const firstName = (() => {
+    const raw = currentUser?.name?.trim() ?? "";
+    if (!raw) return "";
+    if (raw.includes(" ")) {
+      const first = raw.split(/\s+/)[0];
+      return first[0].toUpperCase() + first.slice(1).toLowerCase();
+    }
+    // Single token. Treat as a name only if it's short enough to plausibly
+    // BE a single name ("olalekan"), not an email local-part with no spaces
+    // ("olalekanoderinlo").
+    if (raw.length <= 12 && /^[a-z]+$/i.test(raw)) {
+      return raw[0].toUpperCase() + raw.slice(1).toLowerCase();
+    }
+    return "";
+  })();
 
   // Compose a one-line "what matters right now" hint. Stops the dashboard
   // feeling like a stat board on slow days.

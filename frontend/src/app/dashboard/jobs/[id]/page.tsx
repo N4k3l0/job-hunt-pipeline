@@ -1,6 +1,6 @@
 "use client";
 
-import { use } from "react";
+import { use, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,8 @@ import {
 } from "lucide-react";
 import { useJob, useShortlistJob, useGenerateTailored, useDeepScore } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/toast";
-import { API_BASE } from "@/lib/api-client";
+import { useQueryClient } from "@tanstack/react-query";
+import { api } from "@/lib/api-client";
 
 function ScoreRing({ score, size = 56 }: { score: number; size?: number }) {
   const strokeWidth = 4;
@@ -43,6 +44,8 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
   const deepScore = useDeepScore();
   const toast = useToast();
   const router = useRouter();
+  const qc = useQueryClient();
+  const [applying, setApplying] = useState(false);
 
   if (isLoading) {
     return (
@@ -67,17 +70,47 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
   const entities = job.entities;
   const overallFit = score?.overall_fit ?? 0;
 
-  // ── Apply destination ──────────────────────────────────────────────────
-  // The button just links to a public backend endpoint. The backend:
-  //   1. If apply_url is already on a known ATS, 302's straight there.
-  //   2. Otherwise, hits Greenhouse / Lever / Ashby APIs server-side to
-  //      find the company's direct posting URL, caches it, then 302's
-  //      the browser to it.
-  //   3. If nothing resolves, 302's to the source URL.
-  // The user only ever sees one redirect — they land on the destination,
-  // never on Google.
+  // ── Apply flow ─────────────────────────────────────────────────────────
+  // We open a placeholder window synchronously so the popup blocker is
+  // happy, THEN POST to the backend (which resolves the best ATS URL AND
+  // creates an ApplicationTracking row), THEN rewrite the popup to the
+  // resolved URL. The user clicks once, lands on the company's posting,
+  // and the application is already tracked in their pipeline.
   const hasUrl = !!(job.apply_url || job.job_url);
-  const applyHref = hasUrl ? `${API_BASE}/api/v1/jobs/${id}/apply` : null;
+
+  async function handleApply() {
+    if (applying) return;
+    setApplying(true);
+    // Open the new tab IMMEDIATELY in the click handler — browsers only
+    // allow window.open to escape the popup blocker if it happens
+    // synchronously, before any await.
+    const popup = window.open("about:blank", "_blank", "noopener,noreferrer");
+    try {
+      const data = await api.post<{
+        url: string; is_direct_ats: boolean; tracking_id: string;
+      }>(`/api/v1/jobs/${id}/apply`);
+      if (popup) {
+        popup.location.href = data.url;
+      } else {
+        // Popup was blocked — fall back to same-tab navigation.
+        window.location.href = data.url;
+      }
+      toast.success(
+        data.is_direct_ats ? "Opened company posting" : "Opened source posting",
+        { description: "Tracked as Applied. Edit status in Applications anytime." },
+      );
+      // Refresh job + applications + analytics caches so the UI updates.
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      qc.invalidateQueries({ queryKey: ["job", id] });
+      qc.invalidateQueries({ queryKey: ["applications"] });
+      qc.invalidateQueries({ queryKey: ["analytics"] });
+    } catch (e: any) {
+      if (popup) popup.close();
+      toast.error("Couldn't resolve apply URL", { description: e?.message });
+    } finally {
+      setApplying(false);
+    }
+  }
 
   return (
     <div className="space-y-6 max-w-4xl">
@@ -130,16 +163,16 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
           >
             <Star className="h-4 w-4" /> Shortlist
           </Button>
-          {applyHref && (
+          {hasUrl && (
             <Button
               variant="outline"
               size="sm"
-              nativeButton={false}
-              title="Opens the company's direct ATS posting (Greenhouse, Lever, Ashby) when available, otherwise the source posting."
-              render={<a href={applyHref} target="_blank" rel="noopener noreferrer" />}
+              onClick={handleApply}
+              disabled={applying}
+              title="Opens the company's direct ATS posting (Greenhouse, Lever, Ashby, SmartRecruiters) when available — otherwise the source posting. Either way, this click is tracked as an application."
             >
-              <ExternalLink className="h-4 w-4" />
-              Apply directly
+              {applying ? <Loader2 className="h-4 w-4 animate-spin" /> : <ExternalLink className="h-4 w-4" />}
+              {applying ? "Opening…" : "Apply directly"}
             </Button>
           )}
           <Button

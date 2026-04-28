@@ -39,6 +39,18 @@ export function useInviteUser() {
   });
 }
 
+export function useUpdateMe() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) =>
+      api.patch<{ id: string; email: string; name: string; role: string }>(
+        "/api/v1/auth/me",
+        { name },
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["auth", "me"] }),
+  });
+}
+
 // ── Profile ──────────────────────────────────────────────────────────────────
 
 export function useProfile() {

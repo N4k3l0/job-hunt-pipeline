@@ -14,6 +14,10 @@ class InviteRequest(BaseModel):
     email: EmailStr
 
 
+class UpdateMeRequest(BaseModel):
+    name: str
+
+
 class UserResponse(BaseModel):
     id: str
     email: str
@@ -35,6 +39,29 @@ class UserListResponse(BaseModel):
 @router.get("/me", response_model=UserResponse)
 async def get_current_user(user: CurrentUser, db: DbSession):
     """Get the current authenticated user."""
+    return UserResponse(
+        id=str(user.id),
+        email=user.email,
+        name=user.name,
+        role=user.role,
+    )
+
+
+@router.patch("/me", response_model=UserResponse)
+async def update_me(request: UpdateMeRequest, user: CurrentUser, db: DbSession):
+    """Update the current user's display name.
+
+    Used by the Profile page so the dashboard can greet "Good morning, Olalekan"
+    instead of falling back to the email local-part. We trim whitespace and
+    enforce a minimum length so a blank submission can't wipe the name."""
+    name = (request.name or "").strip()
+    if len(name) < 1:
+        raise HTTPException(status_code=400, detail="Name cannot be empty")
+    if len(name) > 100:
+        raise HTTPException(status_code=400, detail="Name too long (max 100 chars)")
+    user.name = name
+    await db.commit()
+    await db.refresh(user)
     return UserResponse(
         id=str(user.id),
         email=user.email,

@@ -174,7 +174,65 @@ async def _try_ashby(client: httpx.AsyncClient, slug: str, title: str) -> str | 
     return f"https://jobs.ashbyhq.com/{slug}"
 
 
+async def _try_smartrecruiters(client: httpx.AsyncClient, slug: str, title: str) -> str | None:
+    """SmartRecruiters: GET /v1/companies/<slug>/postings returns {content: [...]}.
+
+    SmartRecruiters slugs are case-sensitive and often Title-cased (e.g.
+    "Bosch", "PublicisGroup"). We try the slug as-is and a lowercase variant.
+    """
+    for variant in (slug, slug.title(), slug.upper()):
+        try:
+            r = await client.get(
+                f"https://api.smartrecruiters.com/v1/companies/{variant}/postings",
+                params={"limit": 100},
+            )
+            if r.status_code != 200:
+                continue
+            data = r.json()
+        except (httpx.HTTPError, ValueError):
+            continue
+        for j in data.get("content") or []:
+            if _title_match(title, j.get("name") or ""):
+                # The "ref" link is the public posting URL.
+                refs = j.get("ref")
+                if isinstance(refs, str):
+                    return refs
+                # Sometimes nested: postUrl / applyUrl
+                for k in ("postUrl", "applyUrl"):
+                    if j.get(k):
+                        return j[k]
+        return f"https://jobs.smartrecruiters.com/{variant}"
+    return None
+
+
 # ─── Public API ─────────────────────────────────────────────────────────────
+
+async def follow_to_ats(client: httpx.AsyncClient, source_url: str) -> str | None:
+    """Aggregator URLs (RemoteOK, Adzuna's redirect link, Indeed apply, etc.)
+    very often 30x straight to the company's ATS. We do one HEAD-style GET
+    and check the final URL — costs ~200ms and skips the entire slug-guessing
+    dance when it works.
+    """
+    if not source_url:
+        return None
+    try:
+        # Some sources reject HEAD; use GET but stream:false (we don't read body)
+        r = await client.get(source_url, headers={
+            # Aggregators serve different content to bots. Pretend to be a
+            # real browser so we get the same redirects a human would.
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                          "AppleWebKit/537.36 (KHTML, like Gecko) "
+                          "Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml",
+        })
+    except httpx.HTTPError:
+        return None
+    final = str(r.url)
+    if is_ats_url(final):
+        logger.info("Follow-redirect resolved %s → %s", source_url, final)
+        return final
+    return None
+
 
 async def resolve_ats_url(company: str, title: str) -> str | None:
     """Best-effort: return the direct ATS URL for this (company, title), or None.
@@ -214,7 +272,7 @@ async def resolve_ats_url(company: str, title: str) -> str | None:
         headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
         follow_redirects=True,
     ) as client:
-        for probe in (_try_greenhouse, _try_lever, _try_ashby):
+        for probe in (_try_greenhouse, _try_lever, _try_ashby, _try_smartrecruiters):
             hit = await probe_all_slugs(client, probe)
             if hit:
                 logger.info(
@@ -223,3 +281,34 @@ async def resolve_ats_url(company: str, title: str) -> str | None:
                 )
                 return hit
     return None
+
+
+async def find_direct_apply(
+    company: str,
+    title: str,
+    source_url: str | None,
+) -> str | None:
+    """Top-level orchestrator: cheapest paths first.
+
+    1. If source URL is already on a known ATS → use it (zero network).
+    2. Follow source URL's redirect chain — aggregators often 30x to the
+       ATS for free (~200ms).
+    3. Slug-guess across Greenhouse → Lever → Ashby → SmartRecruiters
+       (1-12s, cached on the row).
+    4. Otherwise → None, caller falls back to source URL.
+    """
+    if source_url and is_ats_url(source_url):
+        return source_url
+
+    async with httpx.AsyncClient(
+        timeout=TIMEOUT,
+        follow_redirects=True,
+    ) as client:
+        # Step 2: follow the source's redirect chain
+        if source_url:
+            via_redirect = await follow_to_ats(client, source_url)
+            if via_redirect:
+                return via_redirect
+
+    # Step 3: API resolve (opens its own client with JSON headers)
+    return await resolve_ats_url(company, title)

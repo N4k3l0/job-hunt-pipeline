@@ -70,6 +70,12 @@ export const api = {
       body: body ? JSON.stringify(body) : undefined,
     }),
 
+  patch: <T>(path: string, body?: unknown) =>
+    apiRequest<T>(path, {
+      method: "PATCH",
+      body: body ? JSON.stringify(body) : undefined,
+    }),
+
   delete: <T>(path: string) => apiRequest<T>(path, { method: "DELETE" }),
 
   upload: async <T>(
