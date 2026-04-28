@@ -45,7 +45,9 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
   const toast = useToast();
   const router = useRouter();
   const qc = useQueryClient();
+  // All hooks must be declared before any early return (Rules of Hooks).
   const [applying, setApplying] = useState(false);
+  const [marking, setMarking] = useState(false);
 
   if (isLoading) {
     return (
@@ -88,7 +90,6 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
   // the new tab.
   const hasUrl = !!(job.apply_url || job.job_url);
   const isAlreadyApplied = job.status === "applied";
-  const [marking, setMarking] = useState(false);
 
   async function handleApply() {
     if (applying) return;

@@ -24,7 +24,6 @@ import {
   Radar,
   ChevronRight,
   Globe,
-  Zap,
   Sparkles,
   CircleDot,
 } from "lucide-react";
@@ -222,7 +221,7 @@ export default function DashboardPage() {
             {now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
           </p>
           <h1 className="font-display text-3xl sm:text-4xl font-semibold tracking-tight">
-            {greeting}{firstName && <span className="text-foreground/60 italic">, {firstName}</span>}
+            {greeting}{firstName && <span className="text-foreground/60">, {firstName}</span>}
           </h1>
           <Link
             href={hint.href}
@@ -418,34 +417,10 @@ export default function DashboardPage() {
             <ChevronRight className="h-4 w-4 text-muted-foreground/40 group-hover:text-amber-400 transition-colors shrink-0" />
           </Link>
 
-          {/* Pipeline Snapshot */}
-          <div className="rounded-xl border border-white/[0.06] bg-white/[0.015] p-5">
-            <div className="flex items-center gap-2 mb-4">
-              <Zap className="h-3.5 w-3.5 text-amber-400" />
-              <span className="text-[11px] uppercase tracking-[0.1em] text-muted-foreground font-medium">
-                Pipeline
-              </span>
-            </div>
-            <div className="grid grid-cols-3 gap-2 sm:gap-3">
-              {[
-                { label: "Review", count: stats.review_queue, color: "text-amber-400" },
-                { label: "Applied", count: stats.applications_sent, color: "text-emerald-400" },
-                { label: "Interviews", count: Math.round(stats.applications_sent * stats.interview_rate / 100), color: "text-blue-400" },
-              ].map((stage) => {
-                const isZero = stage.count === 0;
-                return (
-                  <div key={stage.label} className="text-center py-3">
-                    <span className={`text-2xl font-bold tracking-tight tabular-nums block ${isZero ? "text-muted-foreground/30" : stage.color}`}>
-                      {isZero ? "—" : stage.count}
-                    </span>
-                    <span className="text-xs text-muted-foreground block mt-1.5">
-                      {stage.label}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+          {/* Pipeline snapshot removed — its three stages (Review / Applied /
+              Interviews) duplicate numbers already shown in the top stat
+              cards row, and the labels visually echo the sidebar nav, which
+              made the bottom of the dashboard feel like a second menu. */}
         </div>
       </div>
     </div>

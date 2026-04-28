@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import {
@@ -52,6 +53,15 @@ export function AppSidebar() {
   const profileItems = currentUser?.role === "admin"
     ? [PROFILE_ITEM, ADMIN_ITEM]
     : [PROFILE_ITEM];
+
+  // Auto-collapse the mobile sheet whenever the route changes. Belt-and-
+  // braces with the per-button onClick: covers cases where the click
+  // handler races the navigation, or the user lands here from a
+  // programmatic redirect.
+  useEffect(() => {
+    if (isMobile) setOpenMobile(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
 
   async function handleSignOut() {
     const supabase = createClient();
