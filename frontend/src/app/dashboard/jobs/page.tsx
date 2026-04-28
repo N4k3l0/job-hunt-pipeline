@@ -228,16 +228,10 @@ export default function JobsInboxPage() {
         <div className="flex items-center gap-1.5 overflow-x-auto -mx-1 px-1 sm:contents">
         <Separator orientation="vertical" className="h-4 mx-0.5 hidden sm:block" />
 
-        <Button
-          variant={roleFilter === "pm" ? "default" : "ghost"}
-          size="xs"
-          onClick={() => setRoleFilter(roleFilter === "pm" ? null : "pm")}
-          className="font-mono text-[11px]"
-        >
-          PM
-        </Button>
-
-        <Separator orientation="vertical" className="h-4 mx-0.5 hidden sm:block" />
+        {/* Role filter is driven by the user's profile target_roles — the
+            inbox is already pre-filtered, so a hardcoded PM chip here would
+            force the wrong query for an AI-only user. If we ever need a
+            quick role switcher we'll surface one based on target_roles. */}
 
         <DropdownMenu>
           <DropdownMenuTrigger
