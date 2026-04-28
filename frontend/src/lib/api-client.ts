@@ -4,7 +4,7 @@ import { createClient } from "./supabase";
 // keeps working even if NEXT_PUBLIC_API_URL isn't passed during the build
 // (Vercel + Next.js 16 Turbopack has been flaky about inlining this).
 // For local dev, set NEXT_PUBLIC_API_URL=http://localhost:8000 in .env.local.
-const API_BASE =
+export const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ||
   "https://backend-nakel0s-projects.vercel.app";
 

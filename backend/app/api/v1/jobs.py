@@ -2,6 +2,7 @@ import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Query, HTTPException
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import select, func, and_
 from sqlalchemy.orm import selectinload
@@ -10,6 +11,7 @@ from app.api.deps import CurrentUserId, DbSession
 from app.models.job import Job, JobEntity, JobSource
 from app.models.scoring import JobScore
 from app.models.candidate import CandidateProfile
+from app.services.discovery.ats_resolver import is_ats_url, resolve_ats_url
 
 logger = logging.getLogger(__name__)
 
@@ -398,3 +400,48 @@ async def dismiss_job(job_id: UUID, user_id: CurrentUserId, db: DbSession):
     job.status = "dismissed"
     await db.commit()
     return {"status": "dismissed", "job_id": str(job_id)}
+
+
+@router.get("/{job_id}/apply")
+async def apply_redirect(job_id: UUID, db: DbSession):
+    """Resolve and 302-redirect to the company's direct ATS posting.
+
+    The Apply button on the frontend is a plain `<a href>` so it opens in a
+    new tab — that means we can't send an Authorization header, so this
+    endpoint is intentionally PUBLIC. Job IDs are random UUIDs and the
+    destination URLs are themselves public-facing job postings, so there's
+    no leak.
+
+    Routing logic:
+      1. If the existing job_url / apply_url is already on a known free ATS
+         (Greenhouse, Lever, Ashby, Workable, etc.) → 302 there immediately.
+      2. Otherwise call the ATS resolver: probe Greenhouse / Lever / Ashby
+         for the company's slug, find a title match, return the direct
+         posting URL. Cache the result on the row so the next click is
+         instant.
+      3. If nothing resolves → 302 to the original source URL (no signup
+         wall avoidance, but at least the user lands on the posting).
+    """
+    result = await db.execute(select(Job).where(Job.id == job_id))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Step 1: existing URL already on a known ATS.
+    for raw in (job.apply_url, job.job_url):
+        if raw and is_ats_url(raw):
+            return RedirectResponse(raw, status_code=302)
+
+    # Step 2: server-side resolve via ATS APIs.
+    resolved = await resolve_ats_url(job.company or "", job.title or "")
+    if resolved:
+        # Cache on the row so subsequent clicks skip the resolver entirely.
+        job.apply_url = resolved
+        await db.commit()
+        return RedirectResponse(resolved, status_code=302)
+
+    # Step 3: fallback to whatever URL the source gave us.
+    fallback = job.apply_url or job.job_url
+    if fallback:
+        return RedirectResponse(fallback, status_code=302)
+    raise HTTPException(status_code=404, detail="No URL available for this job")

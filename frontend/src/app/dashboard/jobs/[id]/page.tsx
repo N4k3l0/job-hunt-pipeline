@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useJob, useShortlistJob, useGenerateTailored, useDeepScore } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/toast";
+import { API_BASE } from "@/lib/api-client";
 
 function ScoreRing({ score, size = 56 }: { score: number; size?: number }) {
   const strokeWidth = 4;
@@ -67,46 +68,16 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
   const overallFit = score?.overall_fit ?? 0;
 
   // ── Apply destination ──────────────────────────────────────────────────
-  // Single button, smart routing:
-  //
-  //   1. If apply_url / job_url is on a known free ATS (Greenhouse, Lever,
-  //      Ashby, Workable, SmartRecruiters, Jobvite, Recruitee, BambooHR,
-  //      Breezy, Workday, TeamTailor, iCIMS, Pinpoint) → label
-  //      "Apply directly" and link straight there. No signup wall.
-  //
-  //   2. Otherwise → label "Open posting" and link to whatever URL we have
-  //      (apply_url first, then job_url). The previous Google ATS search
-  //      fallback was dropped: it landed on dead pages too often when the
-  //      role wasn't actually mirrored on a free ATS.
-  const ATS_HOST_PATTERNS = [
-    /(^|\.)greenhouse\.io$/i,
-    /(^|\.)lever\.co$/i,
-    /(^|\.)ashbyhq\.com$/i,
-    /(^|\.)workable\.com$/i,
-    /(^|\.)smartrecruiters\.com$/i,
-    /(^|\.)jobvite\.com$/i,
-    /(^|\.)recruitee\.com$/i,
-    /(^|\.)bamboohr\.com$/i,
-    /(^|\.)breezy\.hr$/i,
-    /(^|\.)myworkdayjobs\.com$/i,
-    /(^|\.)teamtailor\.com$/i,
-    /(^|\.)icims\.com$/i,
-    /(^|\.)pinpointhq\.com$/i,
-  ];
-  const isAtsUrl = (raw: string | null | undefined): boolean => {
-    if (!raw) return false;
-    try {
-      const host = new URL(raw).hostname;
-      return ATS_HOST_PATTERNS.some((re) => re.test(host));
-    } catch {
-      return false;
-    }
-  };
-
-  const directAtsLink = [job.apply_url, job.job_url].find(isAtsUrl) || null;
-  const sourceLink = job.apply_url ?? job.job_url ?? null;
-  const applyHref = directAtsLink ?? sourceLink;
-  const applyIsDirect = !!directAtsLink;
+  // The button just links to a public backend endpoint. The backend:
+  //   1. If apply_url is already on a known ATS, 302's straight there.
+  //   2. Otherwise, hits Greenhouse / Lever / Ashby APIs server-side to
+  //      find the company's direct posting URL, caches it, then 302's
+  //      the browser to it.
+  //   3. If nothing resolves, 302's to the source URL.
+  // The user only ever sees one redirect — they land on the destination,
+  // never on Google.
+  const hasUrl = !!(job.apply_url || job.job_url);
+  const applyHref = hasUrl ? `${API_BASE}/api/v1/jobs/${id}/apply` : null;
 
   return (
     <div className="space-y-6 max-w-4xl">
@@ -164,13 +135,11 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
               variant="outline"
               size="sm"
               nativeButton={false}
-              title={applyIsDirect
-                ? "This posting is on a free ATS — apply directly, no signup."
-                : "Opens the original posting on the source site."}
+              title="Opens the company's direct ATS posting (Greenhouse, Lever, Ashby) when available, otherwise the source posting."
               render={<a href={applyHref} target="_blank" rel="noopener noreferrer" />}
             >
               <ExternalLink className="h-4 w-4" />
-              {applyIsDirect ? "Apply directly" : "Open posting"}
+              Apply directly
             </Button>
           )}
           <Button
