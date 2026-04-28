@@ -94,18 +94,40 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
   async function handleApply() {
     if (applying) return;
     setApplying(true);
-    const popup = window.open("about:blank", "_blank", "noopener,noreferrer");
+    // Open the new tab synchronously so the popup blocker is happy. We
+    // intentionally OMIT the "noopener" feature here — that flag makes
+    // window.open return null, which blocks us from rewriting the popup's
+    // location after the API call resolves. We sever opener.opener manually
+    // once we've navigated, so the security trade-off is the same.
+    const popup = window.open("about:blank", "_blank");
+    if (popup) {
+      // Friendly placeholder so the new tab isn't just blank during the
+      // ~1-12s the resolver might take.
+      popup.document.write(
+        '<title>Opening posting…</title>' +
+        '<style>body{margin:0;display:flex;align-items:center;justify-content:center;' +
+        'height:100vh;font-family:system-ui;background:#0a0a0a;color:#a3a3a3}</style>' +
+        '<div>Resolving direct apply link…</div>'
+      );
+    }
     try {
       const data = await api.post<{ url: string; is_direct_ats: boolean }>(
         `/api/v1/jobs/${id}/apply`,
       );
-      if (popup) {
-        popup.location.href = data.url;
+      if (popup && !popup.closed) {
+        // Sever the opener reference so the destination site can't poke
+        // back into our tab. Same protection noopener gives, just applied
+        // after we're done with the popup.
+        try { popup.opener = null; } catch {}
+        popup.location.replace(data.url);
       } else {
-        window.location.href = data.url;
+        // Popup was blocked entirely (ad blockers / strict browser settings)
+        // — open in same tab as last resort. Original page is still in
+        // history, so back-button gets them home.
+        window.open(data.url, "_blank") || (window.location.href = data.url);
       }
     } catch (e: any) {
-      if (popup) popup.close();
+      if (popup && !popup.closed) popup.close();
       toast.error("Couldn't open posting", { description: e?.message });
     } finally {
       setApplying(false);
