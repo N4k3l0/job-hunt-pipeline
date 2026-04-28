@@ -404,13 +404,18 @@ async def dismiss_job(job_id: UUID, user_id: CurrentUserId, db: DbSession):
 
 
 @router.post("/{job_id}/apply")
-async def apply_to_job(job_id: UUID, user_id: CurrentUserId, db: DbSession):
-    """Resolve the best apply URL AND record the click as an application.
+async def resolve_apply_url(job_id: UUID, user_id: CurrentUserId, db: DbSession):
+    """Resolve the best apply URL (no tracking side-effects).
 
     The frontend opens a placeholder window first (so the popup blocker is
-    happy), then POSTs here to get back `{ url, tracking_id }`, then
-    rewrites the popup to that URL. End result: one click → company's
-    direct ATS posting → application is already in the user's pipeline.
+    happy), then POSTs here to get back `{ url, is_direct_ats }`, then
+    rewrites the popup to that URL.
+
+    Crucially: clicking "Apply directly" does NOT mark the job as applied.
+    The user might find the role doesn't exist, isn't eligible for their
+    region, or just decides to skip. They have to explicitly press
+    "I applied" (POST /{job_id}/mark-applied) once they've actually
+    submitted the application.
 
     Resolution order (cheapest first):
       1. apply_url / job_url is already on a known free ATS → use it.
@@ -419,19 +424,12 @@ async def apply_to_job(job_id: UUID, user_id: CurrentUserId, db: DbSession):
       3. Slug-guess across Greenhouse → Lever → Ashby → SmartRecruiters
          using the company name. Cache on the job row.
       4. Fall back to whatever source URL we have.
-
-    Side effect: creates / updates an ApplicationTracking row with status
-    'applied'. The user can edit/correct status from the Applications page
-    (e.g. roll it back if they decided not to submit). This is the price
-    of doing the actual application outside the pipeline — we treat the
-    click as the tracked event.
     """
     result = await db.execute(select(Job).where(Job.id == job_id))
     job = result.scalar_one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    # ── Resolve URL ────────────────────────────────────────────────────
     source = job.apply_url or job.job_url
     resolved = await find_direct_apply(
         company=job.company or "",
@@ -441,11 +439,29 @@ async def apply_to_job(job_id: UUID, user_id: CurrentUserId, db: DbSession):
     if resolved and resolved != job.apply_url and is_ats_url(resolved):
         # Cache the better URL on the job so the next click skips resolution.
         job.apply_url = resolved
+        await db.commit()
     final_url = resolved or source
     if not final_url:
         raise HTTPException(status_code=404, detail="No URL available for this job")
+    return {
+        "url": final_url,
+        "is_direct_ats": is_ats_url(final_url),
+    }
 
-    # ── Record / update the application ────────────────────────────────
+
+@router.post("/{job_id}/mark-applied")
+async def mark_applied(job_id: UUID, user_id: CurrentUserId, db: DbSession):
+    """Explicit user action: 'I just submitted this application.'
+
+    Creates / updates the ApplicationTracking row to status='applied' and
+    flips the job's own status so the inbox stops surfacing it as fresh.
+    Idempotent: re-pressing won't downgrade an interview/offer/rejected.
+    """
+    result = await db.execute(select(Job).where(Job.id == job_id))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
     existing = await db.execute(
         select(ApplicationTracking).where(
             ApplicationTracking.job_id == job_id,
@@ -462,20 +478,41 @@ async def apply_to_job(job_id: UUID, user_id: CurrentUserId, db: DbSession):
         )
         db.add(tracking)
     else:
-        # Re-clicking shouldn't downgrade an interview / offer back to applied.
         if tracking.status not in ("interviewing", "offered", "rejected"):
             tracking.status = "applied"
             if not tracking.applied_at:
                 tracking.applied_at = datetime.now(timezone.utc)
 
-    # Also flip the job to 'applied' so the inbox stops surfacing it as fresh.
     if job.status not in ("applied", "shortlisted"):
         job.status = "applied"
 
     await db.commit()
     await db.refresh(tracking)
     return {
-        "url": final_url,
-        "is_direct_ats": is_ats_url(final_url),
         "tracking_id": str(tracking.id),
+        "status": tracking.status,
+        "applied_at": tracking.applied_at.isoformat() if tracking.applied_at else None,
     }
+
+
+@router.post("/{job_id}/unmark-applied")
+async def unmark_applied(job_id: UUID, user_id: CurrentUserId, db: DbSession):
+    """Roll back an accidental 'I applied' click. Removes the tracking row
+    iff its status is still 'applied' (won't touch interview/offer history)."""
+    result = await db.execute(
+        select(ApplicationTracking).where(
+            ApplicationTracking.job_id == job_id,
+            ApplicationTracking.user_id == user_id,
+        )
+    )
+    tracking = result.scalar_one_or_none()
+    if tracking and tracking.status == "applied":
+        await db.delete(tracking)
+
+    job_result = await db.execute(select(Job).where(Job.id == job_id))
+    job = job_result.scalar_one_or_none()
+    if job and job.status == "applied":
+        job.status = "discovered"
+
+    await db.commit()
+    return {"status": "rolled_back"}

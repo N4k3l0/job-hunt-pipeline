@@ -71,44 +71,79 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
   const overallFit = score?.overall_fit ?? 0;
 
   // ── Apply flow ─────────────────────────────────────────────────────────
-  // We open a placeholder window synchronously so the popup blocker is
-  // happy, THEN POST to the backend (which resolves the best ATS URL AND
-  // creates an ApplicationTracking row), THEN rewrite the popup to the
-  // resolved URL. The user clicks once, lands on the company's posting,
-  // and the application is already tracked in their pipeline.
+  // Two distinct user actions, never collapsed:
+  //
+  //   • "Apply directly" → opens the external posting in a new tab and
+  //     does nothing else. The user might find the role doesn't exist, isn't
+  //     eligible for their region, or just decides to skip — clicking is
+  //     NOT a commitment to apply.
+  //
+  //   • "I applied" → the user explicitly tells us they actually
+  //     submitted. This creates the ApplicationTracking row, flips the
+  //     job's own status, and feeds Analytics. Mirrors how the user
+  //     actually thinks about their funnel.
+  //
+  // Popup-blocker note: window.open must happen synchronously inside the
+  // click handler, before any await — otherwise browsers silently swallow
+  // the new tab.
   const hasUrl = !!(job.apply_url || job.job_url);
+  const isAlreadyApplied = job.status === "applied";
+  const [marking, setMarking] = useState(false);
 
   async function handleApply() {
     if (applying) return;
     setApplying(true);
-    // Open the new tab IMMEDIATELY in the click handler — browsers only
-    // allow window.open to escape the popup blocker if it happens
-    // synchronously, before any await.
     const popup = window.open("about:blank", "_blank", "noopener,noreferrer");
     try {
-      const data = await api.post<{
-        url: string; is_direct_ats: boolean; tracking_id: string;
-      }>(`/api/v1/jobs/${id}/apply`);
+      const data = await api.post<{ url: string; is_direct_ats: boolean }>(
+        `/api/v1/jobs/${id}/apply`,
+      );
       if (popup) {
         popup.location.href = data.url;
       } else {
-        // Popup was blocked — fall back to same-tab navigation.
         window.location.href = data.url;
       }
-      toast.success(
-        data.is_direct_ats ? "Opened company posting" : "Opened source posting",
-        { description: "Tracked as Applied. Edit status in Applications anytime." },
-      );
-      // Refresh job + applications + analytics caches so the UI updates.
+    } catch (e: any) {
+      if (popup) popup.close();
+      toast.error("Couldn't open posting", { description: e?.message });
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  async function handleMarkApplied() {
+    if (marking) return;
+    setMarking(true);
+    try {
+      await api.post(`/api/v1/jobs/${id}/mark-applied`);
+      toast.success("Marked as applied", {
+        description: "Now tracked in Applications & Analytics.",
+      });
       qc.invalidateQueries({ queryKey: ["jobs"] });
       qc.invalidateQueries({ queryKey: ["job", id] });
       qc.invalidateQueries({ queryKey: ["applications"] });
       qc.invalidateQueries({ queryKey: ["analytics"] });
     } catch (e: any) {
-      if (popup) popup.close();
-      toast.error("Couldn't resolve apply URL", { description: e?.message });
+      toast.error("Couldn't mark as applied", { description: e?.message });
     } finally {
-      setApplying(false);
+      setMarking(false);
+    }
+  }
+
+  async function handleUnmarkApplied() {
+    if (marking) return;
+    setMarking(true);
+    try {
+      await api.post(`/api/v1/jobs/${id}/unmark-applied`);
+      toast.success("Rolled back", { description: "Application tracking removed." });
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      qc.invalidateQueries({ queryKey: ["job", id] });
+      qc.invalidateQueries({ queryKey: ["applications"] });
+      qc.invalidateQueries({ queryKey: ["analytics"] });
+    } catch (e: any) {
+      toast.error("Couldn't roll back", { description: e?.message });
+    } finally {
+      setMarking(false);
     }
   }
 
@@ -169,10 +204,37 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
               size="sm"
               onClick={handleApply}
               disabled={applying}
-              title="Opens the company's direct ATS posting (Greenhouse, Lever, Ashby, SmartRecruiters) when available — otherwise the source posting. Either way, this click is tracked as an application."
+              title="Opens the company's direct ATS posting (Greenhouse, Lever, Ashby, SmartRecruiters) when available — otherwise the source posting. Does NOT mark this as applied."
             >
               {applying ? <Loader2 className="h-4 w-4 animate-spin" /> : <ExternalLink className="h-4 w-4" />}
               {applying ? "Opening…" : "Apply directly"}
+            </Button>
+          )}
+          {/* Explicit tracking toggle — shows different state based on whether
+              the job has been marked applied. The user controls this; we
+              never auto-set it from a click. */}
+          {isAlreadyApplied ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleUnmarkApplied}
+              disabled={marking}
+              className="border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/5"
+              title="Click to roll back if you didn't actually submit."
+            >
+              {marking ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+              {marking ? "…" : "Applied ✓"}
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleMarkApplied}
+              disabled={marking}
+              title="Press only after you've actually submitted the application. Adds it to your Applications and Analytics."
+            >
+              {marking ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+              {marking ? "Saving…" : "I applied"}
             </Button>
           )}
           <Button
