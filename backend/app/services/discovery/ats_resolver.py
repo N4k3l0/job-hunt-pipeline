@@ -100,8 +100,15 @@ def _slug_candidates(company: str) -> list[str]:
 def _title_match(needle: str, haystack: str) -> bool:
     """Loose title equality. The aggregator title and the ATS title
     rarely match exactly — the aggregator may add a location ("Remote"),
-    a level ("Senior"), or a department ("@ AI Platform"). We tokenize
-    both, drop stopwords, and require ≥70% token overlap."""
+    a level ("Senior"), or a department ("@ AI Platform").
+
+    Bidirectional 70% rule: a match counts if EITHER side covers ≥70% of
+    its tokens with the intersection. This handles asymmetric cases like:
+        "Senior Product Manager, AI Platform"  vs  "Product Manager"
+        {product, manager, ai, platform}      ∩  {product, manager}
+        coverage of needle = 2/4 = 50%   ← old threshold misses
+        coverage of haystack = 2/2 = 100% ← matches under the new rule
+    """
     if not needle or not haystack:
         return False
     stop = {"a", "the", "of", "and", "for", "to", "in", "at", "on",
@@ -114,14 +121,21 @@ def _title_match(needle: str, haystack: str) -> bool:
     a, b = tokens(needle), tokens(haystack)
     if not a or not b:
         return False
-    overlap = len(a & b) / max(len(a), 1)
-    return overlap >= 0.7
+    common = len(a & b)
+    return common / len(a) >= 0.7 or common / len(b) >= 0.7
 
 
 # ─── Per-ATS probes ─────────────────────────────────────────────────────────
 
 async def _try_greenhouse(client: httpx.AsyncClient, slug: str, title: str) -> str | None:
-    """Greenhouse: GET /v1/boards/<slug>/jobs returns JSON {jobs: [{title, absolute_url}]}."""
+    """Greenhouse: GET /v1/boards/<slug>/jobs returns JSON {jobs: [{title, absolute_url}]}.
+
+    Only returns a URL when we can pin the EXACT job. If the company is on
+    Greenhouse but the title doesn't match anything on their board (the role
+    was filled, the title differs too much, etc.) we return None and let the
+    caller fall back to the original aggregator URL — landing on a list of
+    unrelated jobs is a worse experience than landing on the source posting.
+    """
     try:
         r = await client.get(f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs")
         if r.status_code != 200:
@@ -132,9 +146,7 @@ async def _try_greenhouse(client: httpx.AsyncClient, slug: str, title: str) -> s
     for j in data.get("jobs") or []:
         if _title_match(title, j.get("title") or ""):
             return j.get("absolute_url")
-    # We know the company has a board but couldn't pin the exact title — return
-    # the human-facing board URL so the user lands on a filtered list.
-    return f"https://boards.greenhouse.io/{slug}"
+    return None
 
 
 async def _try_lever(client: httpx.AsyncClient, slug: str, title: str) -> str | None:
@@ -154,7 +166,7 @@ async def _try_lever(client: httpx.AsyncClient, slug: str, title: str) -> str | 
     for j in data:
         if _title_match(title, j.get("text") or ""):
             return j.get("hostedUrl") or j.get("applyUrl")
-    return f"https://jobs.lever.co/{slug}"
+    return None  # company on Lever but title didn't match — let caller fall back
 
 
 async def _try_ashby(client: httpx.AsyncClient, slug: str, title: str) -> str | None:
@@ -171,7 +183,7 @@ async def _try_ashby(client: httpx.AsyncClient, slug: str, title: str) -> str | 
     for j in data.get("jobs") or []:
         if _title_match(title, j.get("title") or ""):
             return j.get("jobUrl") or j.get("applyUrl")
-    return f"https://jobs.ashbyhq.com/{slug}"
+    return None  # company on Ashby but title didn't match — let caller fall back
 
 
 async def _try_smartrecruiters(client: httpx.AsyncClient, slug: str, title: str) -> str | None:
@@ -201,7 +213,8 @@ async def _try_smartrecruiters(client: httpx.AsyncClient, slug: str, title: str)
                 for k in ("postUrl", "applyUrl"):
                     if j.get(k):
                         return j[k]
-        return f"https://jobs.smartrecruiters.com/{variant}"
+        # Company on SmartRecruiters but title didn't match — try next slug
+        # variant rather than returning a board URL the user can't act on.
     return None
 
 
