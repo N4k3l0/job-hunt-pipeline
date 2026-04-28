@@ -186,6 +186,35 @@ async def _try_ashby(client: httpx.AsyncClient, slug: str, title: str) -> str | 
     return None  # company on Ashby but title didn't match — let caller fall back
 
 
+async def _try_personio(client: httpx.AsyncClient, slug: str, title: str) -> str | None:
+    """Personio: GET https://<slug>.jobs.personio.com/xml returns an XML feed
+    of `<position>` elements (id, name, recruitingCategory, ...). Used by a
+    lot of European employers (Celonis, Personio itself, etc.).
+    """
+    try:
+        r = await client.get(f"https://{slug}.jobs.personio.com/xml")
+        if r.status_code != 200 or not r.text:
+            return None
+        body = r.text
+    except httpx.HTTPError:
+        return None
+
+    # Lightweight parse — avoid xml.etree because some feeds embed CDATA
+    # with malformed HTML that trips strict parsers.
+    positions = re.findall(
+        r"<position>(.*?)</position>", body, re.S | re.I,
+    )
+    for pos in positions:
+        m_name = re.search(r"<name>(.*?)</name>", pos, re.S | re.I)
+        m_id = re.search(r"<id>(.*?)</id>", pos, re.S | re.I)
+        if not m_name or not m_id:
+            continue
+        name = re.sub(r"<.*?>", "", m_name.group(1)).strip()
+        if _title_match(title, name):
+            return f"https://{slug}.jobs.personio.com/job/{m_id.group(1).strip()}"
+    return None
+
+
 async def _try_smartrecruiters(client: httpx.AsyncClient, slug: str, title: str) -> str | None:
     """SmartRecruiters: GET /v1/companies/<slug>/postings returns {content: [...]}.
 
@@ -220,19 +249,32 @@ async def _try_smartrecruiters(client: httpx.AsyncClient, slug: str, title: str)
 
 # ─── Public API ─────────────────────────────────────────────────────────────
 
+_ATS_URL_RE = re.compile(
+    r"https?://(?:[a-z0-9-]+\.)?"
+    r"(?:greenhouse\.io|lever\.co|ashbyhq\.com|workable\.com|"
+    r"smartrecruiters\.com|jobvite\.com|recruitee\.com|"
+    r"bamboohr\.com|breezy\.hr|myworkdayjobs\.com|teamtailor\.com|"
+    r"icims\.com|pinpointhq\.com|personio\.com)"
+    r"/[^\s\"'<>&]+",
+    re.I,
+)
+
+
 async def follow_to_ats(client: httpx.AsyncClient, source_url: str) -> str | None:
-    """Aggregator URLs (RemoteOK, Adzuna's redirect link, Indeed apply, etc.)
-    very often 30x straight to the company's ATS. We do one HEAD-style GET
-    and check the final URL — costs ~200ms and skips the entire slug-guessing
-    dance when it works.
+    """Try two cheap signals before any slug-guessing:
+
+      1. Final URL after redirects — many aggregators 30x to the ATS for free.
+      2. Failing that, scan the response BODY for any embedded ATS URL.
+         Most aggregator postings have an 'Apply' anchor that points
+         directly to the company's Greenhouse/Lever/Ashby page even when
+         they don't redirect to it. Pulling that link out is the highest-
+         leverage signal we have, because it's the URL the source already
+         knew was canonical.
     """
     if not source_url:
         return None
     try:
-        # Some sources reject HEAD; use GET but stream:false (we don't read body)
         r = await client.get(source_url, headers={
-            # Aggregators serve different content to bots. Pretend to be a
-            # real browser so we get the same redirects a human would.
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                           "AppleWebKit/537.36 (KHTML, like Gecko) "
                           "Chrome/120.0.0.0 Safari/537.36",
@@ -240,10 +282,34 @@ async def follow_to_ats(client: httpx.AsyncClient, source_url: str) -> str | Non
         })
     except httpx.HTTPError:
         return None
+
+    # 1. Final URL after redirects
     final = str(r.url)
     if is_ats_url(final):
         logger.info("Follow-redirect resolved %s → %s", source_url, final)
         return final
+
+    # 2. Scan the body for embedded ATS URLs. Strip query strings / fragments
+    #    that are sometimes added for tracking, then return the first match
+    #    that looks like an actual posting URL (has a path beyond the host).
+    body = r.text or ""
+    for m in _ATS_URL_RE.finditer(body):
+        candidate = m.group(0)
+        # Filter out generic landing pages — we want a posting URL, not
+        # the ATS provider's own marketing page (e.g. greenhouse.io itself).
+        try:
+            host = httpx.URL(candidate).host or ""
+            path = httpx.URL(candidate).path or ""
+        except Exception:
+            continue
+        if host in ("greenhouse.io", "lever.co", "workable.com",
+                    "ashbyhq.com", "smartrecruiters.com", "personio.com"):
+            # Bare provider domain, not a customer subdomain → skip
+            continue
+        if not path or path == "/":
+            continue
+        logger.info("Body-scan resolved %s → %s", source_url, candidate)
+        return candidate
     return None
 
 
@@ -285,7 +351,9 @@ async def resolve_ats_url(company: str, title: str) -> str | None:
         headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
         follow_redirects=True,
     ) as client:
-        for probe in (_try_greenhouse, _try_lever, _try_ashby, _try_smartrecruiters):
+        probes = (_try_greenhouse, _try_lever, _try_ashby,
+                  _try_smartrecruiters, _try_personio)
+        for probe in probes:
             hit = await probe_all_slugs(client, probe)
             if hit:
                 logger.info(
