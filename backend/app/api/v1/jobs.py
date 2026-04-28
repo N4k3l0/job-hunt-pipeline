@@ -338,6 +338,7 @@ async def trigger_discovery(user_id: CurrentUserId):
     from app.workers.discovery_tasks import (
         _run_adzuna_async, _run_remoteok_async, _run_arbeitnow_async,
         _run_himalayas_async, _run_remotive_async, _run_weworkremotely_async,
+        _run_dailyremote_async,
     )
     runners = [
         ("adzuna", _run_adzuna_async),
@@ -346,6 +347,7 @@ async def trigger_discovery(user_id: CurrentUserId):
         ("himalayas", _run_himalayas_async),
         ("remotive", _run_remotive_async),
         ("weworkremotely", _run_weworkremotely_async),
+        ("dailyremote", _run_dailyremote_async),
     ]
     results: dict[str, str] = {}
     for name, runner in runners:

@@ -116,7 +116,10 @@ export default function DashboardPage() {
   const topJobs = (jobsData?.jobs ?? []).map((j: any) => ({
     ...j,
     score: j.score?.overall_fit ?? 0,
-    role_path: j.score?.role_path ?? "pm",
+    // Pass role_path through as-is — null when the job hasn't been scored yet.
+    // Falling back to "pm" was wrong: it made every unscored job (most of them)
+    // render a PM badge, even on AI-only inboxes.
+    role_path: j.score?.role_path ?? null,
     salary_text: j.salary_text ?? "",
     discovered_at: j.discovered_at,
   }));
@@ -167,7 +170,32 @@ export default function DashboardPage() {
     if (hotMatchCount > 0) {
       return { text: `${hotMatchCount} hot match${hotMatchCount === 1 ? "" : "es"} today`, href: "/dashboard/jobs", tone: "info" };
     }
-    return { text: "Nothing pressing — discovery is running in the background.", href: "/dashboard/jobs", tone: "calm" };
+    // Calm path: be honest about when discovery actually last ran instead of
+    // claiming it's "running in the background" (cron fires once a day at
+    // 6 AM UTC). If the sweep is older than 36h we surface that as a warning
+    // so the user knows to investigate.
+    const last = analytics?.last_discovery_at ? new Date(analytics.last_discovery_at) : null;
+    if (last) {
+      const hoursSince = (now.getTime() - last.getTime()) / 3_600_000;
+      if (hoursSince > 36) {
+        return {
+          text: `Discovery hasn't run in ${Math.round(hoursSince / 24)} day${hoursSince > 48 ? "s" : ""} — check the cron`,
+          href: "/dashboard/jobs",
+          tone: "warn",
+        };
+      }
+      const ago = hoursSince < 1
+        ? "just now"
+        : hoursSince < 24
+          ? `${Math.round(hoursSince)}h ago`
+          : `${Math.round(hoursSince / 24)}d ago`;
+      return {
+        text: `All clear · last job sweep ${ago}, next ~6 AM UTC`,
+        href: "/dashboard/jobs",
+        tone: "calm",
+      };
+    }
+    return { text: "All clear — no jobs in the pipeline yet", href: "/dashboard/import", tone: "calm" };
   })();
 
   return (
@@ -273,13 +301,18 @@ export default function DashboardPage() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium truncate">{job.title}</span>
-                    <span className={`shrink-0 font-mono text-[9px] px-1.5 py-0.5 rounded-md border ${
-                      job.role_path === "pm"
-                        ? "border-blue-500/20 text-blue-400 bg-blue-500/5"
-                        : "border-emerald-500/20 text-emerald-400 bg-emerald-500/5"
-                    }`}>
-                      {job.role_path === "pm" ? "PM" : "AI"}
-                    </span>
+                    {/* Only render the role badge when scoring actually
+                        classified this job. Anything else would just be a
+                        guess painted on the wrong half of the inbox. */}
+                    {(job.role_path === "pm" || job.role_path === "ai_automation") && (
+                      <span className={`shrink-0 font-mono text-[9px] px-1.5 py-0.5 rounded-md border ${
+                        job.role_path === "pm"
+                          ? "border-blue-500/20 text-blue-400 bg-blue-500/5"
+                          : "border-emerald-500/20 text-emerald-400 bg-emerald-500/5"
+                      }`}>
+                        {job.role_path === "pm" ? "PM" : "AI"}
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
                     <span className="font-medium text-foreground/60">{job.company}</span>

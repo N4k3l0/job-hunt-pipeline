@@ -62,6 +62,7 @@ async def cron_discover_remote(authorization: str | None = Header(None)):
     from app.workers.discovery_tasks import (
         _run_remoteok_async, _run_himalayas_async,
         _run_remotive_async, _run_weworkremotely_async,
+        _run_dailyremote_async,
     )
 
     runners = [
@@ -69,6 +70,7 @@ async def cron_discover_remote(authorization: str | None = Header(None)):
         ("himalayas", _run_himalayas_async),
         ("remotive", _run_remotive_async),
         ("weworkremotely", _run_weworkremotely_async),
+        ("dailyremote", _run_dailyremote_async),
     ]
     results = {}
     for name, runner in runners:

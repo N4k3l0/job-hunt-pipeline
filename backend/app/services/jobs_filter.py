@@ -4,21 +4,42 @@ Analytics overview. Keeping a single source of truth means the dashboard's
 
 from __future__ import annotations
 
-from sqlalchemy import or_, and_, not_, func
+from sqlalchemy import or_, not_, func
 
 from app.models.job import Job
 from app.models.job import JobSource
 
 
-# Title patterns that imply a Product role. We exclude these from the inbox
-# unless the user's target roles explicitly include "product" — otherwise an
-# AI Engineer search picks up "Senior Product Manager, AI Platform" via the
-# generic "% ai " expansion.
-_PRODUCT_PATTERNS = (
-    "%product manager%", "%product lead%", "%product owner%",
-    "%head of product%", "%director of product%", "%vp of product%",
-    "%group product manager%", "%principal product manager%",
-    "%staff product manager%", "%product strateg%",
+# Single Postgres POSIX regex (case-insensitive via `~*`) that catches the
+# Product Management role family. We use `\y` for word boundaries so:
+#   - "Senior PM, AI Platform"      → matches (\ypm\y)
+#   - "Lead Product Manager, ML"    → matches (\yproduct\s+manager\y)
+#   - "Head of Product, Growth"     → matches
+#   - "Product Marketing Manager"   → matches (\yproduct\s+marketing\y)
+#   - "Product Operations Lead"     → matches (\yproduct\s+operations\y)
+#   - "AI Spammer", "9pm shift"     → does NOT match (word boundary protects)
+#
+# We exclude this whole family from the inbox unless the user's target roles
+# explicitly include "product" — otherwise an AI Engineer search picks up
+# "Senior PM, AI Platform" via the generic "% ai " expansion.
+_PRODUCT_TITLE_REGEX = (
+    r"\y("
+    r"product\s+(manager|managers|management|"
+    r"lead|leader|leaders|leadership|"
+    r"owner|owners|"
+    r"strateg\w*|"
+    r"director|"
+    r"analyst|analytics|"
+    r"marketing|"
+    r"operations|"
+    r"specialist|"
+    r"associate)"
+    r"|head\s+of\s+product"
+    r"|(vp|vice\s+president|director|chief|svp|evp)\s+of\s+product"
+    r"|chief\s+product\s+officer|cpo"
+    r"|(senior|sr|principal|staff|lead|associate|junior|jr|group|head|technical|tpm)\s+pm"
+    r"|pm"
+    r")\y"
 )
 
 
@@ -77,11 +98,11 @@ def apply_user_filters(
 
     # Exclude product-management titles unless the user actually targets product.
     # Without this, an AI/ML user gets "Sr. PM, AI Platform" leaking in via the
-    # generic "% ai " expansion.
+    # generic "% ai " expansion. `~*` is Postgres' case-insensitive POSIX
+    # regex; `\y` gives proper word boundaries so we don't false-positive on
+    # things like "9pm shift" or "Spammer".
     if not _user_wants_product(target_roles):
-        query = query.where(
-            and_(*[not_(func.lower(Job.title).like(p)) for p in _PRODUCT_PATTERNS])
-        )
+        query = query.where(not_(Job.title.op("~*")(_PRODUCT_TITLE_REGEX)))
 
     if blocked_sources:
         query = query.where(

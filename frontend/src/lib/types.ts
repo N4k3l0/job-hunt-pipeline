@@ -152,4 +152,7 @@ export interface AnalyticsOverview {
   response_rate: number;
   interview_rate: number;
   applications_this_week: number;
+  /** ISO timestamp of the most recent job discovery sweep, used by the
+   *  dashboard greeting hint to be honest about cron freshness. */
+  last_discovery_at: string | null;
 }

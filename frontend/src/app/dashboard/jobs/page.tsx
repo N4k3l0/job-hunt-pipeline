@@ -27,6 +27,7 @@ import {
   Loader2,
   Inbox,
   Shield,
+  Database,
 } from "lucide-react";
 import { useJobs } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/toast";
@@ -45,6 +46,7 @@ const SOURCE_COLORS: Record<string, { dot: string; label: string }> = {
   remotive: { dot: "bg-cyan-500", label: "Remotive" },
   weworkremotely: { dot: "bg-indigo-500", label: "WeWorkRemotely" },
   crossover: { dot: "bg-lime-500", label: "Crossover" },
+  dailyremote: { dot: "bg-pink-500", label: "DailyRemote" },
   manual: { dot: "bg-amber-500/60", label: "Manual" },
 };
 
@@ -107,6 +109,7 @@ export default function JobsInboxPage() {
   const [remoteFilter, setRemoteFilter] = useState<string | null>(null);
   const [sponsorshipFilter, setSponsorshipFilter] = useState(false);
   const [countryFilter, setCountryFilter] = useState<string | null>(null);
+  const [sourceFilter, setSourceFilter] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [sortBy, setSortBy] = useState("score");
 
@@ -118,6 +121,7 @@ export default function JobsInboxPage() {
     remoteOnly: remoteFilter === "full_remote",
     remoteType: remoteFilter,
     sponsorship: sponsorshipFilter,
+    source: sourceFilter,
     sortBy,
   });
 
@@ -185,7 +189,7 @@ export default function JobsInboxPage() {
       )
     : jobs;
 
-  const activeFilters = [roleFilter, remoteFilter, sponsorshipFilter, countryFilter].filter(Boolean).length;
+  const activeFilters = [roleFilter, remoteFilter, sponsorshipFilter, countryFilter, sourceFilter].filter(Boolean).length;
 
   return (
     <div className="space-y-5">
@@ -315,6 +319,36 @@ export default function JobsInboxPage() {
           Visa
         </Button>
 
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant={sourceFilter ? "default" : "ghost"}
+                size="xs"
+                className="text-[11px]"
+              >
+                <Database className="h-3 w-3" />
+                {sourceFilter ? (SOURCE_COLORS[sourceFilter]?.label ?? sourceFilter) : "Source"}
+              </Button>
+            }
+          />
+          <DropdownMenuContent align="start">
+            <DropdownMenuItem onClick={() => setSourceFilter(null)}>
+              All sources
+            </DropdownMenuItem>
+            {Object.entries(SOURCE_COLORS).map(([key, meta]) => (
+              <DropdownMenuItem
+                key={key}
+                onClick={() => setSourceFilter(key)}
+                className="flex items-center gap-2"
+              >
+                <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
+                {meta.label}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+
         {activeFilters > 0 && (
           <button
             onClick={() => {
@@ -322,6 +356,7 @@ export default function JobsInboxPage() {
               setRemoteFilter(null);
               setSponsorshipFilter(false);
               setCountryFilter(null);
+              setSourceFilter(null);
               setSearch("");
             }}
             className="text-[10px] text-amber-400/70 hover:text-amber-400 ml-1 underline underline-offset-2"

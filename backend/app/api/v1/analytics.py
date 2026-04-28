@@ -94,6 +94,14 @@ async def get_overview(user_id: CurrentUserId, db: DbSession):
     )
     review_queue = review_result.scalar() or 0
 
+    # Last successful discovery — proxy is the newest job's discovered_at
+    # across the whole jobs table (not just this user's filtered view, since
+    # the cron writes globally and a slow-day filter shouldn't make us
+    # report "discovery is stale" when it actually ran). Used by the
+    # dashboard's greeting hint to be honest about cron freshness.
+    last_disc_result = await db.execute(select(func.max(Job.discovered_at)))
+    last_discovery_at = last_disc_result.scalar()
+
     return {
         "jobs_discovered": jobs_discovered,
         "jobs_shortlisted": jobs_shortlisted,
@@ -102,4 +110,5 @@ async def get_overview(user_id: CurrentUserId, db: DbSession):
         "interview_rate": round(interview_rate, 1),
         "applications_this_week": applications_this_week,
         "review_queue": review_queue,
+        "last_discovery_at": last_discovery_at.isoformat() if last_discovery_at else None,
     }

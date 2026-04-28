@@ -397,3 +397,24 @@ async def _run_crossover_async():
             await _ingest_raw_jobs(jobs)
     except Exception as e:
         logger.error("Crossover discovery failed: %s", e)
+
+
+# ── DailyRemote (Cloudflare-gated remote board, ld+json scraping) ────────────
+
+
+@celery_app.task(name="app.workers.discovery_tasks.run_dailyremote_discovery")
+def run_dailyremote_discovery():
+    """Run scheduled DailyRemote discovery — scrapes JobPosting JSON-LD."""
+    _run_async(_run_dailyremote_async())
+
+
+async def _run_dailyremote_async():
+    from app.services.discovery.dailyremote_service import fetch_jobs
+
+    keywords = await _collect_all_keywords()
+    try:
+        jobs = await fetch_jobs(keywords=set(keywords) if keywords else None)
+        if jobs:
+            await _ingest_raw_jobs(jobs)
+    except Exception as e:
+        logger.error("DailyRemote discovery failed: %s", e)

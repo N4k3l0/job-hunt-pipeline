@@ -777,6 +777,7 @@ export default function ProfilePage() {
                   { key: "remotive", label: "Remotive", note: "Remote-only board" },
                   { key: "weworkremotely", label: "WeWorkRemotely", note: "Remote-only board" },
                   { key: "crossover", label: "Crossover", note: "Crossover.com only" },
+                  { key: "dailyremote", label: "DailyRemote", note: "Remote-only, scraped" },
                 ].map((src) => {
                   const blocked = blockedSources.includes(src.key);
                   return (

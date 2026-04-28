@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
   ArrowLeft, MapPin, Globe, Building2, Clock, ExternalLink,
-  Briefcase, Star, Sparkles, Loader2, CheckCircle2, AlertCircle,
+  Briefcase, Star, Sparkles, Loader2, CheckCircle2, AlertCircle, Search,
 } from "lucide-react";
 import { useJob, useShortlistJob, useGenerateTailored, useDeepScore } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/toast";
@@ -66,6 +66,74 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
   const entities = job.entities;
   const overallFit = score?.overall_fit ?? 0;
 
+  // ── Apply destination ──────────────────────────────────────────────────
+  // We collapsed "View posting" and "Find direct apply" into a single
+  // primary "Apply directly" button that smart-routes:
+  //
+  //   1. If we already have a URL on a known free ATS (Greenhouse, Lever,
+  //      Ashby, Workable, SmartRecruiters, Jobvite, Recruitee, BambooHR,
+  //      Breezy, Workday, TeamTailor) — use it directly. One click, no
+  //      signup wall.
+  //   2. Otherwise — open a Google search across those ATSes for
+  //      "<company>" "<title>". The same job is almost always mirrored
+  //      on the company's own ATS page, signup-free.
+  //
+  // The aggregator URL (RemoteOK / LinkedIn / Adzuna / etc.) is intentionally
+  // dropped from the UI: it sends the user to a signup wall, which is the
+  // problem this button exists to solve.
+  const ATS_HOST_PATTERNS = [
+    /(^|\.)greenhouse\.io$/i,
+    /(^|\.)lever\.co$/i,
+    /(^|\.)ashbyhq\.com$/i,
+    /(^|\.)workable\.com$/i,
+    /(^|\.)smartrecruiters\.com$/i,
+    /(^|\.)jobvite\.com$/i,
+    /(^|\.)recruitee\.com$/i,
+    /(^|\.)bamboohr\.com$/i,
+    /(^|\.)breezy\.hr$/i,
+    /(^|\.)myworkdayjobs\.com$/i,
+    /(^|\.)teamtailor\.com$/i,
+    /(^|\.)icims\.com$/i,
+    /(^|\.)pinpointhq\.com$/i,
+  ];
+  const isAtsUrl = (raw: string | null | undefined): boolean => {
+    if (!raw) return false;
+    try {
+      const host = new URL(raw).hostname;
+      return ATS_HOST_PATTERNS.some((re) => re.test(host));
+    } catch {
+      return false;
+    }
+  };
+
+  const atsSearchHref = (() => {
+    const company = (job.company ?? "").trim();
+    const title = (job.title ?? "").trim();
+    if (!company || !title) return null;
+    const sites = [
+      "site:boards.greenhouse.io",
+      "site:job-boards.greenhouse.io",
+      "site:jobs.lever.co",
+      "site:jobs.ashbyhq.com",
+      "site:apply.workable.com",
+      "site:jobs.smartrecruiters.com",
+      "site:jobs.jobvite.com",
+      "site:recruitee.com",
+      "site:bamboohr.com",
+      "site:breezy.hr",
+      "site:myworkdayjobs.com",
+    ].join(" OR ");
+    const q = `(${sites}) "${company}" "${title}"`;
+    return `https://www.google.com/search?q=${encodeURIComponent(q)}`;
+  })();
+
+  // Prefer an existing ATS link (apply_url first — that's the
+  // "click to apply" target — then the canonical job_url). Fall back to
+  // the ATS search when nothing direct is available.
+  const directAtsLink = [job.apply_url, job.job_url].find(isAtsUrl) || null;
+  const applyHref = directAtsLink ?? atsSearchHref;
+  const applyIsDirect = !!directAtsLink;
+
   return (
     <div className="space-y-6 max-w-4xl">
       {/* Back */}
@@ -117,10 +185,18 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
           >
             <Star className="h-4 w-4" /> Shortlist
           </Button>
-          {job.job_url && (
-            <Button variant="outline" size="sm" nativeButton={false}
-              render={<a href={job.job_url} target="_blank" rel="noopener noreferrer" />}>
-              <ExternalLink className="h-4 w-4" /> View posting
+          {applyHref && (
+            <Button
+              variant="outline"
+              size="sm"
+              nativeButton={false}
+              title={applyIsDirect
+                ? "This posting is on a free ATS — apply directly, no signup."
+                : "Searches Greenhouse/Lever/Ashby/Workable for the same role on the company's own ATS."}
+              render={<a href={applyHref} target="_blank" rel="noopener noreferrer" />}
+            >
+              {applyIsDirect ? <ExternalLink className="h-4 w-4" /> : <Search className="h-4 w-4" />}
+              {applyIsDirect ? "Apply directly" : "Find direct apply"}
             </Button>
           )}
           <Button
