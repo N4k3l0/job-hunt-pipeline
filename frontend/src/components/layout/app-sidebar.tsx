@@ -28,6 +28,7 @@ import {
 import { createClient } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { useCurrentUser } from "@/hooks/use-api";
 
 const navItems = [
   { title: "Jobs Inbox", href: "/dashboard/jobs", icon: Briefcase },
@@ -37,15 +38,20 @@ const navItems = [
   { title: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
 ];
 
-const profileItems = [
-  { title: "Profile", href: "/dashboard/profile", icon: User },
-  { title: "Admin", href: "/dashboard/admin", icon: Settings },
-];
+// Profile is for everyone. Admin only appears for users with role=admin —
+// the page itself is also gated server-side via AdminUser dep, but hiding
+// the link prevents non-admins from seeing a 403 wall they'd never use.
+const PROFILE_ITEM = { title: "Profile", href: "/dashboard/profile", icon: User };
+const ADMIN_ITEM = { title: "Admin", href: "/dashboard/admin", icon: Settings };
 
 export function AppSidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { setOpenMobile, isMobile } = useSidebar();
+  const { data: currentUser } = useCurrentUser();
+  const profileItems = currentUser?.role === "admin"
+    ? [PROFILE_ITEM, ADMIN_ITEM]
+    : [PROFILE_ITEM];
 
   async function handleSignOut() {
     const supabase = createClient();

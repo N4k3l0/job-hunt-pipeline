@@ -186,17 +186,26 @@ async def _process_apify_async(actor_run_id: str, actor_type: str):
 async def _collect_all_keywords() -> list[str]:
     """Collect search keywords from all users' profiles.
 
-    Combines custom search_keywords + target_roles from all users.
-    Returns deduplicated list.
+    Combines:
+      - custom `search_keywords` (free-text user input)
+      - `target_roles` (e.g. "AI Engineer")
+      - `candidate_skills` rows where category is `technical` or `tool`
+        (e.g. "Python", "LangChain", "Figma") — the strongest signal for
+        whether a posting is actually a fit for this user
+
+    Skills are short, concrete, and the same words employers put in their
+    job descriptions, which makes them the most reliable expansion of the
+    search beyond the role title alone.
     """
-    from app.models.candidate import CandidateProfile
+    from app.models.candidate import CandidateProfile, CandidateSkill
 
     async with create_worker_session()() as db:
-        result = await db.execute(
+        # Profiles: search_keywords + target_roles
+        prof_result = await db.execute(
             select(CandidateProfile.search_keywords, CandidateProfile.target_roles)
         )
-        all_keywords = set()
-        for search_kw, target_roles in result:
+        all_keywords: set[str] = set()
+        for search_kw, target_roles in prof_result:
             if search_kw:
                 for kw in search_kw:
                     all_keywords.add(kw.strip().lower())
@@ -204,8 +213,25 @@ async def _collect_all_keywords() -> list[str]:
                 for role in target_roles:
                     all_keywords.add(role.strip().lower())
 
+        # Skills: pull technical + tool entries across every profile
+        skill_result = await db.execute(
+            select(CandidateSkill.skill_name).where(
+                CandidateSkill.category.in_(("technical", "tool"))
+            )
+        )
+        for (skill_name,) in skill_result:
+            if skill_name:
+                cleaned = skill_name.strip().lower()
+                # Single letters / pure punctuation slip in if a user types
+                # "C" or "+"; both would explode aggregator queries with noise.
+                if len(cleaned) >= 2:
+                    all_keywords.add(cleaned)
+
     keywords = list(all_keywords)
-    logger.info("Collected %d unique search keywords from all users: %s", len(keywords), keywords)
+    logger.info(
+        "Collected %d unique search keywords (roles + skills) from all users: %s",
+        len(keywords), keywords,
+    )
     return keywords
 
 

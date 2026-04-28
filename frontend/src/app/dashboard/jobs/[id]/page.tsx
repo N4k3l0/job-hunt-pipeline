@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
   ArrowLeft, MapPin, Globe, Building2, Clock, ExternalLink,
-  Briefcase, Star, Sparkles, Loader2, CheckCircle2, AlertCircle, Search,
+  Briefcase, Star, Sparkles, Loader2, CheckCircle2, AlertCircle,
 } from "lucide-react";
 import { useJob, useShortlistJob, useGenerateTailored, useDeepScore } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/toast";
@@ -67,20 +67,17 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
   const overallFit = score?.overall_fit ?? 0;
 
   // ── Apply destination ──────────────────────────────────────────────────
-  // We collapsed "View posting" and "Find direct apply" into a single
-  // primary "Apply directly" button that smart-routes:
+  // Single button, smart routing:
   //
-  //   1. If we already have a URL on a known free ATS (Greenhouse, Lever,
+  //   1. If apply_url / job_url is on a known free ATS (Greenhouse, Lever,
   //      Ashby, Workable, SmartRecruiters, Jobvite, Recruitee, BambooHR,
-  //      Breezy, Workday, TeamTailor) — use it directly. One click, no
-  //      signup wall.
-  //   2. Otherwise — open a Google search across those ATSes for
-  //      "<company>" "<title>". The same job is almost always mirrored
-  //      on the company's own ATS page, signup-free.
+  //      Breezy, Workday, TeamTailor, iCIMS, Pinpoint) → label
+  //      "Apply directly" and link straight there. No signup wall.
   //
-  // The aggregator URL (RemoteOK / LinkedIn / Adzuna / etc.) is intentionally
-  // dropped from the UI: it sends the user to a signup wall, which is the
-  // problem this button exists to solve.
+  //   2. Otherwise → label "Open posting" and link to whatever URL we have
+  //      (apply_url first, then job_url). The previous Google ATS search
+  //      fallback was dropped: it landed on dead pages too often when the
+  //      role wasn't actually mirrored on a free ATS.
   const ATS_HOST_PATTERNS = [
     /(^|\.)greenhouse\.io$/i,
     /(^|\.)lever\.co$/i,
@@ -106,32 +103,9 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
     }
   };
 
-  const atsSearchHref = (() => {
-    const company = (job.company ?? "").trim();
-    const title = (job.title ?? "").trim();
-    if (!company || !title) return null;
-    const sites = [
-      "site:boards.greenhouse.io",
-      "site:job-boards.greenhouse.io",
-      "site:jobs.lever.co",
-      "site:jobs.ashbyhq.com",
-      "site:apply.workable.com",
-      "site:jobs.smartrecruiters.com",
-      "site:jobs.jobvite.com",
-      "site:recruitee.com",
-      "site:bamboohr.com",
-      "site:breezy.hr",
-      "site:myworkdayjobs.com",
-    ].join(" OR ");
-    const q = `(${sites}) "${company}" "${title}"`;
-    return `https://www.google.com/search?q=${encodeURIComponent(q)}`;
-  })();
-
-  // Prefer an existing ATS link (apply_url first — that's the
-  // "click to apply" target — then the canonical job_url). Fall back to
-  // the ATS search when nothing direct is available.
   const directAtsLink = [job.apply_url, job.job_url].find(isAtsUrl) || null;
-  const applyHref = directAtsLink ?? atsSearchHref;
+  const sourceLink = job.apply_url ?? job.job_url ?? null;
+  const applyHref = directAtsLink ?? sourceLink;
   const applyIsDirect = !!directAtsLink;
 
   return (
@@ -192,11 +166,11 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
               nativeButton={false}
               title={applyIsDirect
                 ? "This posting is on a free ATS — apply directly, no signup."
-                : "Searches Greenhouse/Lever/Ashby/Workable for the same role on the company's own ATS."}
+                : "Opens the original posting on the source site."}
               render={<a href={applyHref} target="_blank" rel="noopener noreferrer" />}
             >
-              {applyIsDirect ? <ExternalLink className="h-4 w-4" /> : <Search className="h-4 w-4" />}
-              {applyIsDirect ? "Apply directly" : "Find direct apply"}
+              <ExternalLink className="h-4 w-4" />
+              {applyIsDirect ? "Apply directly" : "Open posting"}
             </Button>
           )}
           <Button

@@ -22,7 +22,6 @@ import {
   ChevronRight,
   SlidersHorizontal,
   Plus,
-  Wifi,
   Flag,
   Loader2,
   Inbox,
@@ -106,20 +105,22 @@ function AccentEdge({ score }: { score: number | null }) {
 export default function JobsInboxPage() {
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<string | null>(null);
-  const [remoteFilter, setRemoteFilter] = useState<string | null>(null);
   const [sponsorshipFilter, setSponsorshipFilter] = useState(false);
   const [countryFilter, setCountryFilter] = useState<string | null>(null);
   const [sourceFilter, setSourceFilter] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [sortBy, setSortBy] = useState("score");
 
+  // Work-type filter is gone — every user on this product is hunting remote
+  // roles, the profile's `remote_preference` already enforces it server-side,
+  // and the dropdown was just a way to accidentally see ineligible jobs.
   const { data, isLoading } = useJobs({
     page,
     pageSize: 20,
     roleType: roleFilter,
     country: countryFilter,
-    remoteOnly: remoteFilter === "full_remote",
-    remoteType: remoteFilter,
+    remoteOnly: false,
+    remoteType: null,
     sponsorship: sponsorshipFilter,
     source: sourceFilter,
     sortBy,
@@ -189,7 +190,7 @@ export default function JobsInboxPage() {
       )
     : jobs;
 
-  const activeFilters = [roleFilter, remoteFilter, sponsorshipFilter, countryFilter, sourceFilter].filter(Boolean).length;
+  const activeFilters = [roleFilter, sponsorshipFilter, countryFilter, sourceFilter].filter(Boolean).length;
 
   return (
     <div className="space-y-5">
@@ -232,41 +233,6 @@ export default function JobsInboxPage() {
             inbox is already pre-filtered, so a hardcoded PM chip here would
             force the wrong query for an AI-only user. If we ever need a
             quick role switcher we'll surface one based on target_roles. */}
-
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                variant={remoteFilter ? "default" : "ghost"}
-                size="xs"
-                className="text-[11px]"
-              >
-                <Wifi className="h-3 w-3" />
-                {remoteFilter === "full_remote" ? "Remote" :
-                 remoteFilter === "hybrid" ? "Hybrid" :
-                 remoteFilter === "onsite" ? "Onsite" :
-                 remoteFilter === "unknown" ? "Unknown" : "Work type"}
-              </Button>
-            }
-          />
-          <DropdownMenuContent>
-            <DropdownMenuItem onClick={() => setRemoteFilter(null)}>
-              All
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setRemoteFilter("full_remote")}>
-              Remote
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setRemoteFilter("hybrid")}>
-              Hybrid
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setRemoteFilter("onsite")}>
-              Onsite
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setRemoteFilter("unknown")}>
-              Unknown
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
 
         <DropdownMenu>
           <DropdownMenuTrigger
@@ -347,7 +313,6 @@ export default function JobsInboxPage() {
           <button
             onClick={() => {
               setRoleFilter(null);
-              setRemoteFilter(null);
               setSponsorshipFilter(false);
               setCountryFilter(null);
               setSourceFilter(null);
