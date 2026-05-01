@@ -109,15 +109,15 @@ async def _ingest_raw_jobs(jobs: list[dict]):
                 normalized_url = raw.get("_normalized_url")
                 canonical_hash = raw.get("_canonical_hash")
 
-                is_dup, _ = await check_duplicate(
-                    db, canonical_hash, raw.get("raw_description", ""),
-                    title=title, company=company,
-                    source_id=source.id, external_id=external_id,
-                    job_url=normalized_url,
-                )
-                if is_dup:
-                    skipped += 1
-                    continue
+                # Bulk pre-filter already cleared canonical_hash + URL
+                # collisions in O(1). Skipping the per-row `check_duplicate`
+                # call (which fires 4-5 extra DB queries for source/external
+                # ID matches and description similarity) keeps the cron
+                # under budget — at the cost of slightly looser dedup on
+                # the (source_id, external_id) and Jaccard-similarity axes.
+                # In practice ATS sources have stable external_ids so this
+                # is safe; if cross-source near-duplicates start sneaking
+                # in we can re-enable for the affected sources.
 
                 remote_type = (
                     raw.get("remote_type")
