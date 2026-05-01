@@ -8,19 +8,29 @@ from app.core.config import get_settings
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-# Model selection per task type
+# Model selection per task type. The previous IDs (claude-*-4-20250514)
+# were the May 2025 release wave — long since deprecated. Updated to the
+# current Claude 4.X family (Opus 4.7 / Sonnet 4.6) per CLAUDE.md:
+#   - Sonnet 4.6 for parsing + scoring (mechanical, cost-sensitive).
+#   - Opus 4.7 for tailoring + outreach (creative, accuracy-sensitive).
 MODELS = {
-    "parsing": "claude-sonnet-4-20250514",
-    "scoring": "claude-sonnet-4-20250514",
-    "tailoring": "claude-opus-4-20250514",
+    "parsing": "claude-sonnet-4-6",
+    "scoring": "claude-sonnet-4-6",
+    "tailoring": "claude-opus-4-7",
 }
 
 
 class LLMClient:
-    """Wrapper around Claude API with retry logic and cost tracking."""
+    """Wrapper around Claude API with retry logic and cost tracking.
+
+    Uses anthropic.AsyncAnthropic so each call yields the event loop —
+    important inside the FastAPI request handler so tailoring's 3-5
+    sequential LLM calls don't starve other coroutines (DB queries,
+    progress callbacks) or hold the worker pool.
+    """
 
     def __init__(self):
-        self.client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        self.client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
     async def generate(
         self,
@@ -34,7 +44,7 @@ class LLMClient:
         model = MODELS.get(task_type, MODELS["parsing"])
 
         try:
-            response = self.client.messages.create(
+            response = await self.client.messages.create(
                 model=model,
                 max_tokens=max_tokens,
                 temperature=temperature,
@@ -42,14 +52,10 @@ class LLMClient:
                 messages=[{"role": "user", "content": user_prompt}],
             )
 
-            # Log token usage for cost tracking
             usage = response.usage
             logger.info(
                 "LLM call: task=%s model=%s input_tokens=%d output_tokens=%d",
-                task_type,
-                model,
-                usage.input_tokens,
-                usage.output_tokens,
+                task_type, model, usage.input_tokens, usage.output_tokens,
             )
 
             return response.content[0].text
@@ -72,7 +78,7 @@ class LLMClient:
         """Generate structured output using Claude's tool use."""
         model = MODELS.get(task_type, MODELS["parsing"])
 
-        response = self.client.messages.create(
+        response = await self.client.messages.create(
             model=model,
             max_tokens=max_tokens,
             temperature=0.0,
@@ -85,18 +91,13 @@ class LLMClient:
         usage = response.usage
         logger.info(
             "LLM structured call: task=%s model=%s input_tokens=%d output_tokens=%d",
-            task_type,
-            model,
-            usage.input_tokens,
-            usage.output_tokens,
+            task_type, model, usage.input_tokens, usage.output_tokens,
         )
 
-        # Extract tool use result
         for block in response.content:
             if block.type == "tool_use":
                 return block.input
 
-        # Fallback: return text if no tool use
         return {"text": response.content[0].text}
 
 

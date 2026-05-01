@@ -8,7 +8,7 @@ from sqlalchemy.orm import selectinload
 from app.models.job import Job
 from app.models.candidate import CandidateProfile, Resume
 from app.models.scoring import JobScore
-from app.llm.client import llm_client
+from app.llm.client import llm_client, MODELS
 from app.llm.prompts.deep_score import (
     DEEP_SCORE_SYSTEM_PROMPT,
     DEEP_SCORE_USER_PROMPT,
@@ -136,7 +136,9 @@ async def run_deep_score(
 
     # Add metadata
     deep_score["scored_at"] = datetime.now(timezone.utc).isoformat()
-    deep_score["model"] = "claude-sonnet-4-20250514"
+    # Metadata only — actual model is selected by llm_client via MODELS map.
+    # Kept for transparency in the cached deep_score_json blob.
+    deep_score["model"] = MODELS.get("scoring", "claude-sonnet-4-6")
 
     # Cache the result on the JobScore record
     if score_record:
