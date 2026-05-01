@@ -245,16 +245,45 @@ def run_adzuna_discovery():
 
 
 async def _run_adzuna_async():
+    """Adzuna runs N×M API calls (N keywords, M countries). To stay under the
+    60s Vercel function limit we:
+      - Use target_roles ONLY, not the full skills list. Each keyword is a
+        separate API query, and Adzuna already does full-text matching on
+        the role title. Adding 20 skills would 5× the API call count for
+        marginal benefit.
+      - Run all countries concurrently with asyncio.gather. The total wall
+        time becomes ~max(country_time) instead of sum(country_times).
+      - Ingest once at the end so we don't fight the DB connection pool.
+    """
+    import asyncio
     from app.services.discovery.adzuna_service import fetch_jobs, ADZUNA_COUNTRIES
+    from app.models.candidate import CandidateProfile
 
-    keywords = await _collect_all_keywords() or None  # None falls back to defaults
-    for iso, code in ADZUNA_COUNTRIES.items():
+    # Target roles only (NOT _collect_all_keywords — that includes skills,
+    # which would explode Adzuna's call count past the 60s limit).
+    async with create_worker_session()() as db:
+        result = await db.execute(select(CandidateProfile.target_roles))
+        roles: set[str] = set()
+        for (target_roles,) in result:
+            for role in (target_roles or []):
+                cleaned = role.strip().lower()
+                if cleaned:
+                    roles.add(cleaned)
+    keywords = list(roles) or None  # None lets adzuna_service fall back to its defaults
+
+    async def run_country(iso: str, code: str) -> list[dict]:
         try:
-            jobs = await fetch_jobs(country_code=code, keywords=keywords)
-            if jobs:
-                await _ingest_raw_jobs(jobs)
+            return await fetch_jobs(country_code=code, keywords=keywords)
         except Exception as e:
             logger.error("Adzuna discovery failed for %s: %s", iso, e)
+            return []
+
+    batches = await asyncio.gather(*[
+        run_country(iso, code) for iso, code in ADZUNA_COUNTRIES.items()
+    ])
+    all_jobs = [j for batch in batches for j in batch]
+    if all_jobs:
+        await _ingest_raw_jobs(all_jobs)
 
 
 # ── RemoteOK ─────────────────────────────────────────────────────────────────
