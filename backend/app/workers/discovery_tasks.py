@@ -102,14 +102,20 @@ async def _ingest_raw_jobs(jobs: list[dict]):
                 db.add(job)
                 await db.flush()
 
-                # If we have description content, create basic entities
+                # If we have description content, create basic entities.
+                # Capture the visa-sponsorship flag too — Arbeitnow is the
+                # only source that explicitly exposes it today, but if other
+                # sources start returning it we want it without another
+                # plumbing change.
                 desc = raw.get("raw_description", "")
-                if desc:
+                visa_flag = raw.get("visa_sponsorship")
+                if desc or visa_flag is not None:
                     entities = JobEntity(
                         job_id=job.id,
                         skills=raw.get("tags", []),
                         requirements=[],
                         keywords=[],
+                        sponsorship_available=visa_flag if isinstance(visa_flag, bool) else None,
                     )
                     db.add(entities)
 

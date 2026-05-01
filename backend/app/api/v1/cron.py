@@ -195,6 +195,22 @@ async def cron_stats(authorization: str | None = Header(None)):
             "GROUP BY 1 ORDER BY n DESC"
         ))).all()
 
+        # Remote-type breakdown across all visible jobs
+        remote_rows = (await db.execute(text(
+            "SELECT COALESCE(remote_type,'unknown') AS r, count(*) AS n "
+            "FROM jobs WHERE status NOT IN ('duplicate','raw') GROUP BY 1 ORDER BY n DESC"
+        ))).all()
+
+        # Visa sponsorship coverage — how many jobs in the DB actually have
+        # the flag populated, true vs false vs null.
+        visa_rows = (await db.execute(text(
+            "SELECT CASE WHEN e.sponsorship_available IS TRUE THEN 'true' "
+            "WHEN e.sponsorship_available IS FALSE THEN 'false' "
+            "ELSE 'unknown' END AS flag, count(*) "
+            "FROM jobs j LEFT JOIN job_entities e ON e.job_id = j.id "
+            "WHERE j.status NOT IN ('duplicate','raw') GROUP BY 1"
+        ))).all()
+
         # Scoring coverage on recent jobs (6h)
         scored_recent = (await db.execute(text(
             "SELECT count(*) FROM jobs j JOIN job_scores s ON s.job_id = j.id "
@@ -212,11 +228,15 @@ async def cron_stats(authorization: str | None = Header(None)):
                    CandidateProfile.id.label("profile_id"),
                    CandidateProfile.target_roles,
                    CandidateProfile.blocked_sources,
-                   CandidateProfile.search_keywords)
+                   CandidateProfile.search_keywords,
+                   CandidateProfile.remote_preference,
+                   CandidateProfile.preferred_countries,
+                   CandidateProfile.visa_statuses)
             .outerjoin(CandidateProfile, CandidateProfile.user_id == User.id)
         )
         users_info: list[dict] = []
-        for uid, email, profile_id, target_roles, blocked_sources, search_kw in users_result.all():
+        for (uid, email, profile_id, target_roles, blocked_sources, search_kw,
+             remote_pref, pref_countries, visa_statuses) in users_result.all():
             # Pull skills grouped by category so we can see whether the
             # 'technical' / 'tool' filter is actually catching what the
             # user added.
@@ -237,6 +257,9 @@ async def cron_stats(authorization: str | None = Header(None)):
                 "search_keywords": search_kw or [],
                 "skills_by_category": by_cat,
                 "skill_total": len(skills_rows),
+                "remote_preference": remote_pref,
+                "preferred_countries": pref_countries or [],
+                "visa_statuses": visa_statuses or {},
             })
 
         # The actual keyword set we hand to discovery (RemoteOK/Himalayas/etc.)
@@ -268,6 +291,8 @@ async def cron_stats(authorization: str | None = Header(None)):
             "latest_discovered_at": latest_ts.isoformat() if latest_ts else None,
         },
         "by_source_last_6h": {row[0]: row[1] for row in src_rows},
+        "by_remote_type": {row[0]: row[1] for row in remote_rows},
+        "by_sponsorship_flag": {row[0]: row[1] for row in visa_rows},
         "users": users_info,
         "discovery_keyword_count": len(discovery_keywords) if isinstance(discovery_keywords, list) else 0,
         "discovery_keywords_sample": (
@@ -275,6 +300,52 @@ async def cron_stats(authorization: str | None = Header(None)):
         ),
         "recent_titles_sample": sample,
     }
+
+
+@router.get("/backfill-visa")
+async def cron_backfill_visa(authorization: str | None = Header(None)):
+    """Re-set the sponsorship_available flag on already-ingested Arbeitnow
+    jobs whose JobEntity was created before we started capturing the
+    visa_sponsorship field. Reads job.raw_content (str-repr of the source
+    dict) to recover the flag — fragile but cheap and one-shot."""
+    _verify_cron(authorization)
+
+    import ast
+    from sqlalchemy import select, update
+    from app.workers.discovery_tasks import create_worker_session
+    from app.models.job import Job, JobEntity, JobSource
+
+    updated = 0
+    inspected = 0
+    async with create_worker_session()() as db:
+        rows = (await db.execute(
+            select(Job.id, Job.raw_content)
+            .join(JobSource, JobSource.id == Job.source_id)
+            .where(JobSource.name == "arbeitnow")
+        )).all()
+        for job_id, raw in rows:
+            inspected += 1
+            if not raw:
+                continue
+            try:
+                d = ast.literal_eval(raw)
+            except (ValueError, SyntaxError):
+                continue
+            flag = d.get("visa_sponsorship") if isinstance(d, dict) else None
+            if not isinstance(flag, bool):
+                continue
+            # Upsert: update if entity exists, insert otherwise
+            existing = (await db.execute(
+                select(JobEntity).where(JobEntity.job_id == job_id)
+            )).scalar_one_or_none()
+            if existing is None:
+                db.add(JobEntity(job_id=job_id, skills=[], requirements=[],
+                                 keywords=[], sponsorship_available=flag))
+            else:
+                existing.sponsorship_available = flag
+            updated += 1
+        await db.commit()
+    return {"inspected": inspected, "updated": updated}
 
 
 @router.get("/discover-slow")
