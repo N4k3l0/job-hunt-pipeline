@@ -22,12 +22,12 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 # Per-source budget: ANY single source taking longer than this is killed
-# and reported as `timeout`. Picked so the SLOWEST source still leaves
-# room for the rest under Vercel's 60s function ceiling. With concurrent
-# execution (asyncio.gather) the total wall time is ~max(per-source
-# duration), but we keep a hard cap as a safety net in case one source
-# falls into a redirect loop or rate-limit backoff.
-PER_SOURCE_BUDGET_SECONDS = 35
+# and reported as `timeout`. Sources run concurrently via asyncio.gather,
+# so the function's total wall time is ~max(per-source) + a few seconds
+# of overhead. We pick 50s — the curated source can do real work
+# (fetch 65 companies + ingest hundreds of jobs + inline-score across
+# users) and still leaves ~10s margin under Vercel's 60s ceiling.
+PER_SOURCE_BUDGET_SECONDS = 50
 
 
 def _verify_cron(authorization: str | None) -> None:
