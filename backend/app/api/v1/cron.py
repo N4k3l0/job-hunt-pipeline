@@ -153,70 +153,80 @@ async def cron_score_backlog(authorization: str | None = Header(None)):
 @router.get("/stats")
 async def cron_stats(authorization: str | None = Header(None)):
     """Quick visibility into what's actually in the DB. Used to answer
-    'did the new jobs land?' without screen-sharing pgAdmin."""
+    'did the new jobs land?' without screen-sharing pgAdmin.
+
+    Uses raw SQL with INTERVAL literals — far less fragile than fighting
+    SQLAlchemy's type system to express '6 hours ago'."""
     _verify_cron(authorization)
 
-    from sqlalchemy import select, func
+    from sqlalchemy import select, func, text
     from app.workers.discovery_tasks import create_worker_session
-    from app.models.job import Job, JobSource
+    from app.models.job import Job
     from app.models.scoring import JobScore
     from app.models.user import User
+    from app.models.candidate import CandidateProfile
 
     async with create_worker_session()() as db:
-        # Counts by source × age bucket
-        rows = (await db.execute(select(
-            JobSource.name,
-            func.count(Job.id).filter(Job.discovered_at > func.now() - func.cast("6 hours", Job.discovered_at.type)).label("h6"),
-        ).join(Job, Job.source_id == JobSource.id, isouter=True).group_by(JobSource.name))).all()
+        # Visible jobs total
+        total = (await db.execute(
+            select(func.count(Job.id)).where(Job.status.notin_(["duplicate", "raw"]))
+        )).scalar() or 0
 
-        # Simpler raw counts since the Postgres interval cast above is awkward.
-        sql_total = await db.execute(select(func.count(Job.id)).where(Job.status.notin_(["duplicate", "raw"])))
-        total = sql_total.scalar() or 0
+        recent_6h = (await db.execute(text(
+            "SELECT count(*) FROM jobs WHERE status NOT IN ('duplicate','raw') "
+            "AND discovered_at > now() - interval '6 hours'"
+        ))).scalar() or 0
 
-        sql_recent = await db.execute(
-            select(func.count(Job.id)).where(
-                Job.status.notin_(["duplicate", "raw"]),
-                Job.discovered_at > func.now() - func.make_interval(0, 0, 0, 0, 0, 0, 21600),  # 6h
-            )
-        )
-        recent_6h = sql_recent.scalar() or 0
+        recent_24h = (await db.execute(text(
+            "SELECT count(*) FROM jobs WHERE status NOT IN ('duplicate','raw') "
+            "AND discovered_at > now() - interval '24 hours'"
+        ))).scalar() or 0
 
-        sql_24h = await db.execute(
-            select(func.count(Job.id)).where(
-                Job.status.notin_(["duplicate", "raw"]),
-                Job.discovered_at > func.now() - func.make_interval(0, 0, 0, 1),  # 1d
-            )
-        )
-        recent_24h = sql_24h.scalar() or 0
+        # Per-source counts in the last 6h
+        src_rows = (await db.execute(text(
+            "SELECT COALESCE(s.name,'manual') AS source, count(*) AS n "
+            "FROM jobs j LEFT JOIN job_sources s ON s.id = j.source_id "
+            "WHERE j.status NOT IN ('duplicate','raw') "
+            "AND j.discovered_at > now() - interval '6 hours' "
+            "GROUP BY 1 ORDER BY n DESC"
+        ))).all()
 
-        # By source × 6h
-        src_rows = (await db.execute(
-            select(JobSource.name, func.count(Job.id))
-            .select_from(Job).join(JobSource, JobSource.id == Job.source_id, isouter=True)
-            .where(
-                Job.status.notin_(["duplicate", "raw"]),
-                Job.discovered_at > func.now() - func.make_interval(0, 0, 0, 0, 0, 0, 21600),
-            )
-            .group_by(JobSource.name)
-        )).all()
+        # Scoring coverage on recent jobs (6h)
+        scored_recent = (await db.execute(text(
+            "SELECT count(*) FROM jobs j JOIN job_scores s ON s.job_id = j.id "
+            "WHERE j.status NOT IN ('duplicate','raw') "
+            "AND j.discovered_at > now() - interval '6 hours'"
+        ))).scalar() or 0
 
-        # Scoring coverage on recent jobs
-        scored_rows = await db.execute(
-            select(func.count(JobScore.id))
-            .select_from(Job).join(JobScore, JobScore.job_id == Job.id, isouter=True)
-            .where(
-                Job.status.notin_(["duplicate", "raw"]),
-                Job.discovered_at > func.now() - func.make_interval(0, 0, 0, 0, 0, 0, 21600),
-            )
-        )
-        scored_recent = scored_rows.scalar() or 0
-
-        # Latest job timestamp
         latest_ts = (await db.execute(select(func.max(Job.discovered_at)))).scalar()
 
-        # Per-user job count after-filter — gives what the inbox would actually show
-        users_result = await db.execute(select(User.id, User.email))
-        users = list(users_result.all())
+        # Each user's target_roles + a sample of recent visible job titles
+        # so the caller can spot-check whether the inbox should be showing
+        # them or not.
+        users_result = await db.execute(
+            select(User.id, User.email, CandidateProfile.target_roles,
+                   CandidateProfile.blocked_sources)
+            .outerjoin(CandidateProfile, CandidateProfile.user_id == User.id)
+        )
+        users_info: list[dict] = []
+        for uid, email, target_roles, blocked_sources in users_result.all():
+            users_info.append({
+                "email": email,
+                "target_roles": target_roles or [],
+                "blocked_sources": blocked_sources or [],
+            })
+
+        # Sample of the 10 most recent visible job titles, regardless of user filter
+        sample_rows = (await db.execute(text(
+            "SELECT COALESCE(s.name,'manual') AS source, j.title, j.company "
+            "FROM jobs j LEFT JOIN job_sources s ON s.id = j.source_id "
+            "WHERE j.status NOT IN ('duplicate','raw') "
+            "ORDER BY j.discovered_at DESC LIMIT 15"
+        ))).all()
+        sample = [
+            {"source": s, "title": t, "company": c}
+            for (s, t, c) in sample_rows
+        ]
 
     return {
         "totals": {
@@ -226,8 +236,9 @@ async def cron_stats(authorization: str | None = Header(None)):
             "scored_in_last_6h": scored_recent,
             "latest_discovered_at": latest_ts.isoformat() if latest_ts else None,
         },
-        "by_source_last_6h": {(name or "manual"): count for name, count in src_rows},
-        "user_count": len(users),
+        "by_source_last_6h": {row[0]: row[1] for row in src_rows},
+        "users": users_info,
+        "recent_titles_sample": sample,
     }
 
 
