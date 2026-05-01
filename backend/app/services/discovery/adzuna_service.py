@@ -33,7 +33,7 @@ DEFAULT_KEYWORDS = [
 async def fetch_jobs(
     country_code: str = "us",
     keywords: list[str] | None = None,
-    max_pages: int = 2,
+    max_pages: int = 1,
     results_per_page: int = 50,
 ) -> list[dict]:
     """Fetch jobs from Adzuna API.
@@ -54,7 +54,10 @@ async def fetch_jobs(
     keywords = keywords or DEFAULT_KEYWORDS
     all_jobs = []
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    # Tight per-request timeout: when Adzuna rate-limits us under concurrent
+    # country fan-out, individual calls can hang for tens of seconds. We'd
+    # rather skip a slow country than blow the cron's 35s per-source budget.
+    async with httpx.AsyncClient(timeout=httpx.Timeout(connect=4.0, read=8.0, write=4.0, pool=4.0)) as client:
         for keyword in keywords:
             for page in range(1, max_pages + 1):
                 try:

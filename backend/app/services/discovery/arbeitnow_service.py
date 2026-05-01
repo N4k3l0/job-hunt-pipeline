@@ -22,7 +22,11 @@ async def fetch_jobs(
     """
     all_jobs = []
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    # Tight per-request timeout: a single hung Arbeitnow call shouldn't be
+    # able to consume the entire 35s per-source budget on the cron.
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(connect=4.0, read=8.0, write=4.0, pool=4.0)
+    ) as client:
         for page in range(1, max_pages + 1):
             params = {"page": page}
             if visa_sponsorship:
