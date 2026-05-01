@@ -14,8 +14,15 @@ Cloudflare gates the site against generic curl/python clients, but lets a
 plausible browser User-Agent through. We send one, and we don't need to
 solve the JS challenge because the listing/detail pages are server-rendered.
 
-Latency budget: we cap at ~4 categories × 25 jobs = 100 page fetches,
-issued in waves of 10 — comfortably inside the 60s Vercel limit.
+Cloudflare blocks Vercel's serverless IPs regardless of User-Agent
+(verified by /debug-dailyremote — every page returned 403). We route
+every fetch through Firecrawl, which solves the JS challenge upstream.
+
+Each Firecrawl call costs one credit, so the scope here is intentionally
+small. Total credits per cron run:
+    len(CATEGORY_PATHS) + len(CATEGORY_PATHS) * PER_CATEGORY_LIMIT
+With 2 × 8 + 2 = 18 calls/day → ~540 credits/month. Comfortable on the
+Hobby plan (3000 credits) and leaves room for Crossover.
 """
 
 from __future__ import annotations
@@ -25,36 +32,29 @@ import json
 import logging
 import re
 from html import unescape
-from typing import Iterable
-
-import httpx
 
 from app.services.discovery.eligibility import (
     is_nigeria_friendly,
     matches_keywords,
 )
+from app.services.discovery.firecrawl_service import scrape_html
 
 logger = logging.getLogger(__name__)
 
 BASE = "https://dailyremote.com"
-USER_AGENT = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-)
+USER_AGENT = "Firecrawl/1.0"
 
-# Categories the AI/PM users care about. Keep this list short so we stay
-# inside the Vercel function timeout.
+# Categories most relevant to the AI/PM users on this product. Each adds
+# 1 + PER_CATEGORY_LIMIT Firecrawl calls per cron run.
 CATEGORY_PATHS: tuple[str, ...] = (
     "/remote-product-jobs",
-    "/remote-data-science-jobs",
     "/remote-software-development-jobs",
-    "/remote-design-jobs",
 )
 
-# Per-category cap. The listing page returns ~30 unique job URLs, and we'd
-# rather pull the most recent slice from many categories than exhaust one.
-PER_CATEGORY_LIMIT = 25
-CONCURRENCY = 10  # max simultaneous job-detail fetches
+# Per-category cap. Listing pages typically have ~30 unique URLs; we
+# slice the most recent N to control credit spend.
+PER_CATEGORY_LIMIT = 8
+CONCURRENCY = 4  # parallel Firecrawl calls
 
 # Anchor regex: matches /remote-job/<slug> hrefs in the listing HTML. The
 # trailing ID lets us dedupe duplicates that the page renders for accessibility
@@ -72,54 +72,48 @@ async def fetch_jobs(
 ) -> list[dict]:
     """Return up to `limit` Nigeria-eligible jobs across the configured
     categories, normalized for `_ingest_raw_jobs`.
+
+    Uses Firecrawl for every fetch — Cloudflare 403s direct httpx calls
+    from Vercel's serverless IPs.
     """
-    headers = {
-        "User-Agent": USER_AGENT,
-        "Accept": "text/html,application/xhtml+xml",
-        "Accept-Language": "en-US,en;q=0.9",
-    }
     out: list[dict] = []
     seen_urls: set[str] = set()
+    sem = asyncio.Semaphore(CONCURRENCY)
 
-    async with httpx.AsyncClient(
-        timeout=20.0, follow_redirects=True, headers=headers
-    ) as client:
-        for path in CATEGORY_PATHS:
-            try:
-                listing = await client.get(f"{BASE}{path}")
-                listing.raise_for_status()
-            except httpx.HTTPError as e:
-                logger.warning("DailyRemote listing %s failed: %s", path, e)
+    async def fetch_via_firecrawl(rel_url: str) -> str:
+        """One Firecrawl call. Returns raw HTML or '' on failure."""
+        async with sem:
+            return await scrape_html(f"{BASE}{rel_url}", timeout=25.0)
+
+    for path in CATEGORY_PATHS:
+        listing_html = await fetch_via_firecrawl(path)
+        if not listing_html:
+            logger.warning("DailyRemote listing %s: Firecrawl returned empty", path)
+            continue
+
+        urls = _extract_job_urls(listing_html)[:PER_CATEGORY_LIMIT]
+        urls = [u for u in urls if u not in seen_urls]
+        seen_urls.update(urls)
+        if not urls:
+            continue
+
+        # Detail pages run concurrently, capped by the semaphore so we
+        # don't burst Firecrawl beyond their per-second rate limit.
+        detail_htmls = await asyncio.gather(*(fetch_via_firecrawl(u) for u in urls))
+
+        for rel_url, html in zip(urls, detail_htmls):
+            if not html:
                 continue
-
-            urls = _extract_job_urls(listing.text)[:PER_CATEGORY_LIMIT]
-            urls = [u for u in urls if u not in seen_urls]
-            seen_urls.update(urls)
-
-            sem = asyncio.Semaphore(CONCURRENCY)
-
-            async def fetch_one(rel_url: str) -> dict | None:
-                async with sem:
-                    try:
-                        r = await client.get(f"{BASE}{rel_url}")
-                        r.raise_for_status()
-                    except httpx.HTTPError as e:
-                        logger.debug("DailyRemote job %s failed: %s", rel_url, e)
-                        return None
-                    return _parse_job_page(r.text, rel_url)
-
-            results = await asyncio.gather(*(fetch_one(u) for u in urls))
-            for posting in results:
-                if not posting:
-                    continue
-                if not _passes_filters(posting, keywords):
-                    continue
-                out.append(posting)
-                if len(out) >= limit:
-                    break
-
+            posting = _parse_job_page(html, rel_url)
+            if not posting:
+                continue
+            if not _passes_filters(posting, keywords):
+                continue
+            out.append(posting)
             if len(out) >= limit:
                 break
+        if len(out) >= limit:
+            break
 
     logger.info("DailyRemote: %d eligible jobs across %d categories",
                 len(out), len(CATEGORY_PATHS))
