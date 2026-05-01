@@ -43,10 +43,39 @@ _PRODUCT_TITLE_REGEX = (
 )
 
 
+import re as _re
+
+# Matches when the user's TARGET role is actually a PM role (not just any
+# role that contains the word "product"). The old check
+#   any("product" in r.lower() for r in target_roles)
+# was disabling the PM-exclusion filter for users with target_roles like
+# "AI Product Engineer" — they'd then see every Senior PM job leak through.
+_USER_WANTS_PRODUCT_RE = _re.compile(
+    r"\bproduct\s+("
+    r"manager|managers|management|"
+    r"owner|owners|"
+    r"lead|leader|leads|"
+    r"director|"
+    r"strateg\w*|"
+    r"analyst|analytics"
+    r")\b"
+    r"|\bhead\s+of\s+product\b"
+    r"|\b(?:vp|vice\s+president|chief)\s+of\s+product\b"
+    r"|\bchief\s+product\s+officer\b"
+    r"|\bcpo\b",
+    _re.I,
+)
+
+
 def _user_wants_product(target_roles: list[str] | None) -> bool:
+    """True only if the user's target_roles list contains an explicit
+    Product Management role (PM, Product Owner, Head of Product, etc.).
+    Roles that merely contain the word 'product' (e.g. 'AI Product
+    Engineer') do NOT count — those are engineering roles and the user
+    still wants PM titles excluded from their inbox."""
     if not target_roles:
         return False
-    return any("product" in r.lower() for r in target_roles)
+    return any(_USER_WANTS_PRODUCT_RE.search(r or "") for r in target_roles)
 
 
 def build_role_keywords(target_roles: list[str] | None) -> list[str]:
