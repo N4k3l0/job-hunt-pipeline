@@ -109,21 +109,59 @@ def build_role_keywords(target_roles: list[str] | None) -> list[str]:
     return list(set(keywords))
 
 
+def _skill_keywords(skills: list[str] | None) -> list[str]:
+    """Convert technical/tool skills to SQL LIKE patterns. Skills that are
+    too short, too generic, or too noisy as a substring (e.g. 'C', 'go',
+    'r') are skipped — they'd match titles like 'Go-to-Market Manager'
+    and torpedo precision."""
+    if not skills:
+        return []
+    # Tokens too risky as standalone LIKE patterns. We allow them via
+    # full-skill match (e.g. 'r programming') but never as bare '%r%'.
+    bad_short = {"c", "r", "go", "ai", "ml", "ui", "ux", "qa", "it"}
+    out: list[str] = []
+    for raw in skills:
+        if not raw:
+            continue
+        s = raw.strip().lower()
+        if len(s) < 3:
+            continue
+        if s in bad_short:
+            continue
+        # Drop trailing parenthetical alias like "Workflow Automation (n8n)"
+        # → use "workflow automation" + "n8n" separately. The alias is
+        # already its own row in candidate_skills (tool category).
+        s = _re.sub(r"\s*\(.*?\)\s*", "", s).strip()
+        if not s:
+            continue
+        out.append(f"%{s}%")
+    return list(set(out))
+
+
 def apply_user_filters(
     query,
     *,
     target_roles: list[str] | None,
-    blocked_sources: list[str] | None,
-    remote_preference: str | None,
+    skills: list[str] | None = None,
+    blocked_sources: list[str] | None = None,
+    remote_preference: str | None = None,
 ):
     """Apply the same filter chain the inbox uses to any Job-based query.
 
     The query MUST already join JobSource (left or otherwise) for the
     blocked_sources filter to compile.
+
+    A job is kept when EITHER its title matches one of the role keywords
+    (target_roles + role-family synonyms) OR its title matches one of the
+    user's skills/tools. So a 'Python Developer' lands in the inbox of an
+    AI Engineer who has Python as a skill, even though 'Python' isn't a
+    role keyword.
     """
     role_keywords = build_role_keywords(target_roles)
-    if role_keywords:
-        query = query.where(or_(*[func.lower(Job.title).like(kw) for kw in role_keywords]))
+    skill_keywords = _skill_keywords(skills)
+    match_keywords = list(set(role_keywords + skill_keywords))
+    if match_keywords:
+        query = query.where(or_(*[func.lower(Job.title).like(kw) for kw in match_keywords]))
 
     # Exclude product-management titles unless the user actually targets product.
     # Without this, an AI/ML user gets "Sr. PM, AI Platform" leaking in via the

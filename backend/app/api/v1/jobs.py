@@ -59,17 +59,33 @@ async def list_jobs(
     # always agree).
     from sqlalchemy import or_  # still used by role_type override below
     from app.services.jobs_filter import apply_user_filters
+    from app.models.candidate import CandidateSkill
     profile_result = await db.execute(
         select(
+            CandidateProfile.id,
             CandidateProfile.target_roles,
             CandidateProfile.blocked_sources,
             CandidateProfile.remote_preference,
         ).where(CandidateProfile.user_id == user_id)
     )
     profile_row = profile_result.first()
-    target_roles = profile_row[0] if profile_row else None
-    blocked_sources = profile_row[1] if profile_row else None
-    profile_remote_pref = profile_row[2] if profile_row else None
+    profile_id = profile_row[0] if profile_row else None
+    target_roles = profile_row[1] if profile_row else None
+    blocked_sources = profile_row[2] if profile_row else None
+    profile_remote_pref = profile_row[3] if profile_row else None
+
+    # Skills also feed the title filter, so a 'Python Developer' role
+    # surfaces for someone whose target_roles say AI Engineer but whose
+    # skills include Python.
+    user_skills: list[str] = []
+    if profile_id:
+        skills_result = await db.execute(
+            select(CandidateSkill.skill_name).where(
+                CandidateSkill.profile_id == profile_id,
+                CandidateSkill.category.in_(("technical", "tool")),
+            )
+        )
+        user_skills = [row[0] for row in skills_result.all() if row[0]]
 
     # role_type query param overrides the profile's target_roles.
     apply_target_roles = target_roles if not role_type else None
@@ -81,6 +97,7 @@ async def list_jobs(
     query = apply_user_filters(
         query,
         target_roles=apply_target_roles,
+        skills=user_skills if not role_type else None,
         blocked_sources=blocked_sources,
         remote_preference=effective_remote_pref,
     )
@@ -132,6 +149,7 @@ async def list_jobs(
     count_base = apply_user_filters(
         count_base,
         target_roles=apply_target_roles,
+        skills=user_skills if not role_type else None,
         blocked_sources=blocked_sources,
         remote_preference=effective_remote_pref,
     )

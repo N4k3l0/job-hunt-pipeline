@@ -23,15 +23,30 @@ async def get_overview(user_id: CurrentUserId, db: DbSession):
     # Get user's profile (same fields the inbox uses for filtering)
     profile_result = await db.execute(
         select(
+            CandidateProfile.id,
             CandidateProfile.target_roles,
             CandidateProfile.blocked_sources,
             CandidateProfile.remote_preference,
         ).where(CandidateProfile.user_id == user_id)
     )
     profile_row = profile_result.first()
-    target_roles = profile_row[0] if profile_row else None
-    blocked_sources = profile_row[1] if profile_row else None
-    remote_preference = profile_row[2] if profile_row else None
+    profile_id = profile_row[0] if profile_row else None
+    target_roles = profile_row[1] if profile_row else None
+    blocked_sources = profile_row[2] if profile_row else None
+    remote_preference = profile_row[3] if profile_row else None
+
+    # Skills feed the same title filter as the inbox so the dashboard's
+    # 'Discovered' count matches what the user actually sees.
+    from app.models.candidate import CandidateSkill
+    user_skills: list[str] = []
+    if profile_id:
+        skills_result = await db.execute(
+            select(CandidateSkill.skill_name).where(
+                CandidateSkill.profile_id == profile_id,
+                CandidateSkill.category.in_(("technical", "tool")),
+            )
+        )
+        user_skills = [row[0] for row in skills_result.all() if row[0]]
 
     # Jobs discovered — exact same filter chain the inbox applies, so the
     # number on the dashboard always matches what the user actually sees.
@@ -43,6 +58,7 @@ async def get_overview(user_id: CurrentUserId, db: DbSession):
     jobs_query = apply_user_filters(
         jobs_query,
         target_roles=target_roles,
+        skills=user_skills,
         blocked_sources=blocked_sources,
         remote_preference=remote_preference,
     )
