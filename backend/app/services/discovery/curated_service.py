@@ -227,12 +227,20 @@ _FETCHERS = {
 # ─── Public API ─────────────────────────────────────────────────────────────
 
 
+PER_COMPANY_CAP = 30  # cap most-recent jobs per company to bound dedup cost
+
+
 async def fetch_jobs(
     keywords: set[str] | None = None,
     limit: int = 500,
 ) -> list[dict]:
-    """Pull every active posting from every curated company, filter by
-    user keywords, return normalized for `_ingest_raw_jobs`."""
+    """Pull active postings from every curated company, filter by user
+    keywords, return normalized for `_ingest_raw_jobs`.
+
+    Per-company cap (PER_COMPANY_CAP) keeps the candidate pool bounded so
+    the downstream dedup-per-job DB queries don't blow the cron budget.
+    Most ATSes return jobs newest-first so we lose tail roles only.
+    """
     companies = _load_companies()
     if not companies:
         return []
@@ -246,10 +254,13 @@ async def fetch_jobs(
             return []
         async with sem:
             try:
-                return await fetcher(client, c)
+                jobs = await fetcher(client, c)
             except Exception as e:  # noqa: BLE001
                 logger.warning("Curated: %s (%s) failed: %s", c.get("name"), c.get("ats"), e)
                 return []
+            # Cap per-company AFTER fetch so we always take the most recent
+            # ones the ATS returned.
+            return jobs[:PER_COMPANY_CAP]
 
     headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
     async with httpx.AsyncClient(timeout=TIMEOUT, headers=headers) as client:

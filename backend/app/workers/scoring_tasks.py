@@ -129,7 +129,10 @@ async def _batch_score_async(user_id: str, rescore_all: bool = False):
             await db.commit()
             logger.info("Cleared old scores for user %s for re-scoring", user_id)
 
-        # Find unscored jobs (jobs without a score for this user)
+        # Find unscored jobs (jobs without a score for this user). Cap per
+        # call to keep cron-invoked scoring under budget; remaining unscored
+        # jobs get picked up on the next discovery tick or via /score-backlog.
+        # Newest-first so the user sees today's discoveries scored ASAP.
         scored_job_ids = select(JobScore.job_id).where(JobScore.user_id == user_id)
         result = await db.execute(
             select(Job)
@@ -137,8 +140,9 @@ async def _batch_score_async(user_id: str, rescore_all: bool = False):
                 Job.status.notin_(["duplicate", "raw", "dismissed"]),
                 Job.id.notin_(scored_job_ids),
             )
+            .order_by(Job.discovered_at.desc().nulls_last())
             .options(selectinload(Job.entities))
-            .limit(5000)
+            .limit(300)
         )
         jobs = result.scalars().all()
 
