@@ -348,6 +348,107 @@ async def cron_backfill_visa(authorization: str | None = Header(None)):
     return {"inspected": inspected, "updated": updated}
 
 
+@router.get("/debug-dailyremote")
+async def cron_debug_dailyremote(authorization: str | None = Header(None)):
+    """Trace DailyRemote step by step: did Cloudflare let us in, did
+    we extract job URLs, how many detail pages parsed, how many passed
+    each filter? Cron secret protected."""
+    _verify_cron(authorization)
+
+    import asyncio
+    import httpx
+    from app.services.discovery import dailyremote_service as dr
+    from app.services.discovery.eligibility import is_nigeria_friendly, matches_keywords
+    from app.workers.discovery_tasks import _collect_all_keywords
+
+    keywords = await _collect_all_keywords()
+    keyword_set = set(keywords) if keywords else None
+
+    headers = {
+        "User-Agent": dr.USER_AGENT,
+        "Accept": "text/html,application/xhtml+xml",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    per_category: list[dict] = []
+    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True, headers=headers) as client:
+        for path in dr.CATEGORY_PATHS:
+            entry: dict = {"category": path}
+            try:
+                listing = await client.get(f"{dr.BASE}{path}")
+                entry["listing_status"] = listing.status_code
+                entry["listing_size"] = len(listing.text or "")
+            except httpx.HTTPError as e:
+                entry["listing_error"] = f"{type(e).__name__}: {e}"
+                per_category.append(entry)
+                continue
+
+            urls = dr._extract_job_urls(listing.text)[: dr.PER_CATEGORY_LIMIT]
+            entry["urls_found"] = len(urls)
+            entry["sample_url"] = urls[0] if urls else None
+
+            # Try one detail page so we can see whether the JSON-LD parses
+            if urls:
+                try:
+                    r = await client.get(f"{dr.BASE}{urls[0]}")
+                    entry["detail_status"] = r.status_code
+                    entry["detail_size"] = len(r.text or "")
+                    posting = dr._parse_job_page(r.text, urls[0])
+                    entry["parsed"] = bool(posting)
+                    if posting:
+                        entry["sample_title"] = posting.get("title")
+                        entry["sample_company"] = posting.get("company")
+                        entry["sample_location"] = posting.get("location")
+                        entry["passed_keyword_filter"] = matches_keywords(
+                            f"{posting.get('title','')} {posting.get('raw_description','')}",
+                            keyword_set,
+                        )
+                        entry["passed_nigeria_filter"] = is_nigeria_friendly(
+                            candidate_required_location=posting.get("location"),
+                            description=posting.get("raw_description"),
+                        )
+                except httpx.HTTPError as e:
+                    entry["detail_error"] = f"{type(e).__name__}: {e}"
+
+            # Full pass: count how many of the 25 URLs survive each filter
+            if urls:
+                kept_keyword = 0
+                kept_nigeria = 0
+                kept_both = 0
+                detail_results = await asyncio.gather(*(
+                    client.get(f"{dr.BASE}{u}") for u in urls
+                ), return_exceptions=True)
+                for u, resp in zip(urls, detail_results):
+                    if isinstance(resp, Exception):
+                        continue
+                    posting = dr._parse_job_page(resp.text, u)
+                    if not posting:
+                        continue
+                    title = posting.get("title", "")
+                    desc = posting.get("raw_description", "")
+                    loc = posting.get("location", "")
+                    pk = matches_keywords(f"{title} {desc}", keyword_set)
+                    pn = is_nigeria_friendly(
+                        candidate_required_location=loc, description=desc,
+                    )
+                    if pk: kept_keyword += 1
+                    if pn is not False: kept_nigeria += 1
+                    if pk and pn is not False: kept_both += 1
+                entry["full_pass"] = {
+                    "fetched": len(detail_results),
+                    "passed_keyword_filter": kept_keyword,
+                    "passed_nigeria_filter": kept_nigeria,
+                    "passed_both": kept_both,
+                }
+
+            per_category.append(entry)
+
+    return {
+        "user_agent": dr.USER_AGENT[:60] + "...",
+        "keywords_in_use": len(keywords),
+        "per_category": per_category,
+    }
+
+
 @router.get("/discover-slow")
 async def cron_discover_slow(authorization: str | None = Header(None)):
     """Run the heavier scraper-based sources on their own cron tick.
