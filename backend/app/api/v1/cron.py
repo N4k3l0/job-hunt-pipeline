@@ -356,6 +356,117 @@ async def cron_backfill_visa(authorization: str | None = Header(None)):
     return {"inspected": inspected, "updated": updated}
 
 
+@router.get("/rescue-dead-slugs")
+async def cron_rescue_dead_slugs(authorization: str | None = Header(None)):
+    """For each entry in curated_companies.json, probe every ATS with the
+    declared slug AND a handful of derived slug variants. Reports which
+    (ATS, slug) pairs actually return jobs — used to fix wrong guesses
+    in the JSON without manually testing each one.
+
+    This is intentionally slow (it makes ~9 probes per company). Don't
+    call it from the daily cron — it's a one-shot diagnostic the human
+    runs when curating the company list.
+    """
+    _verify_cron(authorization)
+
+    import asyncio
+    import json
+    from pathlib import Path
+    import re
+    import httpx
+
+    json_path = Path(__file__).parents[3] / "app" / "services" / "discovery" / "curated_companies.json"
+    data = json.loads(json_path.read_text())
+    # Probe entries we haven't verified yet, not the live list. The live
+    # list is the cron's source of truth and shouldn't be churned.
+    companies = data.get("to_probe") or []
+
+    def slug_variants(name: str, given: str) -> list[str]:
+        """Generate 3-4 candidate slugs from a company name + the
+        existing slug we tried. Strip common corporate suffixes, try
+        lowercase-no-punctuation, keep it tight."""
+        out: list[str] = [given]
+        n = (name or "").strip().lower()
+        n = re.sub(r"\b(inc|llc|ltd|gmbh|co|corp)\.?\b", "", n)
+        n = re.sub(r"[^a-z0-9]+", "-", n).strip("-")
+        if n and n not in out:
+            out.append(n)
+        squashed = n.replace("-", "")
+        if squashed and squashed not in out:
+            out.append(squashed)
+        # First-word-only as a fallback (e.g. "y combinator" → "y")
+        first = (n.split("-") or [""])[0]
+        if first and len(first) >= 3 and first not in out:
+            out.append(first)
+        return out
+
+    async def probe_one(client: httpx.AsyncClient, ats: str, slug: str) -> int:
+        """Return job count if the (ats, slug) is live, else 0."""
+        try:
+            if ats == "greenhouse":
+                r = await client.get(f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs")
+                if r.status_code != 200:
+                    return 0
+                return len((r.json().get("jobs") or []))
+            if ats == "lever":
+                r = await client.get(
+                    f"https://api.lever.co/v0/postings/{slug}",
+                    params={"mode": "json"},
+                )
+                if r.status_code != 200:
+                    return 0
+                d = r.json()
+                return len(d) if isinstance(d, list) else 0
+            if ats == "ashby":
+                r = await client.get(f"https://api.ashbyhq.com/posting-api/job-board/{slug}")
+                if r.status_code != 200:
+                    return 0
+                return len((r.json().get("jobs") or []))
+        except (httpx.HTTPError, ValueError):
+            return 0
+        return 0
+
+    sem = asyncio.Semaphore(16)
+    headers = {"User-Agent": "JobHuntPipeline/1.0 (rescue)", "Accept": "application/json"}
+
+    async def rescue(client: httpx.AsyncClient, c: dict) -> dict:
+        """Try every (ATS, variant) pair; return the best hit (highest
+        job count) or None."""
+        name = c.get("name") or ""
+        given = c.get("slug") or ""
+        original_ats = c.get("ats") or ""
+
+        async with sem:
+            best: dict | None = None
+            for variant in slug_variants(name, given):
+                for ats in ("greenhouse", "lever", "ashby"):
+                    n = await probe_one(client, ats, variant)
+                    if n > 0:
+                        if best is None or n > best["jobs"]:
+                            best = {"ats": ats, "slug": variant, "jobs": n}
+            return {
+                "name": name,
+                "original": {"ats": original_ats, "slug": given},
+                "best_hit": best,  # None if nothing worked
+            }
+
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(connect=3.0, read=5.0, write=3.0, pool=3.0),
+        headers=headers,
+    ) as client:
+        rows = await asyncio.gather(*(rescue(client, c) for c in companies))
+
+    rescued = [r for r in rows if r["best_hit"]]
+    truly_dead = [r for r in rows if not r["best_hit"]]
+    return {
+        "total": len(rows),
+        "rescued": len(rescued),
+        "truly_dead": len(truly_dead),
+        "rescued_companies": rescued,
+        "truly_dead_companies": [r["name"] for r in truly_dead],
+    }
+
+
 @router.get("/debug-curated")
 async def cron_debug_curated(authorization: str | None = Header(None)):
     """Per-company health probe: which slugs in curated_companies.json are
