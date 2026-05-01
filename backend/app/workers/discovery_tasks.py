@@ -122,27 +122,39 @@ async def _ingest_raw_jobs(jobs: list[dict]):
         await db.commit()
         logger.info("Ingestion complete: %d stored, %d duplicates skipped", stored, skipped)
 
-    # Auto-score new jobs for all users
+    # Auto-score new jobs for all users.
+    #
+    # The codebase shipped with `batch_score_for_user.delay(uid)` (Celery
+    # broker call), but production runs Vercel-only — Celery + Redis are
+    # gone. Result was: jobs were ingested, no scores were ever written,
+    # the inbox sorted by score-DESC and buried every new job at the
+    # bottom. The user saw "last sweep just now" but only old scored jobs
+    # at the top of the list.
+    #
+    # Fix: invoke the underlying async coroutine directly so scoring runs
+    # inline in the same cron request. Wrapped in wait_for so a runaway
+    # scoring loop can't blow the cron's per-source budget.
     if stored > 0:
         try:
+            import asyncio
+            from app.workers.scoring_tasks import _batch_score_async
             from app.models.user import User
             async with create_worker_session()() as db:
-                users = await db.execute(select(User.id))
-                user_ids = [str(row[0]) for row in users.all()]
+                users_result = await db.execute(select(User.id))
+                user_ids = [str(row[0]) for row in users_result.all()]
             for uid in user_ids:
-                from app.workers.scoring_tasks import batch_score_for_user
-                batch_score_for_user.delay(uid)
-                logger.info("Queued scoring for user %s", uid)
+                try:
+                    await asyncio.wait_for(
+                        _batch_score_async(uid, rescore_all=False),
+                        timeout=20,
+                    )
+                    logger.info("Inline-scored new jobs for user %s", uid)
+                except asyncio.TimeoutError:
+                    logger.error("Scoring for user %s timed out at 20s", uid)
+                except Exception as e:
+                    logger.error("Scoring for user %s failed: %s", uid, e)
         except Exception as e:
-            logger.error("Failed to queue auto-scoring: %s", e)
-
-        # Queue scoring for all active users
-        if stored > 0:
-            result = await db.execute(select(User))
-            users = result.scalars().all()
-            for user in users:
-                from app.workers.scoring_tasks import batch_score_for_user
-                batch_score_for_user.delay(str(user.id))
+            logger.error("Failed to run auto-scoring: %s", e)
 
 
 # ── Apify ────────────────────────────────────────────────────────────────────

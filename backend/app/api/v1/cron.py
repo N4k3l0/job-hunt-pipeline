@@ -113,6 +113,43 @@ async def cron_discover_remote(authorization: str | None = Header(None)):
     return {"status": "complete", "results": results}
 
 
+@router.get("/score-backlog")
+async def cron_score_backlog(authorization: str | None = Header(None)):
+    """Score every unscored job for every user. One-shot recovery for the
+    period when Celery .delay() calls were silently failing in production
+    (scoring never ran, new jobs sat unscored at the bottom of the inbox).
+
+    Safe to call repeatedly — the batch scorer skips jobs that already
+    have a JobScore row for that user."""
+    _verify_cron(authorization)
+
+    import asyncio
+    from app.workers.scoring_tasks import _batch_score_async
+    from app.workers.discovery_tasks import create_worker_session
+    from app.models.user import User
+    from sqlalchemy import select
+
+    async with create_worker_session()() as db:
+        users_result = await db.execute(select(User.id))
+        user_ids = [str(row[0]) for row in users_result.all()]
+
+    results: dict[str, str] = {}
+    for uid in user_ids:
+        import time
+        started = time.monotonic()
+        try:
+            await asyncio.wait_for(
+                _batch_score_async(uid, rescore_all=False),
+                timeout=45,
+            )
+            results[uid] = f"ok ({time.monotonic() - started:.1f}s)"
+        except asyncio.TimeoutError:
+            results[uid] = f"timeout after {time.monotonic() - started:.0f}s"
+        except Exception as e:  # noqa: BLE001
+            results[uid] = f"error: {type(e).__name__}: {e}"
+    return {"status": "complete", "results": results}
+
+
 @router.get("/discover-slow")
 async def cron_discover_slow(authorization: str | None = Header(None)):
     """Run the heavier scraper-based sources on their own cron tick.
