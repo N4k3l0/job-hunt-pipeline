@@ -150,6 +150,87 @@ async def cron_score_backlog(authorization: str | None = Header(None)):
     return {"status": "complete", "results": results}
 
 
+@router.get("/stats")
+async def cron_stats(authorization: str | None = Header(None)):
+    """Quick visibility into what's actually in the DB. Used to answer
+    'did the new jobs land?' without screen-sharing pgAdmin."""
+    _verify_cron(authorization)
+
+    from sqlalchemy import select, func
+    from app.workers.discovery_tasks import create_worker_session
+    from app.models.job import Job, JobSource
+    from app.models.scoring import JobScore
+    from app.models.user import User
+
+    async with create_worker_session()() as db:
+        # Counts by source × age bucket
+        rows = (await db.execute(select(
+            JobSource.name,
+            func.count(Job.id).filter(Job.discovered_at > func.now() - func.cast("6 hours", Job.discovered_at.type)).label("h6"),
+        ).join(Job, Job.source_id == JobSource.id, isouter=True).group_by(JobSource.name))).all()
+
+        # Simpler raw counts since the Postgres interval cast above is awkward.
+        sql_total = await db.execute(select(func.count(Job.id)).where(Job.status.notin_(["duplicate", "raw"])))
+        total = sql_total.scalar() or 0
+
+        sql_recent = await db.execute(
+            select(func.count(Job.id)).where(
+                Job.status.notin_(["duplicate", "raw"]),
+                Job.discovered_at > func.now() - func.make_interval(0, 0, 0, 0, 0, 0, 21600),  # 6h
+            )
+        )
+        recent_6h = sql_recent.scalar() or 0
+
+        sql_24h = await db.execute(
+            select(func.count(Job.id)).where(
+                Job.status.notin_(["duplicate", "raw"]),
+                Job.discovered_at > func.now() - func.make_interval(0, 0, 0, 1),  # 1d
+            )
+        )
+        recent_24h = sql_24h.scalar() or 0
+
+        # By source × 6h
+        src_rows = (await db.execute(
+            select(JobSource.name, func.count(Job.id))
+            .select_from(Job).join(JobSource, JobSource.id == Job.source_id, isouter=True)
+            .where(
+                Job.status.notin_(["duplicate", "raw"]),
+                Job.discovered_at > func.now() - func.make_interval(0, 0, 0, 0, 0, 0, 21600),
+            )
+            .group_by(JobSource.name)
+        )).all()
+
+        # Scoring coverage on recent jobs
+        scored_rows = await db.execute(
+            select(func.count(JobScore.id))
+            .select_from(Job).join(JobScore, JobScore.job_id == Job.id, isouter=True)
+            .where(
+                Job.status.notin_(["duplicate", "raw"]),
+                Job.discovered_at > func.now() - func.make_interval(0, 0, 0, 0, 0, 0, 21600),
+            )
+        )
+        scored_recent = scored_rows.scalar() or 0
+
+        # Latest job timestamp
+        latest_ts = (await db.execute(select(func.max(Job.discovered_at)))).scalar()
+
+        # Per-user job count after-filter — gives what the inbox would actually show
+        users_result = await db.execute(select(User.id, User.email))
+        users = list(users_result.all())
+
+    return {
+        "totals": {
+            "all_visible": total,
+            "discovered_last_6h": recent_6h,
+            "discovered_last_24h": recent_24h,
+            "scored_in_last_6h": scored_recent,
+            "latest_discovered_at": latest_ts.isoformat() if latest_ts else None,
+        },
+        "by_source_last_6h": {(name or "manual"): count for name, count in src_rows},
+        "user_count": len(users),
+    }
+
+
 @router.get("/discover-slow")
 async def cron_discover_slow(authorization: str | None = Header(None)):
     """Run the heavier scraper-based sources on their own cron tick.
