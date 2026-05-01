@@ -351,6 +351,50 @@ async def cron_backfill_visa(authorization: str | None = Header(None)):
     return {"inspected": inspected, "updated": updated}
 
 
+@router.get("/debug-firecrawl")
+async def cron_debug_firecrawl(authorization: str | None = Header(None)):
+    """One Firecrawl scrape against DailyRemote, with the raw response so
+    we can see WHY it's failing. The runner reports 'ok' even when every
+    underlying call returns empty string, so we have to peek directly."""
+    _verify_cron(authorization)
+
+    import httpx
+    from app.core.config import get_settings as _get_settings
+    s = _get_settings()
+    target = "https://dailyremote.com/remote-product-jobs"
+    out: dict = {
+        "firecrawl_key_present": bool(s.firecrawl_api_key),
+        "firecrawl_key_len": len(s.firecrawl_api_key or ""),
+        "target": target,
+    }
+    if not s.firecrawl_api_key:
+        out["error"] = "FIRECRAWL_API_KEY env var is empty"
+        return out
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            r = await client.post(
+                "https://api.firecrawl.dev/v1/scrape",
+                headers={
+                    "Authorization": f"Bearer {s.firecrawl_api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={"url": target, "formats": ["rawHtml"]},
+            )
+            out["http_status"] = r.status_code
+            out["response_preview"] = (r.text or "")[:600]
+            try:
+                data = r.json()
+                raw = (data.get("data") or {}).get("rawHtml", "") or ""
+                out["raw_html_size"] = len(raw)
+                out["raw_html_head"] = raw[:300]
+            except ValueError:
+                out["json_parse_error"] = True
+        except httpx.HTTPError as e:
+            out["exception"] = f"{type(e).__name__}: {e}"
+    return out
+
+
 @router.get("/debug-dailyremote")
 async def cron_debug_dailyremote(authorization: str | None = Header(None)):
     """Trace DailyRemote step by step: did Cloudflare let us in, did
