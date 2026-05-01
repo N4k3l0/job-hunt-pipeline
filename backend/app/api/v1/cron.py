@@ -72,15 +72,19 @@ async def _run_all_concurrent(runners: list[tuple[str, callable]]) -> dict[str, 
 
 @router.get("/discover-fast")
 async def cron_discover_fast(authorization: str | None = Header(None)):
-    """Adzuna + Arbeitnow run concurrently. Each is capped at the per-source
-    budget so neither can starve the other — and Adzuna itself parallelises
-    its country fan-out internally."""
+    """Currently runs Arbeitnow only.
+
+    Adzuna is temporarily disabled — their API has been returning 400s
+    even on `api.adzuna.com/` itself (their own service is unhealthy as
+    of May 2026). The runner code is still intact in
+    `_run_adzuna_async`; flip it back on once Adzuna is back.
+    """
     _verify_cron(authorization)
 
-    from app.workers.discovery_tasks import _run_adzuna_async, _run_arbeitnow_async
+    from app.workers.discovery_tasks import _run_arbeitnow_async
 
     results = await _run_all_concurrent([
-        ("adzuna", _run_adzuna_async),
+        # ("adzuna", _run_adzuna_async),  # disabled: upstream returning 400s
         ("arbeitnow", _run_arbeitnow_async),
     ])
     return {"status": "complete", "results": results}
