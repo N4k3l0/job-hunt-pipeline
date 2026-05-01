@@ -33,10 +33,7 @@ import logging
 import re
 from html import unescape
 
-from app.services.discovery.eligibility import (
-    is_nigeria_friendly,
-    matches_keywords,
-)
+from app.services.discovery.eligibility import matches_keywords
 from app.services.discovery.firecrawl_service import scrape_html
 
 logger = logging.getLogger(__name__)
@@ -264,17 +261,19 @@ def _normalize_employment_type(raw) -> str | None:
     return mapping.get(raw.upper(), raw.lower())
 
 
-def _passes_filters(posting: dict, keywords: Iterable[str] | None) -> bool:
-    """User-keyword + Nigeria-eligibility gate."""
+def _passes_filters(posting: dict, keywords: set[str] | None) -> bool:
+    """Keyword gate only.
+
+    DailyRemote markets itself as a global remote board. Most postings tag
+    `applicantLocationRequirements` as 'United States' but accept hires
+    anywhere — the tag reflects where the company is, not where the
+    candidate must be. With Nigeria-eligibility on, ~12 % of fetched DR
+    jobs survived; with it off the user sees more US-tagged-but-globally-
+    open roles and can dismiss any that turn out to be US-only on click.
+
+    The strict eligibility gate stays on for Remotive / Himalayas /
+    WeWorkRemotely where the structured location field is more reliable.
+    """
     title = posting.get("title") or ""
     desc = posting.get("raw_description") or ""
-    location = posting.get("location") or ""
-    if not matches_keywords(f"{title} {desc}", keywords):
-        return False
-    # `location` doubles as the candidate-required-location field for
-    # remote-only boards. Pass it through the same heuristic as Remotive.
-    if is_nigeria_friendly(
-        candidate_required_location=location, description=desc
-    ) is False:
-        return False
-    return True
+    return matches_keywords(f"{title} {desc}", keywords)
