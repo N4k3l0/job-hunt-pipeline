@@ -68,6 +68,34 @@ AI_INDUSTRY_KEYWORDS = {
 }
 
 
+import re as _re
+
+
+def _expand_profile_skills(profile_skills: list[str]) -> set[str]:
+    """Normalise a user's skill list for substring matching against job text.
+
+    Splits parenthetical aliases ('Workflow Automation (n8n)' →
+    {'workflow automation', 'n8n'}). Drops 1-2 char tokens and well-known
+    false-friends ('go', 'r', 'c', 'ai', 'ml') that would match unrelated
+    titles like 'Go-to-Market Manager'.
+    """
+    bad_short = {"c", "r", "go", "ai", "ml", "ui", "ux", "qa", "it"}
+    out: set[str] = set()
+    for raw in profile_skills or []:
+        if not raw:
+            continue
+        s = raw.strip().lower()
+        # Pull anything inside parens out as its own skill
+        for alias in _re.findall(r"\(([^)]+)\)", s):
+            alias = alias.strip().lower()
+            if len(alias) >= 2 and alias not in bad_short:
+                out.add(alias)
+        s = _re.sub(r"\s*\(.*?\)\s*", "", s).strip()
+        if len(s) >= 3 and s not in bad_short:
+            out.add(s)
+    return out
+
+
 def score_ai_automation_path(
     title: str,
     job_skills: list[str],
@@ -76,10 +104,11 @@ def score_ai_automation_path(
     job_seniority: str | None,
     profile_skills: list[str],
     profile_work_history: list[dict],
+    job_description: str = "",
 ) -> dict:
     """Score a job on the AI Automation path."""
     title_lower = title.lower()
-    reasoning = {}
+    reasoning: dict = {}
 
     # ── Title Match (0-20) ────────────────────────────────────────────────
     title_score = 0.0
@@ -93,41 +122,72 @@ def score_ai_automation_path(
     reasoning["title_match"] = matched_title or "no AI title match"
 
     # ── Skill Overlap (0-25) ──────────────────────────────────────────────
-    all_job_skills = set()
-    for s in job_skills + job_requirements + job_keywords:
-        all_job_skills.add(s.lower().strip())
+    # Old logic gated on a hardcoded AI_SKILLS reference set, so user
+    # skills that weren't in it (VAPI, Airtable, GoHighLevel, ...) didn't
+    # contribute. New logic: count how many of the USER'S skills actually
+    # appear anywhere in the job text — title, description, source-tagged
+    # skills, requirements, keywords. Their list IS the reference.
+    expanded_user_skills = _expand_profile_skills(profile_skills)
+    for entry in profile_work_history or []:
+        for s in entry.get("skills", []) or []:
+            cleaned = (s or "").strip().lower()
+            if len(cleaned) >= 3:
+                expanded_user_skills.add(cleaned)
 
-    profile_skills_lower = {s.lower().strip() for s in profile_skills}
-    for entry in profile_work_history:
-        for s in entry.get("skills", []):
-            profile_skills_lower.add(s.lower().strip())
+    haystack = " ".join([
+        title_lower,
+        (job_description or "").lower(),
+        " ".join(s for s in (job_skills or []) if s).lower(),
+        " ".join(s for s in (job_requirements or []) if s).lower(),
+        " ".join(s for s in (job_keywords or []) if s).lower(),
+    ])
 
-    ai_relevant = all_job_skills & AI_SKILLS
-    matched_skills = ai_relevant & profile_skills_lower
+    matched_skills = {sk for sk in expanded_user_skills if sk in haystack}
+    match_count = len(matched_skills)
 
-    if ai_relevant:
-        skill_ratio = len(matched_skills) / len(ai_relevant)
+    # Score curve: every match counts, with diminishing returns past 6.
+    #   0  → 0
+    #   1  → 6
+    #   2  → 11
+    #   3  → 15
+    #   4  → 18
+    #   5  → 21
+    #   6+ → 25
+    if match_count == 0:
+        skill_score = 0.0
+    elif match_count == 1:
+        skill_score = 6.0
+    elif match_count == 2:
+        skill_score = 11.0
+    elif match_count == 3:
+        skill_score = 15.0
+    elif match_count == 4:
+        skill_score = 18.0
+    elif match_count == 5:
+        skill_score = 21.0
     else:
-        general_overlap = all_job_skills & profile_skills_lower
-        skill_ratio = min(len(general_overlap) / max(len(all_job_skills), 1), 1.0) if all_job_skills else 0.3
+        skill_score = 25.0
 
-    skill_score = round(skill_ratio * 25, 1)
-    reasoning["ai_skills_matched"] = list(matched_skills)[:10]
-    reasoning["ai_skills_missing"] = list(ai_relevant - matched_skills)[:10]
+    reasoning["user_skills_matched"] = sorted(matched_skills)[:15]
+    reasoning["user_skills_total"] = len(expanded_user_skills)
 
     # ── Seniority Match (0-15) ────────────────────────────────────────────
     seniority_score = _score_seniority(job_seniority, title_lower, profile_work_history)
 
     # ── Industry/Domain (0-10) ────────────────────────────────────────────
-    industry_score = 0.0
-    searchable = " ".join(all_job_skills).lower() + " " + title_lower
-    ai_matches = sum(1 for kw in AI_INDUSTRY_KEYWORDS if kw in searchable)
+    # Industry keywords now also include the user's skills — so a job
+    # whose JD lists "n8n + Zapier + RAG" gets credit even if the title
+    # is something generic like 'Senior Engineer'.
+    industry_searchable = haystack
+    ai_matches = sum(1 for kw in AI_INDUSTRY_KEYWORDS if kw in industry_searchable)
     if ai_matches >= 3:
         industry_score = 10.0
     elif ai_matches >= 2:
         industry_score = 7.0
     elif ai_matches >= 1:
         industry_score = 4.0
+    else:
+        industry_score = 0.0
 
     return {
         "title_score": title_score,

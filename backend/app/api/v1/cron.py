@@ -114,13 +114,17 @@ async def cron_discover_remote(authorization: str | None = Header(None)):
 
 
 @router.get("/score-backlog")
-async def cron_score_backlog(authorization: str | None = Header(None)):
-    """Score every unscored job for every user. One-shot recovery for the
-    period when Celery .delay() calls were silently failing in production
-    (scoring never ran, new jobs sat unscored at the bottom of the inbox).
+async def cron_score_backlog(
+    authorization: str | None = Header(None),
+    rescore_all: bool = False,
+):
+    """Score every unscored job for every user.
 
-    Safe to call repeatedly — the batch scorer skips jobs that already
-    have a JobScore row for that user."""
+    Pass `?rescore_all=true` to wipe + recompute every score for every
+    user — needed when scoring weights or the skill-overlap algorithm
+    change so the inbox sort reflects the new model. Without that flag,
+    the batch scorer skips jobs that already have a JobScore row.
+    """
     _verify_cron(authorization)
 
     import asyncio
@@ -139,7 +143,7 @@ async def cron_score_backlog(authorization: str | None = Header(None)):
         started = time.monotonic()
         try:
             await asyncio.wait_for(
-                _batch_score_async(uid, rescore_all=False),
+                _batch_score_async(uid, rescore_all=rescore_all),
                 timeout=45,
             )
             results[uid] = f"ok ({time.monotonic() - started:.1f}s)"
@@ -147,7 +151,7 @@ async def cron_score_backlog(authorization: str | None = Header(None)):
             results[uid] = f"timeout after {time.monotonic() - started:.0f}s"
         except Exception as e:  # noqa: BLE001
             results[uid] = f"error: {type(e).__name__}: {e}"
-    return {"status": "complete", "results": results}
+    return {"status": "complete", "results": results, "rescore_all": rescore_all}
 
 
 @router.get("/stats")

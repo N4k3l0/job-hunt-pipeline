@@ -55,7 +55,9 @@ def compute_job_score(
         profile_work_history=profile.get("work_history", []),
     )
 
-    # Run AI Automation scoring path
+    # Run AI Automation scoring path. Pass the raw description so the
+    # skill-overlap bucket can match user skills mentioned in the JD body
+    # even when the source's tag list is sparse.
     ai_scores = score_ai_automation_path(
         title=job_data.get("title", ""),
         job_skills=job_entities.get("skills", []),
@@ -64,6 +66,7 @@ def compute_job_score(
         job_seniority=job_data.get("seniority"),
         profile_skills=[s.get("skill_name", "") for s in profile.get("skills", [])],
         profile_work_history=profile.get("work_history", []),
+        job_description=job_data.get("raw_description", "") or "",
     )
 
     # Compute totals for each path

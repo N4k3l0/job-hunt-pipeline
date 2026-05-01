@@ -58,6 +58,7 @@ async def _score_job_async(job_id: str, user_id: str):
             "salary_min": job.salary_min,
             "salary_max": job.salary_max,
             "seniority": job.seniority,
+            "raw_description": job.raw_description or "",
         }
 
         job_entities = {}
@@ -157,6 +158,10 @@ async def _batch_score_async(user_id: str, rescore_all: bool = False):
                 "salary_min": job.salary_min,
                 "salary_max": job.salary_max,
                 "seniority": job.seniority,
+                # Skill scoring scans the description for user-skill mentions
+                # — sources with sparse tag lists (DailyRemote, Arbeitnow)
+                # don't surface skills any other way.
+                "raw_description": job.raw_description or "",
             }
 
             job_entities = {}
