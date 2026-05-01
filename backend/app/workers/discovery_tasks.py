@@ -245,38 +245,34 @@ def run_adzuna_discovery():
 
 
 async def _run_adzuna_async():
-    """Adzuna runs N×M API calls (N keywords, M countries). To stay under the
-    60s Vercel function limit we:
-      - Use target_roles ONLY, not the full skills list. Each keyword is a
-        separate API query, and Adzuna already does full-text matching on
-        the role title. Adding 20 skills would 5× the API call count for
-        marginal benefit.
-      - Run all countries concurrently with asyncio.gather. The total wall
-        time becomes ~max(country_time) instead of sum(country_times).
-      - Ingest once at the end so we don't fight the DB connection pool.
+    """Adzuna's free tier rate-limits aggressively (~25 req/min). With
+    8 countries × N keywords × concurrent fan-out we'd hit that limit
+    instantly and start eating timeouts.
+
+    Constraints we enforce here:
+      - Fixed set of 3 broad keywords (matches what aggregator full-text
+        search actually rewards). Per-user filtering happens at the
+        scoring/inbox layer, not by fanning out the discovery query.
+      - Concurrent country fan-out throttled with a semaphore to 3 at
+        a time → at most 9 in-flight Adzuna calls. Stays inside their
+        rate limit, total wall time roughly ceil(8/3) × per_country.
     """
     import asyncio
     from app.services.discovery.adzuna_service import fetch_jobs, ADZUNA_COUNTRIES
-    from app.models.candidate import CandidateProfile
 
-    # Target roles only (NOT _collect_all_keywords — that includes skills,
-    # which would explode Adzuna's call count past the 60s limit).
-    async with create_worker_session()() as db:
-        result = await db.execute(select(CandidateProfile.target_roles))
-        roles: set[str] = set()
-        for (target_roles,) in result:
-            for role in (target_roles or []):
-                cleaned = role.strip().lower()
-                if cleaned:
-                    roles.add(cleaned)
-    keywords = list(roles) or None  # None lets adzuna_service fall back to its defaults
+    # Fixed keyword set — broad enough to surface roles for both AI and PM
+    # users. Skills/role-specific filtering is applied later in the pipeline,
+    # not at the Adzuna query layer.
+    ADZUNA_KEYWORDS = ["product manager", "ai engineer", "automation"]
+    sem = asyncio.Semaphore(3)
 
     async def run_country(iso: str, code: str) -> list[dict]:
-        try:
-            return await fetch_jobs(country_code=code, keywords=keywords)
-        except Exception as e:
-            logger.error("Adzuna discovery failed for %s: %s", iso, e)
-            return []
+        async with sem:
+            try:
+                return await fetch_jobs(country_code=code, keywords=ADZUNA_KEYWORDS)
+            except Exception as e:
+                logger.error("Adzuna discovery failed for %s: %s", iso, e)
+                return []
 
     batches = await asyncio.gather(*[
         run_country(iso, code) for iso, code in ADZUNA_COUNTRIES.items()
