@@ -72,20 +72,20 @@ async def _run_all_concurrent(runners: list[tuple[str, callable]]) -> dict[str, 
 
 @router.get("/discover-fast")
 async def cron_discover_fast(authorization: str | None = Header(None)):
-    """Currently runs Arbeitnow only.
+    """Curated companies (highest-signal) + Arbeitnow.
 
     Adzuna is temporarily disabled — their API has been returning 400s
-    even on `api.adzuna.com/` itself (their own service is unhealthy as
-    of May 2026). The runner code is still intact in
+    even on `api.adzuna.com/` itself. The runner code is still intact in
     `_run_adzuna_async`; flip it back on once Adzuna is back.
     """
     _verify_cron(authorization)
 
-    from app.workers.discovery_tasks import _run_arbeitnow_async
+    from app.workers.discovery_tasks import _run_arbeitnow_async, _run_curated_async
 
     results = await _run_all_concurrent([
-        # ("adzuna", _run_adzuna_async),  # disabled: upstream returning 400s
+        ("curated", _run_curated_async),
         ("arbeitnow", _run_arbeitnow_async),
+        # ("adzuna", _run_adzuna_async),  # disabled: upstream returning 400s
     ])
     return {"status": "complete", "results": results}
 
@@ -349,6 +349,29 @@ async def cron_backfill_visa(authorization: str | None = Header(None)):
             updated += 1
         await db.commit()
     return {"inspected": inspected, "updated": updated}
+
+
+@router.get("/debug-curated")
+async def cron_debug_curated(authorization: str | None = Header(None)):
+    """Per-company health probe: which slugs in curated_companies.json are
+    live, how many jobs each returned. Used to prune dead slugs and add
+    new ones intentionally."""
+    _verify_cron(authorization)
+
+    from app.services.discovery.curated_service import probe_companies
+    rows = await probe_companies()
+    live = [r for r in rows if r.get("jobs_returned", 0) > 0]
+    dead = [r for r in rows if "error" in r or r.get("jobs_returned") == 0]
+    summary = {
+        "total": len(rows),
+        "live": len(live),
+        "dead": len(dead),
+        "total_jobs": sum(r.get("jobs_returned", 0) for r in live),
+    }
+    # Sort: live first by job count desc, then dead alphabetically.
+    live.sort(key=lambda r: r.get("jobs_returned", 0), reverse=True)
+    dead.sort(key=lambda r: (r.get("name") or "").lower())
+    return {"summary": summary, "live": live, "dead": dead}
 
 
 @router.get("/debug-firecrawl")

@@ -468,6 +468,25 @@ async def _run_crossover_async():
         logger.error("Crossover discovery failed: %s", e)
 
 
+# ── Curated companies (Greenhouse / Lever / Ashby direct) ───────────────────
+
+
+async def _run_curated_async():
+    """Highest-signal source: poll a hand-picked list of remote-friendly
+    companies on free public ATSes. Apply URLs are clean by construction
+    (boards.greenhouse.io / jobs.lever.co / jobs.ashbyhq.com), so
+    swipe-to-apply works end-to-end without redirect resolution."""
+    from app.services.discovery.curated_service import fetch_jobs
+
+    keywords = await _collect_all_keywords()
+    try:
+        jobs = await fetch_jobs(keywords=set(keywords) if keywords else None)
+        if jobs:
+            await _ingest_raw_jobs(jobs)
+    except Exception as e:
+        logger.error("Curated discovery failed: %s", e)
+
+
 # ── DailyRemote (Cloudflare-gated remote board, ld+json scraping) ────────────
 
 
