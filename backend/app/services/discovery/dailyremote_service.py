@@ -56,10 +56,15 @@ CATEGORY_PATHS: tuple[str, ...] = (
 PER_CATEGORY_LIMIT = 8
 CONCURRENCY = 4  # parallel Firecrawl calls
 
-# Anchor regex: matches /remote-job/<slug> hrefs in the listing HTML. The
-# trailing ID lets us dedupe duplicates that the page renders for accessibility
-# (one card has both a thumbnail link and a title link to the same job).
-_JOB_LINK_RE = re.compile(r'href="(/remote-job/[a-z0-9\-]+)"', re.I)
+# Anchor regex: matches /remote-job/<slug> in the listing HTML, whether
+# the href is relative ('/remote-job/x') OR absolute (which is what
+# Firecrawl returns, e.g. 'https://dailyremote.com/remote-job/x'). The
+# capture group always yields just the path so downstream code stays
+# host-agnostic. Trailing ID dedups the dual-link cards.
+_JOB_LINK_RE = re.compile(
+    r'(?:https?://(?:www\.)?dailyremote\.com)?(/remote-job/[a-z0-9\-]+)',
+    re.I,
+)
 _LDJSON_RE = re.compile(
     r'<script[^>]*type="application/ld\+json"[^>]*>(.*?)</script>',
     re.DOTALL,
