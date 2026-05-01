@@ -160,11 +160,11 @@ async def cron_stats(authorization: str | None = Header(None)):
     _verify_cron(authorization)
 
     from sqlalchemy import select, func, text
-    from app.workers.discovery_tasks import create_worker_session
+    from app.workers.discovery_tasks import create_worker_session, _collect_all_keywords
     from app.models.job import Job
     from app.models.scoring import JobScore
     from app.models.user import User
-    from app.models.candidate import CandidateProfile
+    from app.models.candidate import CandidateProfile, CandidateSkill
 
     async with create_worker_session()() as db:
         # Visible jobs total
@@ -204,17 +204,44 @@ async def cron_stats(authorization: str | None = Header(None)):
         # so the caller can spot-check whether the inbox should be showing
         # them or not.
         users_result = await db.execute(
-            select(User.id, User.email, CandidateProfile.target_roles,
-                   CandidateProfile.blocked_sources)
+            select(User.id, User.email,
+                   CandidateProfile.id.label("profile_id"),
+                   CandidateProfile.target_roles,
+                   CandidateProfile.blocked_sources,
+                   CandidateProfile.search_keywords)
             .outerjoin(CandidateProfile, CandidateProfile.user_id == User.id)
         )
         users_info: list[dict] = []
-        for uid, email, target_roles, blocked_sources in users_result.all():
+        for uid, email, profile_id, target_roles, blocked_sources, search_kw in users_result.all():
+            # Pull skills grouped by category so we can see whether the
+            # 'technical' / 'tool' filter is actually catching what the
+            # user added.
+            if profile_id:
+                skills_rows = (await db.execute(
+                    select(CandidateSkill.skill_name, CandidateSkill.category)
+                    .where(CandidateSkill.profile_id == profile_id)
+                )).all()
+            else:
+                skills_rows = []
+            by_cat: dict[str, list[str]] = {}
+            for name, cat in skills_rows:
+                by_cat.setdefault(cat or "uncategorized", []).append(name)
             users_info.append({
                 "email": email,
                 "target_roles": target_roles or [],
                 "blocked_sources": blocked_sources or [],
+                "search_keywords": search_kw or [],
+                "skills_by_category": by_cat,
+                "skill_total": len(skills_rows),
             })
+
+        # The actual keyword set we hand to discovery (RemoteOK/Himalayas/etc.)
+        # — same code path the cron uses, run live so we see exactly what
+        # the cron would see.
+        try:
+            discovery_keywords = await _collect_all_keywords()
+        except Exception as e:
+            discovery_keywords = [f"(failed: {e})"]
 
         # Sample of the 10 most recent visible job titles, regardless of user filter
         sample_rows = (await db.execute(text(
@@ -238,6 +265,10 @@ async def cron_stats(authorization: str | None = Header(None)):
         },
         "by_source_last_6h": {row[0]: row[1] for row in src_rows},
         "users": users_info,
+        "discovery_keyword_count": len(discovery_keywords) if isinstance(discovery_keywords, list) else 0,
+        "discovery_keywords_sample": (
+            sorted(discovery_keywords)[:60] if isinstance(discovery_keywords, list) else discovery_keywords
+        ),
         "recent_titles_sample": sample,
     }
 
