@@ -100,15 +100,18 @@ async def cron_discover_remote(authorization: str | None = Header(None)):
     from app.workers.discovery_tasks import (
         _run_remoteok_async, _run_himalayas_async,
         _run_remotive_async, _run_weworkremotely_async,
-        _run_dailyremote_async,
     )
 
+    # DailyRemote disabled: their pages are gated by Cloudflare, which
+    # 403s every request from Vercel's serverless IPs regardless of
+    # User-Agent. /debug-dailyremote confirmed listing_status=403 on all
+    # four categories, urls_found=0. Re-enable after wiring it through
+    # Firecrawl (we have the API key) or a residential proxy.
     results = await _run_all_concurrent([
         ("remoteok", _run_remoteok_async),
         ("himalayas", _run_himalayas_async),
         ("remotive", _run_remotive_async),
         ("weworkremotely", _run_weworkremotely_async),
-        ("dailyremote", _run_dailyremote_async),
     ])
     return {"status": "complete", "results": results}
 

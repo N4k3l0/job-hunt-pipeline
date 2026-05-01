@@ -25,7 +25,6 @@ import {
   Flag,
   Loader2,
   Inbox,
-  Shield,
   Database,
 } from "lucide-react";
 import { useJobs } from "@/hooks/use-api";
@@ -105,15 +104,17 @@ function AccentEdge({ score }: { score: number | null }) {
 export default function JobsInboxPage() {
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<string | null>(null);
-  const [sponsorshipFilter, setSponsorshipFilter] = useState(false);
   const [countryFilter, setCountryFilter] = useState<string | null>(null);
   const [sourceFilter, setSourceFilter] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [sortBy, setSortBy] = useState("score");
 
-  // Work-type filter is gone — every user on this product is hunting remote
-  // roles, the profile's `remote_preference` already enforces it server-side,
-  // and the dropdown was just a way to accidentally see ineligible jobs.
+  // Work-type filter is gone — profile's `remote_preference` already
+  // enforces remote intent server-side. The Visa toggle was also removed:
+  // very few sources publish a sponsorship flag, so the filter returned 0
+  // jobs in practice — misleading. Sponsorship signal can come back as a
+  // JD-text heuristic later, but we won't surface a UI control until the
+  // data is real.
   const { data, isLoading } = useJobs({
     page,
     pageSize: 20,
@@ -121,7 +122,7 @@ export default function JobsInboxPage() {
     country: countryFilter,
     remoteOnly: false,
     remoteType: null,
-    sponsorship: sponsorshipFilter,
+    sponsorship: false,
     source: sourceFilter,
     sortBy,
   });
@@ -190,7 +191,7 @@ export default function JobsInboxPage() {
       )
     : jobs;
 
-  const activeFilters = [roleFilter, sponsorshipFilter, countryFilter, sourceFilter].filter(Boolean).length;
+  const activeFilters = [roleFilter, countryFilter, sourceFilter].filter(Boolean).length;
 
   return (
     <div className="space-y-5">
@@ -269,16 +270,6 @@ export default function JobsInboxPage() {
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <Button
-          variant={sponsorshipFilter ? "default" : "ghost"}
-          size="xs"
-          onClick={() => setSponsorshipFilter(!sponsorshipFilter)}
-          className="text-[11px]"
-        >
-          <Shield className="h-3 w-3" />
-          Visa
-        </Button>
-
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
@@ -313,7 +304,6 @@ export default function JobsInboxPage() {
           <button
             onClick={() => {
               setRoleFilter(null);
-              setSponsorshipFilter(false);
               setCountryFilter(null);
               setSourceFilter(null);
               setSearch("");

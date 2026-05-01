@@ -190,5 +190,19 @@ def apply_user_filters(
             JobSource.name.notin_(blocked_sources) | (JobSource.name.is_(None))
         )
     if remote_preference and remote_preference != "any":
-        query = query.where(Job.remote_type == remote_preference)
+        # Soft remote filter: when the user wants full_remote, also include
+        # jobs we couldn't classify ('unknown'). Our classify_remote()
+        # heuristic on aggregator location strings is imperfect — at last
+        # check 96 of 269 visible jobs were 'unknown' but most are
+        # remote-friendly in reality. Excluding them was hiding ~36% of
+        # the catalog from the inbox. We accept some hybrid/onsite leakage
+        # in exchange for the recall.
+        if remote_preference == "full_remote":
+            # SQL: NULL fails == comparison and isn't a member of in_(),
+            # so we OR an explicit IS NULL.
+            query = query.where(
+                or_(Job.remote_type == "full_remote", Job.remote_type.is_(None))
+            )
+        else:
+            query = query.where(Job.remote_type == remote_preference)
     return query
