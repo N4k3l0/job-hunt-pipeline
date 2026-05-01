@@ -88,6 +88,21 @@ async def _ingest_raw_jobs(jobs: list[dict]):
         stored = 0
         skipped = 0
 
+        # Cache source records per (name, type) so we don't fire a DB
+        # round trip for every candidate. With curated landing 1000+
+        # rows that all share source_name="curated", this turns 1000
+        # calls into 1.
+        source_cache: dict[tuple[str, str], JobSource] = {}
+
+        async def _resolve_source(name: str, stype: str) -> JobSource:
+            key = (name, stype)
+            cached = source_cache.get(key)
+            if cached is not None:
+                return cached
+            src = await get_or_create_source(db, name, stype)
+            source_cache[key] = src
+            return src
+
         for raw in pre_filtered:
             try:
                 company = raw.get("company", "Unknown")
@@ -97,9 +112,8 @@ async def _ingest_raw_jobs(jobs: list[dict]):
                 city = extract_city(location)
                 external_id = raw.get("external_id")
 
-                # Resolve source first so we can dedup on (source, external_id).
-                source = await get_or_create_source(
-                    db,
+                # Resolve source via the per-batch cache.
+                source = await _resolve_source(
                     raw.get("source_name", "unknown"),
                     raw.get("source_type", "api"),
                 )
