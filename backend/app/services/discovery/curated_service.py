@@ -30,8 +30,12 @@ from app.services.discovery.eligibility import matches_keywords
 logger = logging.getLogger(__name__)
 
 USER_AGENT = "JobHuntPipeline/1.0 (curated)"
-TIMEOUT = httpx.Timeout(connect=4.0, read=8.0, write=4.0, pool=4.0)
-CONCURRENCY = 8  # parallel ATS calls
+# Tighter per-request timeout: when fetching 50-100 companies in parallel
+# we'd rather skip a slow one than blow the cron's 35s budget. Concurrency
+# bumped to 16 — the public ATSes (Greenhouse / Lever / Ashby) handle this
+# fine and our wall time goes from ~30s to ~8s for the same list.
+TIMEOUT = httpx.Timeout(connect=3.0, read=6.0, write=3.0, pool=3.0)
+CONCURRENCY = 16
 
 _COMPANIES_FILE = Path(__file__).parent / "curated_companies.json"
 
