@@ -32,13 +32,63 @@ def _run_async(coro):
 async def _ingest_raw_jobs(jobs: list[dict]):
     """Process a batch of raw job dicts through the pipeline.
 
-    Steps: normalize → deduplicate → store → queue scoring
+    Pipeline: bulk pre-filter → per-job dedup → normalize → store.
+    Scoring is NOT done here — the cron handler calls _quick_score after
+    all sources finish so this function stays cheap and bounded.
     """
+    if not jobs:
+        return
+
+    # Bulk pre-filter: load every existing canonical_hash + job_url in
+    # one query, then short-circuit duplicates in memory before the
+    # expensive per-row check_duplicate (4-5 DB queries each). With the
+    # curated source landing 1000+ candidates per run, this turns a
+    # 30-50s loop into ~2s.
+    async with create_worker_session()() as db:
+        seen_rows = await db.execute(
+            select(Job.canonical_hash, Job.job_url).where(
+                Job.status.notin_(["raw"])
+            )
+        )
+        existing_hashes: set[str] = set()
+        existing_urls: set[str] = set()
+        for h, u in seen_rows.all():
+            if h:
+                existing_hashes.add(h)
+            if u:
+                existing_urls.add(u)
+
+    pre_filtered: list[dict] = []
+    pre_skipped = 0
+    for raw in jobs:
+        # Compute the same fingerprint we'd compute downstream.
+        company = raw.get("company", "Unknown")
+        title = raw.get("title", "")
+        location = raw.get("location")
+        country = normalize_country(raw.get("country"))
+        city = extract_city(location)
+        canonical_hash = compute_canonical_hash(company, title, city, country)
+        normalized_url = normalize_url(raw.get("job_url"))
+        if canonical_hash in existing_hashes or (
+            normalized_url and normalized_url in existing_urls
+        ):
+            pre_skipped += 1
+            continue
+        # Stash the precomputed values so we don't recompute them.
+        raw["_canonical_hash"] = canonical_hash
+        raw["_normalized_url"] = normalized_url
+        pre_filtered.append(raw)
+
+    logger.info(
+        "Bulk pre-filter: %d candidates → %d to ingest (%d known dups skipped)",
+        len(jobs), len(pre_filtered), pre_skipped,
+    )
+
     async with create_worker_session()() as db:
         stored = 0
         skipped = 0
 
-        for raw in jobs:
+        for raw in pre_filtered:
             try:
                 company = raw.get("company", "Unknown")
                 title = raw.get("title", "")
@@ -54,10 +104,10 @@ async def _ingest_raw_jobs(jobs: list[dict]):
                     raw.get("source_type", "api"),
                 )
 
-                # Normalize URL once so both dedup and storage use the same value.
-                normalized_url = normalize_url(raw.get("job_url"))
-
-                canonical_hash = compute_canonical_hash(company, title, city, country)
+                # Reuse the values we already computed in pre-filter rather
+                # than recomputing the canonical hash and URL.
+                normalized_url = raw.get("_normalized_url")
+                canonical_hash = raw.get("_canonical_hash")
 
                 is_dup, _ = await check_duplicate(
                     db, canonical_hash, raw.get("raw_description", ""),
@@ -128,39 +178,40 @@ async def _ingest_raw_jobs(jobs: list[dict]):
         await db.commit()
         logger.info("Ingestion complete: %d stored, %d duplicates skipped", stored, skipped)
 
-    # Auto-score new jobs for all users.
-    #
-    # The codebase shipped with `batch_score_for_user.delay(uid)` (Celery
-    # broker call), but production runs Vercel-only — Celery + Redis are
-    # gone. Result was: jobs were ingested, no scores were ever written,
-    # the inbox sorted by score-DESC and buried every new job at the
-    # bottom. The user saw "last sweep just now" but only old scored jobs
-    # at the top of the list.
-    #
-    # Fix: invoke the underlying async coroutine directly so scoring runs
-    # inline in the same cron request. Wrapped in wait_for so a runaway
-    # scoring loop can't blow the cron's per-source budget.
-    if stored > 0:
+
+async def quick_score_all_users(per_user_timeout: int = 12) -> dict[str, str]:
+    """Run a single bounded scoring pass for every user, in parallel.
+
+    Called by cron handlers AFTER their sources finish, so ingest stays
+    cheap and scoring is its own budget. Each user's pass is capped by
+    the batch scorer (limit 300 newest unscored), and the wait_for here
+    caps wall time per user — together they keep a misbehaving user from
+    starving the others.
+    """
+    import asyncio
+    import time
+    from app.workers.scoring_tasks import _batch_score_async
+    from app.models.user import User
+
+    async with create_worker_session()() as db:
+        users_result = await db.execute(select(User.id))
+        user_ids = [str(row[0]) for row in users_result.all()]
+
+    async def score_one(uid: str) -> tuple[str, str]:
+        started = time.monotonic()
         try:
-            import asyncio
-            from app.workers.scoring_tasks import _batch_score_async
-            from app.models.user import User
-            async with create_worker_session()() as db:
-                users_result = await db.execute(select(User.id))
-                user_ids = [str(row[0]) for row in users_result.all()]
-            for uid in user_ids:
-                try:
-                    await asyncio.wait_for(
-                        _batch_score_async(uid, rescore_all=False),
-                        timeout=20,
-                    )
-                    logger.info("Inline-scored new jobs for user %s", uid)
-                except asyncio.TimeoutError:
-                    logger.error("Scoring for user %s timed out at 20s", uid)
-                except Exception as e:
-                    logger.error("Scoring for user %s failed: %s", uid, e)
-        except Exception as e:
-            logger.error("Failed to run auto-scoring: %s", e)
+            await asyncio.wait_for(
+                _batch_score_async(uid, rescore_all=False),
+                timeout=per_user_timeout,
+            )
+            return uid, f"ok ({time.monotonic() - started:.1f}s)"
+        except asyncio.TimeoutError:
+            return uid, f"timeout after {time.monotonic() - started:.0f}s"
+        except Exception as e:  # noqa: BLE001
+            return uid, f"error: {type(e).__name__}: {e}"
+
+    results = await asyncio.gather(*(score_one(uid) for uid in user_ids))
+    return dict(results)
 
 
 # ── Apify ────────────────────────────────────────────────────────────────────

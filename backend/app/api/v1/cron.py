@@ -72,7 +72,8 @@ async def _run_all_concurrent(runners: list[tuple[str, callable]]) -> dict[str, 
 
 @router.get("/discover-fast")
 async def cron_discover_fast(authorization: str | None = Header(None)):
-    """Curated companies (highest-signal) + Arbeitnow.
+    """Curated companies (highest-signal) + Arbeitnow, then a bounded
+    quick-score pass for every user.
 
     Adzuna is temporarily disabled — their API has been returning 400s
     even on `api.adzuna.com/` itself. The runner code is still intact in
@@ -80,14 +81,17 @@ async def cron_discover_fast(authorization: str | None = Header(None)):
     """
     _verify_cron(authorization)
 
-    from app.workers.discovery_tasks import _run_arbeitnow_async, _run_curated_async
+    from app.workers.discovery_tasks import (
+        _run_arbeitnow_async, _run_curated_async, quick_score_all_users,
+    )
 
     results = await _run_all_concurrent([
         ("curated", _run_curated_async),
         ("arbeitnow", _run_arbeitnow_async),
         # ("adzuna", _run_adzuna_async),  # disabled: upstream returning 400s
     ])
-    return {"status": "complete", "results": results}
+    scoring = await quick_score_all_users(per_user_timeout=10)
+    return {"status": "complete", "results": results, "scoring": scoring}
 
 
 @router.get("/discover-remote")
@@ -100,7 +104,7 @@ async def cron_discover_remote(authorization: str | None = Header(None)):
     from app.workers.discovery_tasks import (
         _run_remoteok_async, _run_himalayas_async,
         _run_remotive_async, _run_weworkremotely_async,
-        _run_dailyremote_async,
+        _run_dailyremote_async, quick_score_all_users,
     )
 
     # DailyRemote routes through Firecrawl now — Cloudflare blocks direct
@@ -113,7 +117,8 @@ async def cron_discover_remote(authorization: str | None = Header(None)):
         ("weworkremotely", _run_weworkremotely_async),
         ("dailyremote", _run_dailyremote_async),
     ])
-    return {"status": "complete", "results": results}
+    scoring = await quick_score_all_users(per_user_timeout=10)
+    return {"status": "complete", "results": results, "scoring": scoring}
 
 
 @router.get("/score-backlog")
