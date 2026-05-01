@@ -159,9 +159,23 @@ def apply_user_filters(
     """
     role_keywords = build_role_keywords(target_roles)
     skill_keywords = _skill_keywords(skills)
-    match_keywords = list(set(role_keywords + skill_keywords))
-    if match_keywords:
-        query = query.where(or_(*[func.lower(Job.title).like(kw) for kw in match_keywords]))
+    title_keywords = list(set(role_keywords + skill_keywords))
+
+    if title_keywords:
+        # A job lands in the inbox when:
+        #   - its TITLE matches any role keyword OR any skill keyword, OR
+        #   - its DESCRIPTION mentions any of the user's skills.
+        # Description matching is restricted to SKILLS only (not role
+        # keywords) — matching role keywords against description is too
+        # noisy because every JD mentions "AI" or "automation" in passing.
+        # Specific skill tokens (Python, n8n, VAPI, ...) are high-signal:
+        # if a job's description mentions them, the role probably uses them.
+        clauses = [func.lower(Job.title).like(kw) for kw in title_keywords]
+        if skill_keywords:
+            clauses.extend(
+                func.lower(Job.raw_description).like(kw) for kw in skill_keywords
+            )
+        query = query.where(or_(*clauses))
 
     # Exclude product-management titles unless the user actually targets product.
     # Without this, an AI/ML user gets "Sr. PM, AI Platform" leaking in via the
