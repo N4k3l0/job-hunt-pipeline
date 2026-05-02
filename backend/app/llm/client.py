@@ -32,6 +32,13 @@ class LLMClient:
     def __init__(self):
         self.client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
+    @staticmethod
+    def _accepts_temperature(model: str) -> bool:
+        """Opus 4.7 deprecated the `temperature` parameter — passing it
+        now returns 400 invalid_request_error. Sonnet 4.6 + Haiku still
+        accept it. Centralise the check so callers don't need to know."""
+        return "opus-4-7" not in model
+
     async def generate(
         self,
         task_type: str,
@@ -43,14 +50,17 @@ class LLMClient:
         """Generate a text response from Claude."""
         model = MODELS.get(task_type, MODELS["parsing"])
 
+        kwargs: dict[str, Any] = dict(
+            model=model,
+            max_tokens=max_tokens,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        if self._accepts_temperature(model):
+            kwargs["temperature"] = temperature
+
         try:
-            response = await self.client.messages.create(
-                model=model,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_prompt}],
-            )
+            response = await self.client.messages.create(**kwargs)
 
             usage = response.usage
             logger.info(
@@ -78,15 +88,18 @@ class LLMClient:
         """Generate structured output using Claude's tool use."""
         model = MODELS.get(task_type, MODELS["parsing"])
 
-        response = await self.client.messages.create(
+        kwargs: dict[str, Any] = dict(
             model=model,
             max_tokens=max_tokens,
-            temperature=0.0,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
             tools=tools,
             tool_choice={"type": "auto"},
         )
+        if self._accepts_temperature(model):
+            kwargs["temperature"] = 0.0
+
+        response = await self.client.messages.create(**kwargs)
 
         usage = response.usage
         logger.info(
