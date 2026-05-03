@@ -13,14 +13,22 @@ import {
   Mail, Loader2, CheckCircle2, ArrowRight, Sparkles, ArrowLeft,
 } from "lucide-react";
 
+// Supabase's per-email OTP rate limit is ~60s. We use 65s as our
+// client-side gate so we never fire a second request inside the
+// server's window — that's what was causing the countdown to re-trigger
+// every cycle (we'd hit 0, the user would click, Supabase would still
+// be in its window, return rate-limited, and we'd reset to 60).
+const COOLDOWN_SECONDS = 65;
+const COOLDOWN_KEY = "jhp:lastOtpAt";
+
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
-  // Cooldown countdown (seconds) when Supabase rate-limits us. Replaces
-  // a static "wait 60 seconds" message — the user can see exactly when
-  // they'll be unblocked instead of guessing.
+  // Remaining cooldown in seconds. Derived from a localStorage timestamp
+  // so it survives page refreshes — without that, refreshing reset the
+  // counter to 0 and the next click immediately re-tripped Supabase.
   const [cooldown, setCooldown] = useState(0);
 
   useEffect(() => {
@@ -31,23 +39,33 @@ export default function LoginPage() {
     if (cbError) {
       setError(cbDetail ? `${cbError}: ${cbDetail}` : `Sign-in failed: ${cbError}`);
     }
+    // Restore cooldown from a previous attempt in this browser.
+    const lastAt = Number(localStorage.getItem(COOLDOWN_KEY) || 0);
+    if (lastAt > 0) {
+      const remaining = COOLDOWN_SECONDS - Math.floor((Date.now() - lastAt) / 1000);
+      if (remaining > 0) setCooldown(remaining);
+    }
   }, []);
 
-  // Tick the cooldown down once a second. When it hits 0 the error
-  // message clears so the user knows they can retry.
+  // Tick the cooldown down once a second.
   useEffect(() => {
     if (cooldown <= 0) return;
-    const t = setTimeout(() => setCooldown((s) => s - 1), 1000);
+    const t = setTimeout(() => setCooldown((s) => Math.max(0, s - 1)), 1000);
     return () => clearTimeout(t);
   }, [cooldown]);
-  useEffect(() => {
-    if (cooldown === 0 && error.startsWith("Wait ")) setError("");
-  }, [cooldown, error]);
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
+    if (cooldown > 0) return; // belt-and-braces against double-submit
     setError("");
     setLoading(true);
+
+    // Stamp the attempt FIRST so a refresh / accidental double-submit
+    // can't slip through the cooldown gate.
+    try {
+      localStorage.setItem(COOLDOWN_KEY, String(Date.now()));
+    } catch { /* private mode etc. */ }
+    setCooldown(COOLDOWN_SECONDS);
 
     try {
       const supabase = createClient();
@@ -59,13 +77,17 @@ export default function LoginPage() {
       });
 
       if (error) {
-        if (error.message.includes("rate") || error.message.includes("limit")) {
-          // Supabase enforces ~60s between OTP requests per email.
-          // Surface a live countdown so the wait isn't a guess.
-          setCooldown(60);
-          setError("Wait 60s before requesting another link.");
-        } else {
+        // Don't restart the cooldown on a rate-limit error — our local
+        // gate already prevents future submits for ~65s. Just show what
+        // Supabase said for any non-rate-limit error.
+        const isRateLimit =
+          error.message.includes("rate") || error.message.includes("limit");
+        if (!isRateLimit) {
           setError(error.message);
+          // Failure other than rate-limit means no email was sent — clear
+          // the cooldown so the user can retry immediately.
+          setCooldown(0);
+          try { localStorage.removeItem(COOLDOWN_KEY); } catch { /* ignore */ }
         }
         return;
       }
@@ -73,6 +95,8 @@ export default function LoginPage() {
       setSent(true);
     } catch {
       setError("An unexpected error occurred");
+      setCooldown(0);
+      try { localStorage.removeItem(COOLDOWN_KEY); } catch { /* ignore */ }
     } finally {
       setLoading(false);
     }
