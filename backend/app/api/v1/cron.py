@@ -490,6 +490,74 @@ async def cron_debug_curated(authorization: str | None = Header(None)):
     return {"summary": summary, "live": live, "dead": dead}
 
 
+@router.get("/debug-supabase-user")
+async def cron_debug_supabase_user(
+    email: str,
+    authorization: str | None = Header(None),
+):
+    """Look up a user in Supabase Auth + our local users table.
+    Cron-secret protected.
+
+    Tells us whether an invited user (a) exists in Supabase auth.users,
+    (b) has confirmed/accepted the invite, (c) has signed in yet, and
+    (d) has been mirrored into our public.users on first request."""
+    _verify_cron(authorization)
+    import httpx
+    from sqlalchemy import select
+    from app.workers.discovery_tasks import create_worker_session
+    from app.models.user import User
+    from app.core.config import get_settings as _get_settings
+    s = _get_settings()
+    out: dict = {"query_email": email, "supabase_url_set": bool(s.supabase_url)}
+
+    # Supabase Auth admin API (service key required)
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(
+                f"{s.supabase_url}/auth/v1/admin/users",
+                params={"filter": f"email.eq.{email}"},
+                headers={
+                    "apikey": s.supabase_service_key,
+                    "Authorization": f"Bearer {s.supabase_service_key}",
+                },
+            )
+            r.raise_for_status()
+            users = (r.json().get("users") or [])
+    except httpx.HTTPError as e:
+        out["supabase_error"] = f"{type(e).__name__}: {e}"
+        users = []
+    matching = [u for u in users if (u.get("email") or "").lower() == email.lower()]
+    out["supabase_matches"] = len(matching)
+    if matching:
+        u = matching[0]
+        out["supabase_user"] = {
+            "id": u.get("id"),
+            "email": u.get("email"),
+            "created_at": u.get("created_at"),
+            "invited_at": u.get("invited_at"),
+            "email_confirmed_at": u.get("email_confirmed_at"),
+            "last_sign_in_at": u.get("last_sign_in_at"),
+            "banned_until": u.get("banned_until"),
+            "user_metadata": u.get("user_metadata"),
+        }
+
+    # Our public.users table (only populated on first authenticated request)
+    async with create_worker_session()() as db:
+        row = (await db.execute(
+            select(User).where(User.email == email)
+        )).scalar_one_or_none()
+        out["public_users_row"] = (
+            {
+                "id": str(row.id),
+                "name": row.name,
+                "role": row.role,
+                "created_at": row.created_at.isoformat() if getattr(row, "created_at", None) else None,
+            } if row else None
+        )
+
+    return out
+
+
 @router.get("/debug-llm")
 async def cron_debug_llm(authorization: str | None = Header(None)):
     """Tiny ping to the LLM client: does the current Anthropic key + model
