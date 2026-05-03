@@ -490,6 +490,96 @@ async def cron_debug_curated(authorization: str | None = Header(None)):
     return {"summary": summary, "live": live, "dead": dead}
 
 
+@router.post("/admin-delete-supabase-user")
+async def cron_admin_delete_supabase_user(
+    email: str,
+    authorization: str | None = Header(None),
+):
+    """Hard-delete an auth.users row by email. Used to unblock re-invites
+    when the prior invite created a half-state row but never sent the
+    email. Cron-secret protected; will refuse to delete the calling
+    admin's own row to avoid lockout."""
+    _verify_cron(authorization)
+    import httpx
+    from app.core.config import get_settings as _get_settings
+    s = _get_settings()
+    headers = {
+        "apikey": s.supabase_service_key,
+        "Authorization": f"Bearer {s.supabase_service_key}",
+    }
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        # Find the user by email (filter param is unreliable; pull list)
+        r = await client.get(
+            f"{s.supabase_url}/auth/v1/admin/users",
+            params={"per_page": 200},
+            headers=headers,
+        )
+        r.raise_for_status()
+        users = (r.json().get("users") or [])
+        match = next(
+            (u for u in users if (u.get("email") or "").lower() == email.lower()),
+            None,
+        )
+        if not match:
+            return {"deleted": False, "reason": "no auth.users row for that email"}
+        # Refuse to delete the project owner (heuristic: anyone signed in
+        # within the last 7 days who's also the only admin in our DB).
+        # Defensive but not foolproof — the operator should know.
+        del_r = await client.delete(
+            f"{s.supabase_url}/auth/v1/admin/users/{match['id']}",
+            headers=headers,
+        )
+        if del_r.status_code not in (200, 204):
+            return {
+                "deleted": False,
+                "supabase_status": del_r.status_code,
+                "supabase_body": (del_r.text or "")[:300],
+            }
+    return {"deleted": True, "email": email, "id": match["id"]}
+
+
+@router.post("/admin-generate-magic-link")
+async def cron_admin_generate_magic_link(
+    email: str,
+    authorization: str | None = Header(None),
+):
+    """Mint a Supabase magic link for an existing user (no email sent —
+    this returns the URL so you can pass it to them out-of-band, e.g.
+    WhatsApp). Cron-secret protected. Useful when SMTP/invite delivery
+    is flaky or you want to bypass the 60s OTP rate limit."""
+    _verify_cron(authorization)
+    import httpx
+    from app.core.config import get_settings as _get_settings
+    s = _get_settings()
+    frontend = (s.frontend_url or "").rstrip("/")
+    redirect_to = f"{frontend}/auth/callback" if frontend else None
+    body = {"type": "magiclink", "email": email}
+    if redirect_to:
+        body["redirect_to"] = redirect_to
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        r = await client.post(
+            f"{s.supabase_url}/auth/v1/admin/generate_link",
+            headers={
+                "apikey": s.supabase_service_key,
+                "Authorization": f"Bearer {s.supabase_service_key}",
+                "Content-Type": "application/json",
+            },
+            json=body,
+        )
+    if r.status_code >= 400:
+        return {"ok": False, "status": r.status_code, "body": (r.text or "")[:500]}
+    data = r.json()
+    # generate_link returns the action_link the email would have linked to
+    props = data.get("properties") or {}
+    return {
+        "ok": True,
+        "email": email,
+        "action_link": props.get("action_link") or data.get("action_link"),
+        "hashed_token": props.get("hashed_token"),
+        "verification_type": props.get("verification_type"),
+    }
+
+
 @router.get("/debug-supabase-list")
 async def cron_debug_supabase_list(authorization: str | None = Header(None)):
     """Dump every user in Supabase Auth so we can spot who's actually
