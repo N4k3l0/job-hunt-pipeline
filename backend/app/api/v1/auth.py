@@ -74,36 +74,77 @@ async def update_me(request: UpdateMeRequest, user: CurrentUser, db: DbSession):
 async def invite_user(request: InviteRequest, admin: AdminUser, db: DbSession):
     """Invite a new user by email (admin only).
 
-    Creates the user in Supabase Auth and sends an invite email. Passes an
-    explicit `redirect_to` so the user lands on OUR /auth/callback page
-    instead of whatever default Site URL the Supabase project happens to
-    have configured (which is often stale across redeploys)."""
+    Creates the user with email pre-confirmed, then generates a MAGIC
+    LINK (not a Supabase invite link) and sends it via Supabase's
+    built-in email. The magic link uses implicit/hash tokens, which our
+    /auth/callback handles client-side — no code_verifier round-trip
+    needed, so the link works on any device.
+
+    Why not `invite_user_by_email`? That uses Supabase's invite flow,
+    which falls back to PKCE. The link arrives without a verifier
+    cookie and `exchangeCodeForSession` fails, dropping the user on
+    /login asking them to type their email all over again.
+
+    We also return `magic_link` so the admin UI can show a copy-paste
+    backup if email delivery is delayed.
+    """
     from supabase import create_client
 
     supabase = create_client(settings.supabase_url, settings.supabase_service_key)
 
-    # Resolve the frontend URL: prefer FRONTEND_URL env, fall back to first cors_origin.
     frontend = (settings.frontend_url
                 or (settings.cors_origin_list[0] if settings.cors_origin_list else "")
                 ).rstrip("/")
     redirect_to = f"{frontend}/auth/callback" if frontend else None
 
+    email = request.email.strip().lower()
+
+    # 1. Make sure the user exists in auth.users with email pre-confirmed.
+    #    create_user is idempotent across re-invites: if the row exists we
+    #    catch the conflict and proceed to magic-link generation.
     try:
-        kwargs = {}
+        supabase.auth.admin.create_user({
+            "email": email,
+            "email_confirm": True,
+        })
+    except Exception as e:
+        # 422 / "already exists" is fine — they have a row, just (re)send
+        # the magic link below.
+        msg = str(e).lower()
+        if "already" not in msg and "registered" not in msg and "exists" not in msg:
+            # Anything else (rate limits, validation) is a real error.
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Failed to create user: {e}",
+            )
+
+    # 2. Generate the magic link. Passing an email triggers Supabase's
+    #    built-in email send via their SMTP config.
+    try:
+        link_kwargs: dict = {"type": "magiclink", "email": email}
         if redirect_to:
-            kwargs["options"] = {"redirect_to": redirect_to}
-        result = supabase.auth.admin.invite_user_by_email(request.email, **kwargs)
-        return {
-            "status": "invited",
-            "email": request.email,
-            "redirect_to": redirect_to,
-            "message": "Invite email sent. User will appear after they accept.",
-        }
+            link_kwargs["options"] = {"redirect_to": redirect_to}
+        result = supabase.auth.admin.generate_link(link_kwargs)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to invite user: {str(e)}",
+            detail=f"Failed to generate magic link: {e}",
         )
+
+    # supabase-py response shape:  result.properties.action_link
+    properties = getattr(result, "properties", None) or {}
+    if isinstance(properties, dict):
+        action_link = properties.get("action_link")
+    else:
+        action_link = getattr(properties, "action_link", None)
+
+    return {
+        "status": "invited",
+        "email": email,
+        "redirect_to": redirect_to,
+        "magic_link": action_link,
+        "message": "Magic link sent. If the email is delayed, copy the magic_link and send it manually.",
+    }
 
 
 @router.get("/users", response_model=list[UserListResponse])

@@ -34,7 +34,12 @@ interface UserRecord {
 export default function AdminPage() {
   const [email, setEmail] = useState("");
   const [inviteLoading, setInviteLoading] = useState(false);
-  const [inviteResult, setInviteResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [inviteResult, setInviteResult] = useState<{
+    ok: boolean;
+    message: string;
+    magicLink?: string | null;
+  } | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [usersLoaded, setUsersLoaded] = useState(false);
 
@@ -54,9 +59,18 @@ export default function AdminPage() {
     if (!email.trim()) return;
     setInviteLoading(true);
     setInviteResult(null);
+    setLinkCopied(false);
     try {
-      await api.post("/api/v1/auth/invite", { email: email.trim() });
-      setInviteResult({ ok: true, message: `Invite sent to ${email}` });
+      const data = await api.post<{
+        status: string;
+        email: string;
+        magic_link?: string | null;
+      }>("/api/v1/auth/invite", { email: email.trim() });
+      setInviteResult({
+        ok: true,
+        message: `Magic link sent to ${data.email}`,
+        magicLink: data.magic_link,
+      });
       setEmail("");
       loadUsers();
     } catch (e: any) {
@@ -64,6 +78,15 @@ export default function AdminPage() {
     } finally {
       setInviteLoading(false);
     }
+  }
+
+  async function copyMagicLink() {
+    if (!inviteResult?.magicLink) return;
+    try {
+      await navigator.clipboard.writeText(inviteResult.magicLink);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    } catch { /* clipboard blocked */ }
   }
 
   // Load users on mount
@@ -88,7 +111,7 @@ export default function AdminPage() {
             Invite User
           </CardTitle>
           <CardDescription>
-            Send an invite email. The user will set their password and can log in.
+            Sends a magic-link email. One click → straight to the dashboard, no password.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -117,15 +140,38 @@ export default function AdminPage() {
             </Button>
           </div>
           {inviteResult && (
-            <div className={`flex items-center gap-2 mt-3 text-sm ${
-              inviteResult.ok ? "text-emerald-400" : "text-red-400"
-            }`}>
-              {inviteResult.ok ? (
-                <CheckCircle2 className="h-4 w-4" />
-              ) : (
-                <AlertCircle className="h-4 w-4" />
+            <div className="mt-3 space-y-2">
+              <div className={`flex items-center gap-2 text-sm ${
+                inviteResult.ok ? "text-emerald-400" : "text-red-400"
+              }`}>
+                {inviteResult.ok ? (
+                  <CheckCircle2 className="h-4 w-4" />
+                ) : (
+                  <AlertCircle className="h-4 w-4" />
+                )}
+                {inviteResult.message}
+              </div>
+              {inviteResult.ok && inviteResult.magicLink && (
+                <div className="rounded-md border border-white/[0.06] bg-white/[0.02] p-3 text-xs space-y-2">
+                  <p className="text-muted-foreground">
+                    Email may take a minute. If they don&apos;t see it, copy this magic link
+                    and send it to them directly (works on any device, expires in ~1 hour):
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 truncate rounded bg-black/30 px-2 py-1.5 text-[11px] text-amber-200/90">
+                      {inviteResult.magicLink}
+                    </code>
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      onClick={copyMagicLink}
+                      className="shrink-0"
+                    >
+                      {linkCopied ? "Copied" : "Copy"}
+                    </Button>
+                  </div>
+                </div>
               )}
-              {inviteResult.message}
             </div>
           )}
         </CardContent>
