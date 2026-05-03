@@ -490,6 +490,47 @@ async def cron_debug_curated(authorization: str | None = Header(None)):
     return {"summary": summary, "live": live, "dead": dead}
 
 
+@router.get("/debug-supabase-list")
+async def cron_debug_supabase_list(authorization: str | None = Header(None)):
+    """Dump every user in Supabase Auth so we can spot who's actually
+    there. Useful when invite said 'already invited' but our targeted
+    /debug-supabase-user lookup returned 0 — usually means the email
+    differs by case / dot / typo."""
+    _verify_cron(authorization)
+    import httpx
+    from app.core.config import get_settings as _get_settings
+    s = _get_settings()
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.get(
+                f"{s.supabase_url}/auth/v1/admin/users",
+                params={"per_page": 200},
+                headers={
+                    "apikey": s.supabase_service_key,
+                    "Authorization": f"Bearer {s.supabase_service_key}",
+                },
+            )
+            r.raise_for_status()
+            data = r.json()
+    except httpx.HTTPError as e:
+        return {"error": f"{type(e).__name__}: {e}"}
+    users = data.get("users") or []
+    return {
+        "total": len(users),
+        "users": [
+            {
+                "email": u.get("email"),
+                "id": u.get("id"),
+                "created_at": u.get("created_at"),
+                "invited_at": u.get("invited_at"),
+                "email_confirmed_at": u.get("email_confirmed_at"),
+                "last_sign_in_at": u.get("last_sign_in_at"),
+            }
+            for u in users
+        ],
+    }
+
+
 @router.get("/debug-supabase-user")
 async def cron_debug_supabase_user(
     email: str,
