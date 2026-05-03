@@ -18,8 +18,11 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
-  // Surface any auth callback failure in the URL — instead of silently
-  // dropping the user back here, show what Supabase actually said.
+  // Cooldown countdown (seconds) when Supabase rate-limits us. Replaces
+  // a static "wait 60 seconds" message — the user can see exactly when
+  // they'll be unblocked instead of guessing.
+  const [cooldown, setCooldown] = useState(0);
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     const sp = new URLSearchParams(window.location.search);
@@ -29,6 +32,17 @@ export default function LoginPage() {
       setError(cbDetail ? `${cbError}: ${cbDetail}` : `Sign-in failed: ${cbError}`);
     }
   }, []);
+
+  // Tick the cooldown down once a second. When it hits 0 the error
+  // message clears so the user knows they can retry.
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown((s) => s - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
+  useEffect(() => {
+    if (cooldown === 0 && error.startsWith("Wait ")) setError("");
+  }, [cooldown, error]);
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -46,7 +60,10 @@ export default function LoginPage() {
 
       if (error) {
         if (error.message.includes("rate") || error.message.includes("limit")) {
-          setError("Please wait 60 seconds before requesting another link.");
+          // Supabase enforces ~60s between OTP requests per email.
+          // Surface a live countdown so the wait isn't a guess.
+          setCooldown(60);
+          setError("Wait 60s before requesting another link.");
         } else {
           setError(error.message);
         }
@@ -141,19 +158,23 @@ export default function LoginPage() {
                 </div>
                 {error && (
                   <div className="rounded-lg border border-destructive/30 bg-destructive/[0.08] px-3 py-2 text-sm text-destructive">
-                    {error}
+                    {cooldown > 0
+                      ? `Wait ${cooldown}s before requesting another link.`
+                      : error}
                   </div>
                 )}
                 <Button
                   type="submit"
                   className="w-full h-11 text-base sm:text-sm font-semibold"
-                  disabled={loading || !email.trim()}
+                  disabled={loading || !email.trim() || cooldown > 0}
                 >
                   {loading ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
                       Sending link…
                     </>
+                  ) : cooldown > 0 ? (
+                    <>Try again in {cooldown}s</>
                   ) : (
                     <>
                       Send sign-in link
