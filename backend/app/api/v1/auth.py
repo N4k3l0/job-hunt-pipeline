@@ -70,70 +70,106 @@ async def update_me(request: UpdateMeRequest, user: CurrentUser, db: DbSession):
     )
 
 
-@router.post("/invite", status_code=status.HTTP_201_CREATED)
-async def invite_user(request: InviteRequest, admin: AdminUser, db: DbSession):
-    """Invite a new user by email (admin only).
-
-    Uses Supabase's built-in invite_user_by_email which:
-      1. Creates the row in auth.users (or 409s if it exists already).
-      2. Sends an invite email through Supabase's mailer.
-
-    The link in that email goes to Supabase's /auth/v1/verify?type=invite
-    endpoint. After verify, Supabase redirects to redirect_to with HASH
-    tokens (implicit flow) because the original invite request carried
-    no code_challenge. Our /auth/callback already handles hash tokens
-    client-side, so this works on any device.
-
-    Earlier we briefly tried admin.generate_link in here, but the SDK
-    docstring confirms it just RETURNS a URL without sending email —
-    'to be sent via a custom email provider'. So no email ever went
-    out, and we were patching the gap with manually-pasted links.
-    Reverted to invite_user_by_email which actually sends.
-
-    On 'already invited' errors, we fall back to admin.generate_link
-    (type='magiclink') and return the URL so the admin can paste it
-    manually — same single magic-link UX, just delivered out-of-band.
-    """
+def _build_supabase_client():
     from supabase import create_client
+    return create_client(settings.supabase_url, settings.supabase_service_key)
 
-    supabase = create_client(settings.supabase_url, settings.supabase_service_key)
 
+def _resolve_redirect_to() -> str | None:
     frontend = (settings.frontend_url
                 or (settings.cors_origin_list[0] if settings.cors_origin_list else "")
                 ).rstrip("/")
-    redirect_to = f"{frontend}/auth/callback" if frontend else None
+    return f"{frontend}/auth/callback" if frontend else None
 
+
+def _extract_action_link(result) -> str | None:
+    properties = getattr(result, "properties", None) or {}
+    if isinstance(properties, dict):
+        return properties.get("action_link")
+    return getattr(properties, "action_link", None)
+
+
+@router.post("/invite", status_code=status.HTTP_201_CREATED)
+async def invite_user(request: InviteRequest, admin: AdminUser, db: DbSession):
+    """Invite a NEW user by email (admin only).
+
+    Refuses to operate on existing users. The admin should use
+    /resend-magic-link instead for users that already have a row in
+    auth.users — that's the right tool for 'I lost my link' or
+    'the previous one expired'.
+
+    For brand-new users:
+      1. Calls Supabase's invite_user_by_email which creates the
+         auth.users row AND sends a real email through Supabase's
+         mailer.
+      2. The link uses implicit/hash tokens (because the request
+         carried no code_challenge), so /auth/callback can complete
+         the session via the new POST /auth/set-session route.
+    """
+    supabase = _build_supabase_client()
+    redirect_to = _resolve_redirect_to()
     email = request.email.strip().lower()
 
-    # Primary path: send the invite email.
+    # Existence check: list users matching this email and refuse if any
+    # row already exists. We can't trust a single "filter" query (that
+    # admin endpoint behaves inconsistently), so we list everyone and
+    # match locally.
+    try:
+        response = supabase.auth.admin.list_users()
+        # supabase-py returns a list directly OR an object with .users
+        existing_users = response if isinstance(response, list) else (
+            getattr(response, "users", None) or []
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Couldn't query existing users: {e}",
+        )
+    if any((u.email or "").lower() == email for u in existing_users):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"{email} already has an account. "
+                f"Use 'Resend magic link' on the user row instead."
+            ),
+        )
+
     options = {"redirect_to": redirect_to} if redirect_to else None
     try:
         kwargs: dict = {}
         if options:
             kwargs["options"] = options
         supabase.auth.admin.invite_user_by_email(email, **kwargs)
-        return {
-            "status": "invited",
-            "email": email,
-            "redirect_to": redirect_to,
-            "magic_link": None,
-            "message": "Invite email sent. Tap the link in the email to land on the dashboard.",
-        }
     except Exception as e:
-        msg = str(e).lower()
-        already_exists = (
-            "already" in msg or "registered" in msg or "exists" in msg
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to send invite: {e}",
         )
-        if not already_exists:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Failed to send invite: {e}",
-            )
+    return {
+        "status": "invited",
+        "email": email,
+        "redirect_to": redirect_to,
+        "magic_link": None,
+        "message": "Invite email sent. Tap the link in the email to land on the dashboard.",
+    }
 
-    # Fallback for 'already exists': they already have a row but
-    # invite_user_by_email refuses to re-send. Mint a magic link via
-    # generate_link (no email) and return the URL so the admin can
-    # paste it via WhatsApp/SMS/etc.
+
+@router.post("/resend-magic-link", status_code=status.HTTP_200_OK)
+async def resend_magic_link(request: InviteRequest, admin: AdminUser, db: DbSession):
+    """Mint a fresh magic link for an existing user (admin only).
+
+    Used when a user has been invited before but never signed in
+    successfully (or their previous link expired/was consumed). Returns
+    the URL — does NOT send an email — because Supabase's invite_user
+    refuses to re-send and admin.generate_link is the only way to mint
+    a fresh single-use token. The admin pastes it into WhatsApp/SMS/
+    email out-of-band.
+    """
+    supabase = _build_supabase_client()
+    redirect_to = _resolve_redirect_to()
+    email = request.email.strip().lower()
+
+    options = {"redirect_to": redirect_to} if redirect_to else None
     try:
         link_kwargs: dict = {"type": "magiclink", "email": email}
         if options:
@@ -142,19 +178,21 @@ async def invite_user(request: InviteRequest, admin: AdminUser, db: DbSession):
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"User exists but couldn't mint magic link: {e}",
+            detail=f"Couldn't mint magic link: {e}",
         )
-    properties = getattr(result, "properties", None) or {}
-    action_link = (
-        properties.get("action_link") if isinstance(properties, dict)
-        else getattr(properties, "action_link", None)
-    )
+
+    action_link = _extract_action_link(result)
+    if not action_link:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Supabase returned no action_link",
+        )
     return {
-        "status": "existing_user",
+        "status": "magic_link_minted",
         "email": email,
         "redirect_to": redirect_to,
         "magic_link": action_link,
-        "message": "User already exists — no email sent. Copy the magic_link and send it directly.",
+        "message": "Fresh magic link ready. Copy and send to the user — single-use, expires in ~1 hour.",
     }
 
 

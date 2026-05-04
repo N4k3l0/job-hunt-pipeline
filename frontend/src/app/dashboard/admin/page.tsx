@@ -55,26 +55,68 @@ export default function AdminPage() {
     }
   }
 
+  // Tracks the email tied to the most recent failed-because-exists invite,
+  // so the inline "Resend magic link" button knows what to act on.
+  const [conflictedEmail, setConflictedEmail] = useState<string | null>(null);
+
   async function handleInvite() {
     if (!email.trim()) return;
     setInviteLoading(true);
     setInviteResult(null);
     setLinkCopied(false);
+    setConflictedEmail(null);
+    const target = email.trim();
     try {
       const data = await api.post<{
         status: string;
         email: string;
         magic_link?: string | null;
-      }>("/api/v1/auth/invite", { email: email.trim() });
+      }>("/api/v1/auth/invite", { email: target });
       setInviteResult({
         ok: true,
-        message: `Magic link sent to ${data.email}`,
+        message: `Invite email sent to ${data.email}. They'll get a one-tap link.`,
         magicLink: data.magic_link,
       });
       setEmail("");
       loadUsers();
     } catch (e: any) {
-      setInviteResult({ ok: false, message: e.message || "Failed to invite" });
+      // 409 → the user already exists. Offer to mint a fresh magic link
+      // instead of pretending the invite worked.
+      const message = e?.message || "Failed to invite";
+      const looksLikeConflict = /409|already has an account|already been registered/i.test(message);
+      if (looksLikeConflict) {
+        setConflictedEmail(target);
+        setInviteResult({
+          ok: false,
+          message: `${target} already has an account. Send them a fresh magic link instead?`,
+        });
+      } else {
+        setInviteResult({ ok: false, message });
+      }
+    } finally {
+      setInviteLoading(false);
+    }
+  }
+
+  async function handleResendMagicLink(targetEmail: string) {
+    setInviteLoading(true);
+    setLinkCopied(false);
+    try {
+      const data = await api.post<{
+        email: string;
+        magic_link?: string | null;
+      }>("/api/v1/auth/resend-magic-link", { email: targetEmail });
+      setConflictedEmail(null);
+      setInviteResult({
+        ok: true,
+        message: `Fresh magic link minted for ${data.email}. Copy and send it directly.`,
+        magicLink: data.magic_link,
+      });
+    } catch (e: any) {
+      setInviteResult({
+        ok: false,
+        message: e?.message || "Failed to mint magic link",
+      });
     } finally {
       setInviteLoading(false);
     }
@@ -140,36 +182,51 @@ export default function AdminPage() {
             </Button>
           </div>
           {inviteResult && (
-            <div className="mt-3 space-y-2">
-              <div className={`flex items-center gap-2 text-sm ${
+            <div className="mt-3 space-y-3">
+              <div className={`flex items-start gap-2 text-sm ${
                 inviteResult.ok ? "text-emerald-400" : "text-red-400"
               }`}>
                 {inviteResult.ok ? (
-                  <CheckCircle2 className="h-4 w-4" />
+                  <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />
                 ) : (
-                  <AlertCircle className="h-4 w-4" />
+                  <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
                 )}
-                {inviteResult.message}
+                <span>{inviteResult.message}</span>
               </div>
+              {conflictedEmail && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleResendMagicLink(conflictedEmail)}
+                  disabled={inviteLoading}
+                  className="border-amber-500/30 text-amber-400 hover:bg-amber-500/5"
+                >
+                  {inviteLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Mail className="h-3.5 w-3.5" />}
+                  Send fresh magic link to {conflictedEmail}
+                </Button>
+              )}
               {inviteResult.ok && inviteResult.magicLink && (
-                <div className="rounded-md border border-white/[0.06] bg-white/[0.02] p-3 text-xs space-y-2">
-                  <p className="text-muted-foreground">
-                    Email may take a minute. If they don&apos;t see it, copy this magic link
-                    and send it to them directly (works on any device, expires in ~1 hour):
+                <div className="rounded-lg border border-amber-500/20 bg-amber-500/[0.04] p-3 space-y-2">
+                  <p className="text-xs text-amber-200/70 font-medium">
+                    Magic link (single-use, expires in ~1 hour)
                   </p>
                   <div className="flex items-center gap-2">
-                    <code className="flex-1 truncate rounded bg-black/30 px-2 py-1.5 text-[11px] text-amber-200/90">
+                    <code className="flex-1 truncate rounded bg-black/40 px-2 py-1.5 text-[11px] text-amber-200/90 font-mono">
                       {inviteResult.magicLink}
                     </code>
                     <Button
                       size="xs"
-                      variant="outline"
+                      variant="default"
                       onClick={copyMagicLink}
                       className="shrink-0"
                     >
                       {linkCopied ? "Copied" : "Copy"}
                     </Button>
                   </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Paste it into WhatsApp, SMS, or email. Tapping it on any device
+                    signs them straight in — no password.
+                  </p>
                 </div>
               )}
             </div>
