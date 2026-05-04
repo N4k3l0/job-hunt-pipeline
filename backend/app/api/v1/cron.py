@@ -495,47 +495,71 @@ async def cron_admin_delete_supabase_user(
     email: str,
     authorization: str | None = Header(None),
 ):
-    """Hard-delete an auth.users row by email. Used to unblock re-invites
-    when the prior invite created a half-state row but never sent the
-    email. Cron-secret protected; will refuse to delete the calling
-    admin's own row to avoid lockout."""
+    """Hard-delete a user from BOTH auth.users (Supabase) and public.users
+    (our mirror). Returns a per-table outcome so we can see exactly what
+    was removed. Used to unblock re-invites when a prior attempt left a
+    half-state row in either place. Cron-secret protected."""
     _verify_cron(authorization)
     import httpx
+    from sqlalchemy import select, delete as sql_delete
     from app.core.config import get_settings as _get_settings
+    from app.workers.discovery_tasks import create_worker_session
+    from app.models.user import User
     s = _get_settings()
     headers = {
         "apikey": s.supabase_service_key,
         "Authorization": f"Bearer {s.supabase_service_key}",
     }
+    out: dict = {"email": email}
+
+    # 1. auth.users (Supabase)
     async with httpx.AsyncClient(timeout=15.0) as client:
-        # Find the user by email (filter param is unreliable; pull list)
-        r = await client.get(
-            f"{s.supabase_url}/auth/v1/admin/users",
-            params={"per_page": 200},
-            headers=headers,
-        )
-        r.raise_for_status()
-        users = (r.json().get("users") or [])
-        match = next(
-            (u for u in users if (u.get("email") or "").lower() == email.lower()),
-            None,
-        )
-        if not match:
-            return {"deleted": False, "reason": "no auth.users row for that email"}
-        # Refuse to delete the project owner (heuristic: anyone signed in
-        # within the last 7 days who's also the only admin in our DB).
-        # Defensive but not foolproof — the operator should know.
-        del_r = await client.delete(
-            f"{s.supabase_url}/auth/v1/admin/users/{match['id']}",
-            headers=headers,
-        )
-        if del_r.status_code not in (200, 204):
-            return {
-                "deleted": False,
-                "supabase_status": del_r.status_code,
-                "supabase_body": (del_r.text or "")[:300],
-            }
-    return {"deleted": True, "email": email, "id": match["id"]}
+        try:
+            r = await client.get(
+                f"{s.supabase_url}/auth/v1/admin/users",
+                params={"per_page": 200},
+                headers=headers,
+            )
+            r.raise_for_status()
+            users = (r.json().get("users") or [])
+            match = next(
+                (u for u in users if (u.get("email") or "").lower() == email.lower()),
+                None,
+            )
+        except httpx.HTTPError as e:
+            out["auth_users"] = f"error: {type(e).__name__}: {e}"
+            match = None
+        if match:
+            del_r = await client.delete(
+                f"{s.supabase_url}/auth/v1/admin/users/{match['id']}",
+                headers=headers,
+            )
+            if del_r.status_code in (200, 204):
+                out["auth_users"] = "deleted"
+                out["auth_users_id"] = match["id"]
+            else:
+                out["auth_users"] = (
+                    f"error status={del_r.status_code} body={(del_r.text or '')[:200]}"
+                )
+        elif "auth_users" not in out:
+            out["auth_users"] = "no row"
+
+    # 2. public.users (our mirror) — match by email regardless of auth.users
+    #    state, so we clean up dangling rows even if the Supabase row was
+    #    already gone.
+    async with create_worker_session()() as db:
+        existing = (await db.execute(
+            select(User).where(User.email == email)
+        )).scalar_one_or_none()
+        if existing:
+            await db.execute(sql_delete(User).where(User.id == existing.id))
+            await db.commit()
+            out["public_users"] = "deleted"
+            out["public_users_id"] = str(existing.id)
+        else:
+            out["public_users"] = "no row"
+
+    return out
 
 
 @router.post("/admin-generate-magic-link")
