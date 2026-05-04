@@ -82,15 +82,15 @@ function StatCard({
   return (
     <div className="rounded-xl border border-white/[0.06] bg-white/[0.015] p-4 transition-colors hover:border-white/[0.12]">
       <div className="flex items-center gap-2 mb-2.5">
-        <Icon className="h-3.5 w-3.5 text-muted-foreground/70" />
-        <span className="text-[11px] uppercase tracking-[0.1em] text-muted-foreground font-medium">
+        <Icon className="h-4 w-4 text-muted-foreground" />
+        <span className="text-xs uppercase tracking-[0.1em] text-muted-foreground font-medium">
           {label}
         </span>
       </div>
-      <span className={`text-3xl font-bold tracking-tight tabular-nums block ${isZero ? "text-muted-foreground/30" : ""}`}>
+      <span className={`text-3xl font-bold tracking-tight tabular-nums block ${isZero ? "text-muted-foreground/40" : ""}`}>
         {isZero ? "—" : value}
       </span>
-      <span className="text-xs text-muted-foreground/70 mt-1 block">{sub}</span>
+      <span className="text-sm text-muted-foreground mt-1 block">{sub}</span>
     </div>
   );
 }
@@ -217,18 +217,18 @@ export default function DashboardPage() {
       {/* Header — stacks on mobile so the greeting doesn't fight the buttons */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
-          <p className="text-[11px] uppercase tracking-[0.25em] text-muted-foreground font-medium mb-1.5">
+          <p className="text-xs uppercase tracking-[0.25em] text-muted-foreground font-medium mb-1.5">
             {now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
           </p>
           <h1 className="font-display text-3xl sm:text-4xl font-semibold tracking-tight">
-            {greeting}{firstName && <span className="text-foreground/60">, {firstName}</span>}
+            {greeting}{firstName && <span className="text-foreground/70">, {firstName}</span>}
           </h1>
           <Link
             href={hint.href}
-            className={`inline-flex items-center gap-1.5 text-sm mt-2 group ${
+            className={`inline-flex items-center gap-1.5 text-sm sm:text-base mt-2 group ${
               hint.tone === "warn" ? "text-amber-400 hover:text-amber-300"
               : hint.tone === "info" ? "text-emerald-400 hover:text-emerald-300"
-              : "text-muted-foreground/70 hover:text-foreground"
+              : "text-muted-foreground hover:text-foreground"
             }`}
           >
             <span
@@ -285,8 +285,8 @@ export default function DashboardPage() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
               <Sparkles className="h-4 w-4 text-amber-400" />
-              <h2 className="text-sm font-semibold">Top matches</h2>
-              <Badge variant="secondary" className="font-mono text-[10px]">24h</Badge>
+              <h2 className="text-base font-semibold">Top matches</h2>
+              <Badge variant="secondary" className="font-mono text-xs">24h</Badge>
             </div>
             <Button variant="ghost" size="sm" render={<Link href="/dashboard/jobs" />}>
               All jobs <ChevronRight className="h-3.5 w-3.5" />
@@ -295,7 +295,7 @@ export default function DashboardPage() {
 
           <div className="rounded-xl border border-white/[0.06] overflow-hidden bg-white/[0.015]">
             {topJobs.length === 0 ? (
-              <p className="px-4 py-4 text-sm text-muted-foreground/70">
+              <p className="px-4 py-4 text-sm text-muted-foreground">
                 No matches yet — discovery runs every few hours.{" "}
                 <Link href="/dashboard/import" className="text-amber-400 hover:underline">
                   Import one manually
@@ -314,12 +314,12 @@ export default function DashboardPage() {
 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium truncate">{job.title}</span>
+                    <span className="text-base font-medium truncate">{job.title}</span>
                     {/* Only render the role badge when scoring actually
                         classified this job. Anything else would just be a
                         guess painted on the wrong half of the inbox. */}
                     {(job.role_path === "pm" || job.role_path === "ai_automation") && (
-                      <span className={`shrink-0 font-mono text-[9px] px-1.5 py-0.5 rounded-md border ${
+                      <span className={`shrink-0 font-mono text-[10px] px-1.5 py-0.5 rounded-md border ${
                         job.role_path === "pm"
                           ? "border-blue-500/20 text-blue-400 bg-blue-500/5"
                           : "border-emerald-500/20 text-emerald-400 bg-emerald-500/5"
@@ -328,30 +328,40 @@ export default function DashboardPage() {
                       </span>
                     )}
                   </div>
-                  <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-                    <span className="font-medium text-foreground/60">{job.company}</span>
-                    <span className="flex items-center gap-1">
-                      <MapPin className="h-3 w-3 opacity-50" />
-                      {job.location}
-                    </span>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-sm text-muted-foreground">
+                    <span className="font-medium text-foreground/80">{job.company}</span>
+                    {job.location && (
+                      <span className="flex items-center gap-1">
+                        <MapPin className="h-3.5 w-3.5 opacity-70" />
+                        {job.location}
+                      </span>
+                    )}
                     {job.remote_type === "full_remote" && (
                       <span className="flex items-center gap-1 text-emerald-400">
-                        <Globe className="h-3 w-3" />
+                        <Globe className="h-3.5 w-3.5" />
                         Remote
+                      </span>
+                    )}
+                    {job.discovered_at && (
+                      <span className="flex items-center gap-1 sm:hidden tabular-nums">
+                        <Clock className="h-3.5 w-3.5 opacity-70" />
+                        {timeAgo(job.discovered_at)}
                       </span>
                     )}
                   </div>
                 </div>
 
                 <div className="shrink-0 text-right hidden sm:block">
-                  <span className="text-xs font-mono text-muted-foreground">{job.salary_text}</span>
-                  <div className="flex items-center justify-end gap-1 mt-0.5 text-[11px] text-muted-foreground/40">
-                    <Clock className="h-3 w-3" />
+                  {job.salary_text && (
+                    <span className="text-sm font-mono text-foreground/80">{job.salary_text}</span>
+                  )}
+                  <div className="flex items-center justify-end gap-1 mt-0.5 text-sm text-muted-foreground tabular-nums">
+                    <Clock className="h-3.5 w-3.5" />
                     {timeAgo(job.discovered_at)}
                   </div>
                 </div>
 
-                <ArrowUpRight className="h-4 w-4 text-white/10 group-hover:text-amber-400 transition-colors shrink-0" />
+                <ArrowUpRight className="h-4 w-4 text-white/20 group-hover:text-amber-400 transition-colors shrink-0" />
               </Link>
             ))}
           </div>
@@ -362,19 +372,19 @@ export default function DashboardPage() {
           {/* Pending Actions */}
           <Card className="border-white/[0.06]">
             <CardHeader>
-              <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <CardTitle className="text-base font-semibold flex items-center gap-2">
                 <CircleDot className="h-4 w-4 text-amber-400" />
                 Actions needed
               </CardTitle>
               <CardAction>
-                <span className="font-mono text-[11px] bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded-md">
+                <span className="font-mono text-xs bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded-md">
                   {actions.length}
                 </span>
               </CardAction>
             </CardHeader>
             <CardContent className="space-y-1 -mt-1">
               {actions.length === 0 ? (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground/70 px-3 py-3">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground px-3 py-3">
                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-400/60" />
                   All clear — nothing waiting on you.
                 </div>
@@ -389,10 +399,10 @@ export default function DashboardPage() {
                         : "bg-white/10"
                   }`} />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold truncate">{action.label}</p>
-                    <p className="text-xs sm:text-sm text-muted-foreground truncate mt-0.5">{action.target}</p>
+                    <p className="text-sm sm:text-base font-semibold truncate">{action.label}</p>
+                    <p className="text-sm text-muted-foreground truncate mt-0.5">{action.target}</p>
                   </div>
-                  <span className="text-[10px] sm:text-xs text-muted-foreground shrink-0 mt-0.5">
+                  <span className="text-xs sm:text-sm text-muted-foreground shrink-0 mt-0.5 tabular-nums">
                     {action.time}
                   </span>
                 </div>
@@ -409,12 +419,12 @@ export default function DashboardPage() {
               <LinkIcon className="h-4 w-4 text-muted-foreground group-hover:text-amber-400 transition-colors" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold">Quick import</p>
-              <p className="text-xs text-muted-foreground truncate">
+              <p className="text-base font-semibold">Quick import</p>
+              <p className="text-sm text-muted-foreground truncate">
                 Paste a job URL or WhatsApp message
               </p>
             </div>
-            <ChevronRight className="h-4 w-4 text-muted-foreground/40 group-hover:text-amber-400 transition-colors shrink-0" />
+            <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-amber-400 transition-colors shrink-0" />
           </Link>
 
           {/* Pipeline snapshot removed — its three stages (Review / Applied /

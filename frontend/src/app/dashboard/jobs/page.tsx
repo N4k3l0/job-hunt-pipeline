@@ -63,7 +63,7 @@ function ScoreBadge({ score }: { score: number | null }) {
   if (score === null || score === undefined || score === 0) {
     return (
       <div className="w-10 h-10 rounded-lg bg-white/[0.03] border border-white/[0.05] flex items-center justify-center">
-        <span className="text-[11px] text-muted-foreground/40 font-mono">—</span>
+        <span className="text-base text-muted-foreground font-mono">—</span>
       </div>
     );
   }
@@ -199,7 +199,7 @@ export default function JobsInboxPage() {
       <div className="flex items-end justify-between">
         <div>
           <h1 className="font-display text-3xl font-semibold tracking-tight">Inbox</h1>
-          <p className="text-xs text-muted-foreground mt-1 font-mono tabular-nums">
+          <p className="text-sm text-muted-foreground mt-1 font-mono tabular-nums">
             {total} jobs
             {activeFilters > 0 && ` · ${filtered.length} matching`}
           </p>
@@ -218,12 +218,12 @@ export default function JobsInboxPage() {
       {/* Filters — stacks on mobile, inline on tablet+ */}
       <div className="rounded-lg bg-white/[0.02] border border-white/[0.04] p-2 space-y-2 sm:space-y-0 sm:flex sm:items-center sm:gap-1.5">
         <div className="relative w-full sm:max-w-[240px]">
-          <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/40" />
+          <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search company or title…"
-            className="pl-8 h-9 sm:h-7 text-sm sm:text-xs bg-transparent border-transparent focus:border-white/10 focus:bg-white/[0.02]"
+            className="pl-8 h-10 sm:h-9 text-sm bg-transparent border-transparent focus:border-white/10 focus:bg-white/[0.02]"
           />
         </div>
 
@@ -240,8 +240,8 @@ export default function JobsInboxPage() {
             render={
               <Button
                 variant={countryFilter ? "default" : "ghost"}
-                size="xs"
-                className="text-[11px]"
+                size="sm"
+                className="text-sm"
               >
                 <Flag className="h-3 w-3" />
                 {countryFilter || "Region"}
@@ -275,8 +275,8 @@ export default function JobsInboxPage() {
             render={
               <Button
                 variant={sourceFilter ? "default" : "ghost"}
-                size="xs"
-                className="text-[11px]"
+                size="sm"
+                className="text-sm"
               >
                 <Database className="h-3 w-3" />
                 {sourceFilter ? (SOURCE_COLORS[sourceFilter]?.label ?? sourceFilter) : "Source"}
@@ -308,7 +308,7 @@ export default function JobsInboxPage() {
               setSourceFilter(null);
               setSearch("");
             }}
-            className="text-[10px] text-amber-400/70 hover:text-amber-400 ml-1 underline underline-offset-2"
+            className="text-sm text-amber-400 hover:text-amber-300 ml-1 underline underline-offset-2"
           >
             Clear
           </button>
@@ -319,8 +319,8 @@ export default function JobsInboxPage() {
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
-              <Button variant="ghost" size="xs" className="text-[11px]">
-                <SlidersHorizontal className="h-3 w-3" />
+              <Button variant="ghost" size="sm" className="text-sm">
+                <SlidersHorizontal className="h-3.5 w-3.5" />
                 Sort
               </Button>
             }
@@ -347,14 +347,14 @@ export default function JobsInboxPage() {
         </div>
       ) : filtered.length === 0 ? (
         <div className="text-center py-20">
-          <Inbox className="h-10 w-10 mx-auto text-white/[0.06] mb-4" />
-          <p className="text-sm text-muted-foreground">
+          <Inbox className="h-10 w-10 mx-auto text-white/[0.15] mb-4" />
+          <p className="text-base text-muted-foreground">
             {total === 0
               ? "No jobs discovered yet."
               : "No jobs match your filters."}
           </p>
           {total === 0 && (
-            <p className="text-xs text-muted-foreground/50 mt-1">
+            <p className="text-sm text-muted-foreground mt-2">
               Import a job or wait for discovery to run.
             </p>
           )}
@@ -407,35 +407,35 @@ export default function JobsInboxPage() {
                   </div>
 
                   {/* Meta row 1: company always shown, prominent */}
-                  <div className="text-xs sm:text-sm font-medium text-foreground/70 truncate mt-0.5">
+                  <div className="text-sm sm:text-base font-medium text-foreground/85 truncate mt-0.5">
                     {job.company}
                   </div>
 
                   {/* Meta row 2: chips that wrap; everything visible on every screen */}
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 text-xs text-muted-foreground">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 text-sm text-muted-foreground">
                     {job.location && (
                       <span className="inline-flex items-center gap-1 min-w-0">
-                        <MapPin className="h-3 w-3 opacity-50 shrink-0" />
+                        <MapPin className="h-3.5 w-3.5 opacity-70 shrink-0" />
                         <span className="truncate max-w-[180px]">{job.location}</span>
                       </span>
                     )}
                     {job.remote_type === "full_remote" && (
                       <span className="inline-flex items-center gap-1 text-emerald-400">
-                        <Globe className="h-3 w-3" />
+                        <Globe className="h-3.5 w-3.5" />
                         Remote
                       </span>
                     )}
                     {job.salary_text && (
-                      <span className="font-mono tabular-nums text-muted-foreground/80">
+                      <span className="font-mono tabular-nums text-foreground/80">
                         {job.salary_text}
                       </span>
                     )}
                     <span className="inline-flex items-center gap-1">
                       <span className={`h-1.5 w-1.5 rounded-full ${src.dot}`} />
-                      <span className="text-muted-foreground/60">{src.label}</span>
+                      <span className="text-muted-foreground">{src.label}</span>
                     </span>
                     {job.discovered_at && (
-                      <span className="text-muted-foreground/50 tabular-nums ml-auto sm:ml-0">
+                      <span className="text-muted-foreground tabular-nums ml-auto sm:ml-0">
                         {timeAgo(job.discovered_at)}
                       </span>
                     )}
@@ -450,7 +450,7 @@ export default function JobsInboxPage() {
       {/* Pagination */}
       {total > 0 && (
         <div className="flex items-center justify-between pt-1">
-          <span className="font-mono text-[10px] text-muted-foreground/30 tabular-nums">
+          <span className="font-mono text-sm text-muted-foreground tabular-nums">
             Page {page} of {totalPages} · {total} total
           </span>
           <div className="flex items-center gap-1">
