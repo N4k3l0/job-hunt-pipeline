@@ -59,11 +59,13 @@ export async function GET(request: NextRequest) {
   }
 
   // === Implicit flow (no `?code=` in URL) ===
-  // Fragment is invisible server-side. Return a tiny HTML page with JS that
-  // reads the hash, sets the Supabase session via the JS client, and routes
-  // to /dashboard. If there's no fragment either, falls through to login.
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const supabaseAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  // The hash fragment is invisible server-side. Return an HTML page with
+  // inline JS that reads the hash and POSTs the tokens to our
+  // /auth/set-session route, which uses @supabase/ssr to write the session
+  // into HTTP cookies. (Calling setSession client-side via @supabase/
+  // supabase-js writes only to localStorage, which the middleware that
+  // gates /dashboard cannot see — that's why the page used to flash
+  // "Signing you in…" then bounce the user back to /login.)
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>Signing in…</title>
 <style>
   body{font-family:system-ui,sans-serif;background:#0a0a0a;color:#a3a3a3;
@@ -76,36 +78,41 @@ export async function GET(request: NextRequest) {
   @keyframes s{to{transform:rotate(360deg)}}
 </style></head>
 <body><div class="box" id="status"><span class="spin"></span>Signing you in…</div>
-<script type="module">
-  import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-  const supabase = createClient(${JSON.stringify(supabaseUrl)}, ${JSON.stringify(supabaseAnon)});
-  const status = document.getElementById("status");
-  const fail = (msg) => {
-    const u = new URL("/login", window.location.origin);
-    u.searchParams.set("error", "callback_hash_failed");
-    u.searchParams.set("detail", msg);
-    window.location.replace(u.toString());
-  };
-  try {
-    const hash = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : "";
-    const params = new URLSearchParams(hash);
-    const at = params.get("access_token");
-    const rt = params.get("refresh_token");
-    const errDesc = params.get("error_description") || params.get("error");
-    if (errDesc) { fail(errDesc); }
-    else if (at && rt) {
-      const { error } = await supabase.auth.setSession({ access_token: at, refresh_token: rt });
-      if (error) { fail(error.message || "setSession failed"); }
-      else {
-        window.history.replaceState(null, "", window.location.pathname);
-        window.location.replace("/dashboard");
+<script>
+  (async () => {
+    const fail = (msg) => {
+      const u = new URL("/login", window.location.origin);
+      u.searchParams.set("error", "callback_hash_failed");
+      u.searchParams.set("detail", msg);
+      window.location.replace(u.toString());
+    };
+    try {
+      const hash = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : "";
+      const params = new URLSearchParams(hash);
+      const at = params.get("access_token");
+      const rt = params.get("refresh_token");
+      const errDesc = params.get("error_description") || params.get("error");
+      if (errDesc) { return fail(errDesc); }
+      if (!at || !rt) {
+        return fail("No auth code or session token in callback URL — the magic link may have been opened twice or expired.");
       }
-    } else {
-      fail("No auth code or session token in callback URL — the magic link may have been opened twice or expired.");
+      const r = await fetch("/auth/set-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ access_token: at, refresh_token: rt }),
+        credentials: "include",
+      });
+      if (!r.ok) {
+        let detail = "set_session_failed";
+        try { detail = (await r.json()).detail || detail; } catch {}
+        return fail(detail);
+      }
+      window.history.replaceState(null, "", window.location.pathname);
+      window.location.replace("/dashboard");
+    } catch (e) {
+      fail((e && e.message) || String(e));
     }
-  } catch (e) {
-    fail((e && e.message) || String(e));
-  }
+  })();
 </script></body></html>`;
   return new NextResponse(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
