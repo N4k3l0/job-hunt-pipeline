@@ -88,16 +88,36 @@ if _USE_CELERY:
         },
     }
 else:
-    # No-op stub. Keeps the existing @celery_app.task(...) decorators
-    # valid (they return the function unchanged) while skipping the
-    # heavy celery + kombu + redis imports entirely.
+    # No-op stub. Keeps existing @celery_app.task(...) decorations valid
+    # while skipping the heavy celery + kombu + redis imports entirely.
+    #
+    # `.delay()` and `.apply_async()` exist as harmless no-ops so call
+    # sites elsewhere in the codebase don't AttributeError in production.
+    # Callers that NEED the work to actually run (e.g. resume parsing
+    # after upload) should invoke the underlying async function directly
+    # — see candidates.upload_resume for the pattern.
+    import logging as _logging
+    _noop_log = _logging.getLogger(__name__)
+
+    def _make_noop_task(fn):
+        def _delay(*a, **kw):  # pylint: disable=unused-argument
+            _noop_log.debug("NoOpCelery: skipping %s.delay()", fn.__name__)
+            return None
+
+        def _apply_async(args=None, kwargs=None, **opts):  # pylint: disable=unused-argument
+            _noop_log.debug("NoOpCelery: skipping %s.apply_async()", fn.__name__)
+            return None
+
+        fn.delay = _delay
+        fn.apply_async = _apply_async
+        return fn
+
     class _NoOpCelery:
         def task(self, *args, **kwargs):
-            def decorator(fn):
-                return fn
-            # Support both @celery_app.task and @celery_app.task(name=...)
+            # @celery_app.task — bare decorator, no parens
             if args and callable(args[0]) and not kwargs:
-                return args[0]
-            return decorator
+                return _make_noop_task(args[0])
+            # @celery_app.task(name=..., bind=True, ...)
+            return _make_noop_task
 
     celery_app = _NoOpCelery()

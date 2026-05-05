@@ -146,7 +146,6 @@ export default function ProfilePage() {
 
   // Resume upload state
   const [versionName, setVersionName] = useState("");
-  const [tags, setTags] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
@@ -228,12 +227,11 @@ export default function ProfilePage() {
   async function handleUploadResume() {
     if (!selectedFile || !versionName.trim()) return;
     uploadResume.mutate(
-      { file: selectedFile, versionName: versionName.trim(), tags },
+      { file: selectedFile, versionName: versionName.trim(), tags: "" },
       {
         onSuccess: () => {
           setSelectedFile(null);
           setVersionName("");
-          setTags("");
           if (fileInputRef.current) fileInputRef.current.value = "";
         },
       }
@@ -584,13 +582,6 @@ export default function ProfilePage() {
                     value={versionName}
                     onChange={(e) => setVersionName(e.target.value)}
                     placeholder="Version name (e.g. PM-General)"
-                    className="max-w-xs"
-                  />
-                  <Input
-                    type="text"
-                    value={tags}
-                    onChange={(e) => setTags(e.target.value)}
-                    placeholder="Tags (e.g. pm, ai-automation)"
                     className="max-w-xs"
                   />
                   <Button

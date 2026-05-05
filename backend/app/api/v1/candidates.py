@@ -270,9 +270,18 @@ async def upload_resume(
     await db.commit()
     await db.refresh(resume)
 
-    # Queue parsing task
-    from app.workers.parsing_tasks import parse_resume
-    parse_resume.delay(str(resume.id), str(user_id))
+    # Parse synchronously inside the request — production has no Celery
+    # worker, so .delay() would silently no-op. The Anthropic call takes
+    # ~10–15s which fits well within Vercel's 60s function timeout.
+    # We swallow exceptions so a flaky parse doesn't roll back the upload
+    # itself; the user can hit "Re-parse" later.
+    from app.workers.parsing_tasks import _parse_resume_async
+    try:
+        await _parse_resume_async(str(resume.id), str(user_id))
+        await db.refresh(resume)
+    except Exception as e:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).error("Resume parse failed: %s", e)
 
     return resume
 
@@ -298,9 +307,9 @@ async def trigger_parse(resume_id: UUID, user_id: CurrentUserId, db: DbSession):
     if not resume:
         raise HTTPException(status_code=404, detail="Resume not found")
 
-    from app.workers.parsing_tasks import parse_resume
-    parse_resume.delay(str(resume.id), str(user_id))
-    return {"status": "queued", "resume_id": str(resume_id)}
+    from app.workers.parsing_tasks import _parse_resume_async
+    await _parse_resume_async(str(resume.id), str(user_id))
+    return {"status": "complete", "resume_id": str(resume_id)}
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
