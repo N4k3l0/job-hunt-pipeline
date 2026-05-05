@@ -62,9 +62,15 @@ async def create_profile(data: ProfileCreate, user_id: CurrentUserId, db: DbSess
     await db.commit()
     await db.refresh(profile)
 
-    # Score all existing jobs for this new profile
-    from app.workers.scoring_tasks import batch_score_for_user
-    batch_score_for_user.delay(str(user_id))
+    # Score the newest 300 unscored jobs synchronously so a user who
+    # creates a profile (but hasn't uploaded a resume yet) still lands
+    # in a populated inbox. Pure deterministic compute, runs in seconds.
+    from app.workers.scoring_tasks import _batch_score_async
+    try:
+        await _batch_score_async(str(user_id), rescore_all=False)
+    except Exception as e:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).error("Initial scoring after profile create failed: %s", e)
 
     return profile
 
@@ -282,6 +288,18 @@ async def upload_resume(
     except Exception as e:  # noqa: BLE001
         import logging
         logging.getLogger(__name__).error("Resume parse failed: %s", e)
+
+    # Score the top 300 newest unscored jobs against the freshly-parsed
+    # profile so the inbox is populated when the user lands on it. Scoring
+    # is pure deterministic compute (no LLM calls), so 300 jobs runs in
+    # a few seconds — comfortably inside the 60s Vercel budget alongside
+    # the parse. The cron handles the longer tail later.
+    from app.workers.scoring_tasks import _batch_score_async
+    try:
+        await _batch_score_async(str(user_id), rescore_all=False)
+    except Exception as e:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).error("Initial scoring after upload failed: %s", e)
 
     return resume
 

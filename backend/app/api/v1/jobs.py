@@ -40,7 +40,10 @@ async def list_jobs(
     remote_type: str | None = None,
     sponsorship: bool = False,
     source: str | None = None,
-    min_score: float | None = None,
+    # Default to 50 so the inbox surfaces actual matches, not noise.
+    # Frontend can pass min_score=0 to show everything (including unscored
+    # jobs, which appear with overall_fit IS NULL — see filter below).
+    min_score: float | None = 50,
     sort_by: str = "score",
     status: str | None = None,
 ):

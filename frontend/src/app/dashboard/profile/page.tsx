@@ -311,7 +311,7 @@ export default function ProfilePage() {
                   id="displayName"
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
-                  placeholder="e.g. Olalekan Oderinlo"
+                  placeholder="e.g. Alex Morgan"
                 />
                 <p className="text-xs text-muted-foreground">
                   Shown in the dashboard greeting. Just your first name will be used.
