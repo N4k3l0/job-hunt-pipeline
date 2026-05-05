@@ -22,7 +22,8 @@ Extract the following:
 4. skills: Array of skills with skill_name, category (technical/soft/tool/domain), proficiency (if mentioned)
 5. education: Array with institution, degree, field, graduation_date
 6. certifications: Array of certification names
-7. links: Object with linkedin, github, portfolio, website URLs if present"""
+7. links: Object with linkedin, github, portfolio, website URLs if present
+8. target_roles: 2-3 target job titles this candidate is qualified for and likely searching for, based on their most recent role(s) and skills. Use canonical industry-standard titles (e.g. "Product Manager", "AI Engineer", "Data Scientist", "Senior Backend Engineer"). These will be used to filter the job inbox, so be precise — generic terms like "Engineer" alone are too broad."""
 
 EXTRACT_TOOL = {
     "name": "extract_resume_data",
@@ -104,6 +105,11 @@ EXTRACT_TOOL = {
                     "portfolio": {"type": "string"},
                     "website": {"type": "string"}
                 }
+            },
+            "target_roles": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "2-3 canonical job titles the candidate is qualified for, derived from recent role(s) + skills. Used to filter the job inbox."
             }
         },
         "required": ["headline", "work_history", "skills", "education"]

@@ -73,11 +73,18 @@ async def _parse_resume_async(resume_id: str, user_id: str):
         )
         profile = prof_result.scalar_one_or_none()
 
+        suggested_roles = parsed.get("target_roles") or []
+        # Strip blanks and dedupe while preserving order.
+        suggested_roles = list({r.strip(): None for r in suggested_roles if r and r.strip()}.keys())
+
         if not profile:
             profile = CandidateProfile(
                 user_id=user_id,
                 headline=parsed.get("headline"),
                 master_summary=parsed.get("summary"),
+                # Seed target_roles from the resume so a user who never
+                # touches the profile form still gets a filtered inbox.
+                target_roles=suggested_roles or None,
             )
             db.add(profile)
             await db.flush()
@@ -87,6 +94,10 @@ async def _parse_resume_async(resume_id: str, user_id: str):
                 profile.headline = parsed["headline"]
             if parsed.get("summary"):
                 profile.master_summary = parsed["summary"]
+            # Only auto-fill target_roles when the user hasn't picked any —
+            # never overwrite an explicit user choice.
+            if suggested_roles and not profile.target_roles:
+                profile.target_roles = suggested_roles
             await db.flush()
 
         # Populate work history from parsed data
