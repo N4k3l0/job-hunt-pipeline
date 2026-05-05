@@ -1,18 +1,19 @@
 import logging
 from typing import Any
 
-import anthropic
-
 from app.core.config import get_settings
+
+# anthropic is imported lazily inside _client_lazy(). The SDK + its
+# pydantic models cost ~500ms to import on Vercel's cold-start —
+# routes that never call the LLM (the inbox, /me, /jobs) should not
+# pay that cost. Imported on first .generate() call instead.
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-# Model selection per task type. The previous IDs (claude-*-4-20250514)
-# were the May 2025 release wave — long since deprecated. Updated to the
-# current Claude 4.X family (Opus 4.7 / Sonnet 4.6) per CLAUDE.md:
-#   - Sonnet 4.6 for parsing + scoring (mechanical, cost-sensitive).
-#   - Opus 4.7 for tailoring + outreach (creative, accuracy-sensitive).
+# Model selection per task type. Sonnet 4.6 for parsing + scoring
+# (mechanical, cost-sensitive); Opus 4.7 for tailoring + outreach
+# (creative, accuracy-sensitive).
 MODELS = {
     "parsing": "claude-sonnet-4-6",
     "scoring": "claude-sonnet-4-6",
@@ -23,14 +24,26 @@ MODELS = {
 class LLMClient:
     """Wrapper around Claude API with retry logic and cost tracking.
 
-    Uses anthropic.AsyncAnthropic so each call yields the event loop —
-    important inside the FastAPI request handler so tailoring's 3-5
-    sequential LLM calls don't starve other coroutines (DB queries,
-    progress callbacks) or hold the worker pool.
+    The underlying anthropic.AsyncAnthropic client is built lazily on
+    first use so importing this module is cheap. Saves ~500ms cold-start
+    per Vercel function invocation that doesn't actually call the LLM.
     """
 
     def __init__(self):
-        self.client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+        self._client = None
+        self._anthropic_module = None
+
+    def _client_lazy(self):
+        if self._client is None:
+            import anthropic
+            self._anthropic_module = anthropic
+            self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+        return self._client
+
+    @property
+    def client(self):
+        # Backwards-compat for any caller still touching .client directly.
+        return self._client_lazy()
 
     @staticmethod
     def _accepts_temperature(model: str) -> bool:
@@ -70,11 +83,17 @@ class LLMClient:
 
             return response.content[0].text
 
-        except anthropic.RateLimitError:
-            logger.warning("Rate limited on %s, will retry", task_type)
-            raise
-        except anthropic.APIError as e:
-            logger.error("Claude API error: %s", e)
+        except Exception as e:
+            # `anthropic` is imported lazily, so we can't catch its exception
+            # types directly at the top level. Use the cached module reference
+            # to distinguish rate limits from generic API errors for logging.
+            anthropic = self._anthropic_module
+            if anthropic is not None and isinstance(e, anthropic.RateLimitError):
+                logger.warning("Rate limited on %s, will retry", task_type)
+            elif anthropic is not None and isinstance(e, anthropic.APIError):
+                logger.error("Claude API error: %s", e)
+            else:
+                logger.error("Unexpected LLM error: %s", e)
             raise
 
     async def generate_structured(

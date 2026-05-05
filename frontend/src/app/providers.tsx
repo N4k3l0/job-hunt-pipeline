@@ -10,8 +10,13 @@ export function Providers({ children }: { children: React.ReactNode }) {
       new QueryClient({
         defaultOptions: {
           queries: {
-            staleTime: 5 * 60 * 1000, // 5 minutes
+            // 15 min: backend is on Vercel Python, every cold start costs
+            // 3-7s. Wider stale window means most navigations between
+            // dashboard pages serve cached data and don't pay that penalty.
+            staleTime: 15 * 60 * 1000,
+            gcTime: 30 * 60 * 1000,
             refetchOnWindowFocus: false,
+            refetchOnMount: false,
             retry: (failureCount, error: any) => {
               // Don't retry on auth errors
               if (error?.message?.includes("401") || error?.message?.includes("Unauthorized")) {
