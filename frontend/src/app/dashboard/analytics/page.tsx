@@ -20,15 +20,15 @@ function StatTile({
   return (
     <div className="rounded-xl border border-white/[0.06] bg-white/[0.015] p-4 transition-colors hover:border-white/[0.12]">
       <div className="flex items-center gap-2 mb-2.5">
-        <Icon className="h-3.5 w-3.5 text-muted-foreground/70" />
-        <span className="text-[11px] uppercase tracking-[0.1em] text-muted-foreground font-medium">
+        <Icon className="h-4 w-4 text-muted-foreground" />
+        <span className="text-xs uppercase tracking-[0.1em] text-muted-foreground font-medium">
           {label}
         </span>
       </div>
-      <span className={`text-3xl font-bold tracking-tight tabular-nums block ${isZero ? "text-muted-foreground/30" : ""}`}>
+      <span className={`text-3xl font-bold tracking-tight tabular-nums block ${isZero ? "text-muted-foreground/40" : ""}`}>
         {isZero ? "—" : display}
       </span>
-      <span className="text-xs text-muted-foreground/70 mt-1 block">{sub}</span>
+      <span className="text-sm text-muted-foreground mt-1 block">{sub}</span>
     </div>
   );
 }
@@ -116,9 +116,9 @@ export default function AnalyticsPage() {
                     className={`h-full ${stage.color} transition-all duration-500`}
                     style={{ width: `${Math.max(pct, hasAnyData && stage.count === 0 ? 0 : 1.5)}%` }}
                   />
-                  <span className="absolute inset-0 flex items-center px-3 text-xs font-medium tabular-nums">
+                  <span className="absolute inset-0 flex items-center px-3 text-sm font-medium tabular-nums">
                     {stage.count === 0 ? (
-                      <span className="text-muted-foreground/40">—</span>
+                      <span className="text-muted-foreground">—</span>
                     ) : (
                       stage.count
                     )}
@@ -128,7 +128,7 @@ export default function AnalyticsPage() {
             );
           })}
           {!hasAnyData && (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground/70 pt-2">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground pt-2">
               <Clock className="h-3.5 w-3.5" />
               Discovery is running — check back after your first few applications.
             </div>

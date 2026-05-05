@@ -146,7 +146,7 @@ export default function LoginPage() {
                     <span className="font-medium text-foreground">{email}</span>.
                   </p>
                 </div>
-                <p className="text-xs text-muted-foreground/70">
+                <p className="text-sm text-muted-foreground">
                   The link works once and expires in 1 hour.
                 </p>
                 <Button
@@ -206,7 +206,7 @@ export default function LoginPage() {
                     </>
                   )}
                 </Button>
-                <p className="text-xs text-muted-foreground/70 text-center leading-relaxed">
+                <p className="text-sm text-muted-foreground text-center leading-relaxed">
                   We'll email you a one-time link. No password required.
                 </p>
               </form>
@@ -214,7 +214,7 @@ export default function LoginPage() {
           </CardContent>
         </Card>
 
-        <p className="text-center text-xs text-muted-foreground/50">
+        <p className="text-center text-sm text-muted-foreground">
           Invite-only · Contact your admin if you don't have access
         </p>
       </div>

@@ -133,7 +133,7 @@ export default function ApplicationsPage() {
         <Card>
           <CardContent className="py-12 text-center">
             <p className="text-muted-foreground">No applications tracked yet.</p>
-            <p className="text-sm text-muted-foreground/60 mt-1">
+            <p className="text-sm text-muted-foreground mt-1">
               Approve tailored materials from the Review Queue to start tracking.
             </p>
           </CardContent>
@@ -142,10 +142,10 @@ export default function ApplicationsPage() {
         grouped.map(({ status, items: statusItems }) => (
           <Card key={status}>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm flex items-center gap-2">
+              <CardTitle className="text-base flex items-center gap-2">
                 <span className={`h-2 w-2 rounded-full ${STATUS_DOTS[status] || "bg-white/20"}`} />
                 {STATUS_LABELS[status]}
-                <Badge variant="outline" className="font-mono text-[10px] ml-1">{statusItems.length}</Badge>
+                <Badge variant="outline" className="font-mono text-xs ml-1">{statusItems.length}</Badge>
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-1">

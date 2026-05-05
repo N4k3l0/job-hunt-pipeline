@@ -55,7 +55,7 @@ function SetupChecklist({
         <X className="h-3.5 w-3.5" />
       </button>
       <div className="flex items-center gap-2 mb-1">
-        <span className="text-[11px] uppercase tracking-[0.1em] text-amber-400 font-semibold">
+        <span className="text-xs uppercase tracking-[0.1em] text-amber-400 font-semibold">
           Set up your profile
         </span>
         <span className="text-xs text-muted-foreground tabular-nums">
@@ -429,7 +429,7 @@ export default function ProfilePage() {
                         {entry.domain_tags?.length > 0 && (
                           <div className="flex gap-1">
                             {entry.domain_tags.map((tag: string) => (
-                              <Badge key={tag} variant="outline" className="text-[10px]">{tag}</Badge>
+                              <Badge key={tag} variant="outline" className="text-xs">{tag}</Badge>
                             ))}
                           </div>
                         )}
@@ -438,7 +438,7 @@ export default function ProfilePage() {
                         <ul className="mt-2 space-y-1">
                           {entry.bullets.map((b: string, i: number) => (
                             <li key={i} className="text-sm text-foreground/70 flex items-start gap-2">
-                              <span className="text-muted-foreground/40 mt-0.5 shrink-0">-</span>
+                              <span className="text-muted-foreground mt-0.5 shrink-0">-</span>
                               {b}
                             </li>
                           ))}
@@ -447,7 +447,7 @@ export default function ProfilePage() {
                       {entry.skills?.length > 0 && (
                         <div className="flex flex-wrap gap-1 mt-2">
                           {entry.skills.map((s: string) => (
-                            <Badge key={s} variant="secondary" className="text-[10px]">{s}</Badge>
+                            <Badge key={s} variant="secondary" className="text-xs">{s}</Badge>
                           ))}
                         </div>
                       )}
@@ -522,13 +522,13 @@ export default function ProfilePage() {
                 <div className="space-y-1.5">
                   {bullets.map((b: any) => (
                     <div key={b.id} className="flex items-start gap-2 rounded-lg px-3 py-2 hover:bg-white/[0.02]">
-                      <span className="text-muted-foreground/40 mt-0.5 shrink-0">-</span>
+                      <span className="text-muted-foreground mt-0.5 shrink-0">-</span>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm">{b.text}</p>
                         {b.keywords?.length > 0 && (
                           <div className="flex flex-wrap gap-1 mt-1">
                             {b.keywords.slice(0, 5).map((kw: string) => (
-                              <Badge key={kw} variant="outline" className="text-[9px]">{kw}</Badge>
+                              <Badge key={kw} variant="outline" className="text-xs">{kw}</Badge>
                             ))}
                           </div>
                         )}
@@ -648,13 +648,13 @@ export default function ProfilePage() {
                           <div className="flex items-center gap-2 mt-0.5">
                             <span className="text-xs text-muted-foreground uppercase">{resume.source_type}</span>
                             {resume.parsed_at && (
-                              <Badge variant="secondary" className="text-[10px]">Parsed</Badge>
+                              <Badge variant="secondary" className="text-xs">Parsed</Badge>
                             )}
                             {!resume.parsed_at && (
-                              <Badge variant="outline" className="text-[10px] text-amber-400 border-amber-500/20">Parsing...</Badge>
+                              <Badge variant="outline" className="text-xs text-amber-400 border-amber-500/20">Parsing...</Badge>
                             )}
                             {resume.tags?.map((tag: string) => (
-                              <Badge key={tag} variant="outline" className="text-[10px]">{tag}</Badge>
+                              <Badge key={tag} variant="outline" className="text-xs">{tag}</Badge>
                             ))}
                           </div>
                         </div>
@@ -852,7 +852,7 @@ export default function ProfilePage() {
                         <p className={`text-sm font-medium ${blocked ? "line-through text-muted-foreground" : ""}`}>
                           {src.label}
                         </p>
-                        <p className="text-xs text-muted-foreground/70">{src.note}</p>
+                        <p className="text-sm text-muted-foreground">{src.note}</p>
                       </div>
                     </label>
                   );

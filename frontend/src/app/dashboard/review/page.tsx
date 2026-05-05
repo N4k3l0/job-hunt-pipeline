@@ -102,7 +102,7 @@ function EditableMaterials({
             <Card>
               <CardContent className="pt-4 space-y-2">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                  <span className="text-xs uppercase tracking-wider text-muted-foreground">
                     {dirty && draft?.[f.key] !== undefined ? "Edited" : "Editable"}
                   </span>
                   <div className="flex items-center gap-1 ml-auto">
@@ -201,7 +201,7 @@ function RegenerateControl({
         }}
         placeholder={placeholder}
         disabled={busy}
-        className="bg-transparent text-xs placeholder:text-muted-foreground/40 focus:outline-none w-56 sm:w-64"
+        className="bg-transparent text-sm placeholder:text-muted-foreground focus:outline-none w-56 sm:w-64"
       />
       <Button
         variant="ghost"
@@ -480,7 +480,7 @@ export default function ReviewQueuePage() {
           <CardContent className="py-12 text-center">
             <FileText className="h-10 w-10 mx-auto text-muted-foreground/20 mb-3" />
             <p className="text-muted-foreground">No applications pending review.</p>
-            <p className="text-sm text-muted-foreground/60 mt-1">
+            <p className="text-sm text-muted-foreground mt-1">
               Generate tailored materials from the Jobs Inbox.
             </p>
           </CardContent>
@@ -597,7 +597,7 @@ export default function ReviewQueuePage() {
               </span>
             )}
             {review.job?.remote_type && review.job.remote_type !== "unknown" && (
-              <Badge variant="secondary" className="text-[10px] bg-emerald-500/10 text-emerald-400">
+              <Badge variant="secondary" className="text-xs bg-emerald-500/10 text-emerald-400">
                 <Globe className="h-3 w-3 mr-0.5" />
                 {review.job.remote_type === "full_remote" ? "Remote"
                   : review.job.remote_type === "hybrid" ? "Hybrid"
@@ -634,7 +634,7 @@ export default function ReviewQueuePage() {
           </CardHeader>
           <CardContent>
             <ProgressTimeline currentStep={review.progress_step} />
-            <p className="text-xs text-muted-foreground/60 mt-4 leading-relaxed">
+            <p className="text-sm text-muted-foreground mt-4 leading-relaxed">
               Tailoring usually takes 30 to 60 seconds. You can leave this page —
               the toast on completion will bring you back.
             </p>
@@ -691,7 +691,7 @@ export default function ReviewQueuePage() {
                   <span className="text-xs text-muted-foreground">Matched keywords:</span>
                   <div className="flex flex-wrap gap-1 mt-1">
                     {(review.keyword_matches.matched || []).map((kw: string) => (
-                      <Badge key={kw} variant="secondary" className="text-[10px] bg-emerald-500/10 text-emerald-400">{kw}</Badge>
+                      <Badge key={kw} variant="secondary" className="text-xs bg-emerald-500/10 text-emerald-400">{kw}</Badge>
                     ))}
                   </div>
                 </div>
@@ -699,7 +699,7 @@ export default function ReviewQueuePage() {
                   <span className="text-xs text-muted-foreground">Gaps:</span>
                   <div className="flex flex-wrap gap-1 mt-1">
                     {(review.keyword_matches.unmatched || []).map((kw: string) => (
-                      <Badge key={kw} variant="secondary" className="text-[10px] bg-amber-500/10 text-amber-400">{kw}</Badge>
+                      <Badge key={kw} variant="secondary" className="text-xs bg-amber-500/10 text-amber-400">{kw}</Badge>
                     ))}
                   </div>
                 </div>

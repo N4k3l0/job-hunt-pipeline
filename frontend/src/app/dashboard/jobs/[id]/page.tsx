@@ -201,7 +201,7 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
                 </span>
               )}
               {job.salary_text && (
-                <span className="font-mono text-xs text-muted-foreground/80">
+                <span className="font-mono text-sm text-foreground/80">
                   {job.salary_text}
                 </span>
               )}
@@ -293,7 +293,7 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
         <div className="lg:col-span-2 space-y-5">
           <Card>
             <CardHeader>
-              <CardTitle className="text-sm">Job Description</CardTitle>
+              <CardTitle className="text-base">Job Description</CardTitle>
             </CardHeader>
             <CardContent>
               {job.raw_description ? (
@@ -314,12 +314,12 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
           {entities && ((entities.skills?.length ?? 0) > 0 || (entities.requirements?.length ?? 0) > 0) && (
             <Card>
               <CardHeader>
-                <CardTitle className="text-sm">Requirements & Skills</CardTitle>
+                <CardTitle className="text-base">Requirements & Skills</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 {entities.requirements && entities.requirements.length > 0 && (
                   <div>
-                    <p className="text-xs text-muted-foreground mb-2">Requirements</p>
+                    <p className="text-sm text-muted-foreground mb-2 font-medium">Requirements</p>
                     <ul className="space-y-1">
                       {entities.requirements.map((r: string, i: number) => (
                         <li key={i} className="text-sm flex items-start gap-2">
@@ -331,7 +331,7 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
                 )}
                 {entities.skills && entities.skills.length > 0 && (
                   <div>
-                    <p className="text-xs text-muted-foreground mb-2">Skills</p>
+                    <p className="text-sm text-muted-foreground mb-2 font-medium">Skills</p>
                     <div className="flex flex-wrap gap-1.5">
                       {entities.skills.map((s: string, i: number) => (
                         <Badge key={i} variant="secondary" className="text-xs">{s}</Badge>
@@ -341,7 +341,7 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
                 )}
                 {entities.nice_to_have && entities.nice_to_have.length > 0 && (
                   <div>
-                    <p className="text-xs text-muted-foreground mb-2">Nice to have</p>
+                    <p className="text-sm text-muted-foreground mb-2 font-medium">Nice to have</p>
                     <div className="flex flex-wrap gap-1.5">
                       {entities.nice_to_have.map((s: string, i: number) => (
                         <Badge key={i} variant="outline" className="text-xs">{s}</Badge>
@@ -359,7 +359,7 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
           {/* Deep Score / AI Assessment */}
           <Card>
             <CardHeader>
-              <CardTitle className="text-sm">Fit Assessment</CardTitle>
+              <CardTitle className="text-base">Fit Assessment</CardTitle>
               <CardDescription>
                 {score?.deep_score ? "AI-powered resume vs job analysis" : "Get a detailed fit analysis"}
               </CardDescription>
@@ -398,11 +398,11 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
                     <div>
                       <div className="flex items-center gap-1.5 mb-2">
                         <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
-                        <span className="text-xs font-medium">Strengths</span>
+                        <span className="text-sm font-medium">Strengths</span>
                       </div>
                       <ul className="space-y-1.5">
                         {score.deep_score.strengths.map((s: string, i: number) => (
-                          <li key={i} className="text-xs text-muted-foreground leading-relaxed">
+                          <li key={i} className="text-sm text-muted-foreground leading-relaxed">
                             {s}
                           </li>
                         ))}
@@ -415,11 +415,11 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
                     <div>
                       <div className="flex items-center gap-1.5 mb-2">
                         <AlertCircle className="h-3.5 w-3.5 text-amber-400" />
-                        <span className="text-xs font-medium">Gaps</span>
+                        <span className="text-sm font-medium">Gaps</span>
                       </div>
                       <ul className="space-y-1.5">
                         {score.deep_score.gaps.map((g: string, i: number) => (
-                          <li key={i} className="text-xs text-muted-foreground leading-relaxed">
+                          <li key={i} className="text-sm text-muted-foreground leading-relaxed">
                             {g}
                           </li>
                         ))}
@@ -445,7 +445,7 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
                 </>
               ) : (
                 <div className="text-center py-4">
-                  <p className="text-xs text-muted-foreground mb-3">
+                  <p className="text-sm text-muted-foreground mb-3">
                     Compare your resume against this job posting
                   </p>
                   <Button
@@ -472,7 +472,7 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-sm">Details</CardTitle>
+              <CardTitle className="text-base">Details</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               {job.employment_type && (

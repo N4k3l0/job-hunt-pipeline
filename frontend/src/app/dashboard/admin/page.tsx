@@ -207,15 +207,15 @@ export default function AdminPage() {
               )}
               {inviteResult.ok && inviteResult.magicLink && (
                 <div className="rounded-lg border border-amber-500/20 bg-amber-500/[0.04] p-3 space-y-2">
-                  <p className="text-xs text-amber-200/70 font-medium">
+                  <p className="text-sm text-amber-200 font-medium">
                     Magic link (single-use, expires in ~1 hour)
                   </p>
                   <div className="flex items-center gap-2">
-                    <code className="flex-1 truncate rounded bg-black/40 px-2 py-1.5 text-[11px] text-amber-200/90 font-mono">
+                    <code className="flex-1 truncate rounded bg-black/40 px-2 py-1.5 text-xs text-amber-200 font-mono">
                       {inviteResult.magicLink}
                     </code>
                     <Button
-                      size="xs"
+                      size="sm"
                       variant="default"
                       onClick={copyMagicLink}
                       className="shrink-0"
@@ -223,7 +223,7 @@ export default function AdminPage() {
                       {linkCopied ? "Copied" : "Copy"}
                     </Button>
                   </div>
-                  <p className="text-[11px] text-muted-foreground">
+                  <p className="text-sm text-muted-foreground">
                     Paste it into WhatsApp, SMS, or email. Tapping it on any device
                     signs them straight in — no password.
                   </p>
