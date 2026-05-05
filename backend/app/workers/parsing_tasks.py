@@ -47,6 +47,14 @@ async def _parse_resume_async(resume_id: str, user_id: str):
             logger.error("Resume %s not found", resume_id)
             return
 
+        # Idempotency guard: if this resume was already parsed, do nothing.
+        # Without this, re-uploading or hitting the re-parse endpoint would
+        # duplicate work_history / skills / education / bullets rows under
+        # the profile.
+        if resume.parsed_at is not None:
+            logger.info("Resume %s already parsed at %s — skipping", resume_id, resume.parsed_at)
+            return
+
         # Download file from storage
         # Extract bucket path from URL
         path = f"{user_id}/{resume.file_url.split('/')[-1]}"

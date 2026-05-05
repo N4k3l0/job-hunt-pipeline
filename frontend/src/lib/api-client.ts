@@ -52,6 +52,13 @@ async function apiRequest<T>(
     throw new Error(error.detail || `API error: ${response.status}`);
   }
 
+  // 204 No Content has no body — calling .json() on it rejects, which was
+  // breaking the resume delete button (mutation never fired onSuccess so
+  // the row never disappeared from the UI even though the backend deleted it).
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
   return response.json();
 }
 
