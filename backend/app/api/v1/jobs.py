@@ -119,8 +119,19 @@ async def list_jobs(
         query = query.where(JobEntity.sponsorship_available == True)
     if source:
         query = query.where(JobSource.name == source)
+    # Only apply min_score if the user has scored jobs at all. A new
+    # account with no scores yet would otherwise see an empty inbox
+    # because LEFT JOINs leave overall_fit IS NULL, and NULL >= 50 is
+    # false. Falling back to the apply_user_filters relevance filter
+    # keeps the inbox useful while scoring catches up.
+    has_scores = False
     if min_score is not None:
-        query = query.where(JobScore.overall_fit >= min_score)
+        has_scores_q = select(func.count()).select_from(JobScore).where(
+            JobScore.user_id == user_id
+        )
+        has_scores = ((await db.execute(has_scores_q)).scalar() or 0) > 0
+        if has_scores:
+            query = query.where(JobScore.overall_fit >= min_score)
     if role_type:
         if role_type == "pm":
             keywords = [
@@ -169,7 +180,7 @@ async def list_jobs(
         count_base = count_base.where(JobEntity.sponsorship_available == True)
     if source:
         count_base = count_base.where(JobSource.name == source)
-    if min_score is not None:
+    if min_score is not None and has_scores:
         count_base = count_base.where(JobScore.overall_fit >= min_score)
     if role_type:
         count_base = count_base.where(or_(*[func.lower(Job.title).like(kw) for kw in keywords]))
