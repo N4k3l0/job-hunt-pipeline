@@ -114,6 +114,123 @@ async def update_profile(data: ProfileUpdate, user_id: CurrentUserId, db: DbSess
 # ── Work History ─────────────────────────────────────────────────────────────
 
 
+@router.post("/auto-suggest-roles")
+async def auto_suggest_roles(user_id: CurrentUserId, db: DbSession):
+    """One-shot heal for users whose target_roles is empty.
+
+    Older users (parsed before commit 0833c1e shipped the auto-suggest
+    in the resume parser) are stuck with target_roles=null forever
+    because the resume parse is idempotent. Without target_roles the
+    scorer falls back to running BOTH paths and inflates AI Engineer
+    titles via tech-adjacent skills.
+
+    If they already have target_roles set, this is a no-op. If they
+    don't have any parsed resume content yet, we can't infer anything
+    — return suggested:[] and let them fill it manually.
+
+    Otherwise: ask Claude to read their work_history + skills and
+    suggest 2-3 target roles, save them, and rescore the whole inbox
+    so the change takes effect immediately.
+    """
+    from app.models.candidate import CandidateProfile, CandidateWorkHistory, CandidateSkill
+    from sqlalchemy.orm import selectinload
+
+    result = await db.execute(
+        select(CandidateProfile)
+        .where(CandidateProfile.user_id == user_id)
+        .options(
+            selectinload(CandidateProfile.work_history),
+            selectinload(CandidateProfile.skills),
+        )
+    )
+    profile = result.scalar_one_or_none()
+    if not profile:
+        return {"suggested": [], "applied": False, "reason": "no_profile"}
+
+    # Already set — don't clobber.
+    if profile.target_roles and len(profile.target_roles) > 0:
+        return {"suggested": profile.target_roles, "applied": False, "reason": "already_set"}
+
+    # Need parsed resume content to infer anything sensible.
+    if not profile.work_history:
+        return {"suggested": [], "applied": False, "reason": "no_work_history"}
+
+    # Build a compact summary for Claude — recent titles + companies + headline + skills.
+    sorted_history = sorted(
+        profile.work_history,
+        key=lambda w: (w.start_date or w.end_date) or __import__("datetime").date.min,
+        reverse=True,
+    )
+    recent_titles = [
+        f"{w.title} @ {w.company}"
+        for w in sorted_history[:5]
+        if w.title and w.company
+    ]
+    skills = [
+        s.skill_name for s in profile.skills
+        if s.skill_name and s.category in ("technical", "tool", "domain")
+    ][:30]
+
+    from app.llm.client import llm_client
+    prompt = (
+        "Pick 2–3 canonical target job titles for this candidate. Use industry-"
+        "standard titles ('Product Manager', 'AI Engineer', 'Data Scientist', "
+        "'Senior Backend Engineer'). Be specific — 'Engineer' alone is too broad. "
+        "These will filter the candidate's job inbox so precision matters.\n\n"
+        f"Headline: {profile.headline or '(none)'}\n"
+        f"Recent roles: {'; '.join(recent_titles) or '(none)'}\n"
+        f"Skills: {', '.join(skills) or '(none)'}"
+    )
+
+    suggest_tool = {
+        "name": "suggest_roles",
+        "description": "Suggest 2-3 canonical target job titles",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "target_roles": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "2-3 specific canonical job titles.",
+                }
+            },
+            "required": ["target_roles"],
+        },
+    }
+
+    try:
+        result = await llm_client.generate_structured(
+            task_type="parsing",
+            system_prompt="You suggest precise canonical job titles based on a candidate's profile.",
+            user_prompt=prompt,
+            tools=[suggest_tool],
+            max_tokens=400,
+        )
+    except Exception as e:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).error("auto_suggest_roles LLM failed: %s", e)
+        return {"suggested": [], "applied": False, "reason": "llm_error"}
+
+    suggested = result.get("target_roles") or []
+    suggested = [s.strip() for s in suggested if s and s.strip()]
+    if not suggested:
+        return {"suggested": [], "applied": False, "reason": "empty_suggestion"}
+
+    profile.target_roles = suggested
+    await db.commit()
+
+    # Now that target_roles is set, rescore everything so the inbox
+    # reflects the corrected intent (PM path only, AI titles excluded).
+    from app.workers.scoring_tasks import _batch_score_async
+    try:
+        await _batch_score_async(str(user_id), rescore_all=True)
+    except Exception as e:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).error("Rescore after auto-suggest failed: %s", e)
+
+    return {"suggested": suggested, "applied": True, "reason": "ok"}
+
+
 @router.get("/work-history", response_model=list[WorkHistoryResponse])
 async def list_work_history(user_id: CurrentUserId, db: DbSession):
     profile = await _get_profile(user_id, db)

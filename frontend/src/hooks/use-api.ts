@@ -137,6 +137,24 @@ export function useDeleteResume() {
   });
 }
 
+export function useAutoSuggestRoles() {
+  const qc = useQueryClient();
+  return useMutation<{
+    suggested: string[];
+    applied: boolean;
+    reason: string;
+  }>({
+    mutationFn: () => api.post("/api/v1/candidates/auto-suggest-roles"),
+    onSuccess: (data) => {
+      if (data.applied) {
+        qc.invalidateQueries({ queryKey: ["jobs"] });
+        qc.invalidateQueries({ queryKey: ["analytics"] });
+        qc.invalidateQueries({ queryKey: ["profile"] });
+      }
+    },
+  });
+}
+
 export function useRescoreInbox() {
   const qc = useQueryClient();
   return useMutation({
