@@ -101,14 +101,188 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
     // once we've navigated, so the security trade-off is the same.
     const popup = window.open("about:blank", "_blank");
     if (popup) {
-      // Friendly placeholder so the new tab isn't just blank during the
-      // ~1-12s the resolver might take.
-      popup.document.write(
-        '<title>Opening posting…</title>' +
-        '<style>body{margin:0;display:flex;align-items:center;justify-content:center;' +
-        'height:100vh;font-family:system-ui;background:#0a0a0a;color:#a3a3a3}</style>' +
-        '<div>Resolving direct apply link…</div>'
-      );
+      // Creative loading state. The resolver chain can take 1–12s on the
+      // slow path (Firecrawl + slug-guess + Claude web_search), so a blank
+      // tab feels broken. Stages mirror the actual backend pipeline so the
+      // copy is honest, with a smooth tween on the progress bar so the
+      // user sees forward motion every frame.
+      popup.document.write(`<!doctype html>
+<html><head><title>Finding posting…</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background: radial-gradient(ellipse 80% 50% at 50% 0%, rgba(251,191,36,0.08), transparent 70%), #0a0a0a;
+    color: #fafafa;
+    padding: 24px;
+  }
+  .card {
+    width: 100%; max-width: 420px;
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 16px;
+    padding: 28px;
+    background: rgba(255,255,255,0.015);
+    box-shadow: 0 24px 48px -16px rgba(0,0,0,0.5);
+  }
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px; border-radius: 999px;
+    background: rgba(251,191,36,0.08);
+    border: 1px solid rgba(251,191,36,0.2);
+    color: #fbbf24; font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    margin-bottom: 18px;
+  }
+  .pulse {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: #fbbf24;
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: 0.4 } 50% { opacity: 1 } }
+  h1 {
+    font-size: 18px; margin: 0 0 6px; font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  .sub {
+    color: #a3a3a3; font-size: 14px; margin: 0 0 22px;
+    line-height: 1.5;
+  }
+  .stage {
+    color: #d4d4d4; font-size: 14px; margin-bottom: 14px;
+    min-height: 21px; display: flex; align-items: center; gap: 10px;
+    transition: color 0.3s;
+  }
+  .check {
+    width: 14px; height: 14px; border-radius: 50%;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 9px; flex-shrink: 0;
+    transition: all 0.3s;
+  }
+  .stage.done .check {
+    background: rgba(34,197,94,0.15);
+    border-color: rgba(34,197,94,0.4);
+    color: #4ade80;
+  }
+  .stage.done .check::before { content: "✓"; }
+  .stage.active .check {
+    background: rgba(251,191,36,0.15);
+    border-color: rgba(251,191,36,0.4);
+  }
+  .stage.active .check::before {
+    content: ""; width: 6px; height: 6px; border-radius: 50%;
+    background: #fbbf24; animation: pulse 1.2s ease-in-out infinite;
+  }
+  .bar {
+    width: 100%; height: 6px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 999px; overflow: hidden;
+    margin-top: 6px;
+  }
+  .fill {
+    height: 100%;
+    background: linear-gradient(90deg, #f59e0b 0%, #fbbf24 50%, #fde047 100%);
+    width: 0%; border-radius: 999px;
+    transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+    box-shadow: 0 0 12px rgba(251,191,36,0.4);
+  }
+  .pct {
+    font-size: 11px; color: #737373; margin-top: 8px;
+    font-variant-numeric: tabular-nums; letter-spacing: 0.04em;
+    display: flex; justify-content: space-between;
+  }
+  .tip {
+    margin-top: 18px; padding: 10px 12px;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.04);
+    border-radius: 8px;
+    font-size: 12px; color: #a3a3a3;
+    line-height: 1.5;
+  }
+</style></head>
+<body>
+  <div class="card">
+    <div class="badge"><div class="pulse"></div> RESOLVING</div>
+    <h1>Finding the actual posting</h1>
+    <p class="sub">Skipping aggregators — landing you on the company's real apply page.</p>
+    <div class="stage active" data-i="0"><div class="check"></div><span>Checking the company's ATS</span></div>
+    <div class="stage" data-i="1"><div class="check"></div><span>Scanning the careers page</span></div>
+    <div class="stage" data-i="2"><div class="check"></div><span>Verifying with Claude</span></div>
+    <div class="stage" data-i="3"><div class="check"></div><span>Opening posting</span></div>
+    <div class="bar"><div class="fill" id="fill"></div></div>
+    <div class="pct"><span id="pctNum">0%</span><span id="elapsed">0.0s</span></div>
+    <div class="tip" id="tip">Most postings resolve in under 3 seconds.</div>
+  </div>
+<script>
+  // Stage timings tuned to the actual backend pipeline. Total budget ~12s.
+  // Each stage owns a slice of the progress bar; we tween smoothly between
+  // them so the user always sees motion. If the API resolves fast, the
+  // popup gets navigated away before the later stages even render.
+  var stages = [
+    { from: 0,  to: 30, ms: 2000, tip: "Most postings resolve in under 3 seconds." },
+    { from: 30, to: 55, ms: 2500, tip: "Aggregator pages need a render — adding ~2s." },
+    { from: 55, to: 85, ms: 5500, tip: "Claude is searching the web for the canonical link." },
+    { from: 85, to: 96, ms: 1500, tip: "Almost there." },
+  ];
+  var fill = document.getElementById('fill');
+  var pctNum = document.getElementById('pctNum');
+  var tipEl = document.getElementById('tip');
+  var elapsedEl = document.getElementById('elapsed');
+  var startedAt = performance.now();
+  var stageEls = document.querySelectorAll('.stage');
+
+  function setStage(i) {
+    stageEls.forEach(function (el, idx) {
+      el.classList.remove('active', 'done');
+      if (idx < i) el.classList.add('done');
+      else if (idx === i) el.classList.add('active');
+    });
+    if (stages[i] && stages[i].tip) tipEl.textContent = stages[i].tip;
+  }
+
+  function tween(from, to, ms) {
+    return new Promise(function (resolve) {
+      var t0 = performance.now();
+      function frame(now) {
+        var p = Math.min(1, (now - t0) / ms);
+        // ease-out cubic so it slows toward the end of each stage,
+        // making the wait feel less stalled when the API is slow.
+        var eased = 1 - Math.pow(1 - p, 3);
+        var v = from + (to - from) * eased;
+        fill.style.width = v + '%';
+        pctNum.textContent = Math.round(v) + '%';
+        if (p < 1) requestAnimationFrame(frame); else resolve();
+      }
+      requestAnimationFrame(frame);
+    });
+  }
+
+  setInterval(function () {
+    var s = (performance.now() - startedAt) / 1000;
+    elapsedEl.textContent = s.toFixed(1) + 's';
+  }, 100);
+
+  (async function () {
+    for (var i = 0; i < stages.length; i++) {
+      setStage(i);
+      await tween(stages[i].from, stages[i].to, stages[i].ms);
+    }
+    // If we're still here after all stages, the API is taking unusually
+    // long — keep the bar inching forward so it doesn't look frozen.
+    setStage(stages.length - 1);
+    var slow = 96;
+    setInterval(function () {
+      slow = Math.min(99, slow + 0.1);
+      fill.style.width = slow + '%';
+      pctNum.textContent = Math.round(slow) + '%';
+    }, 500);
+  })();
+</script></body></html>`);
+      popup.document.close();
     }
     try {
       const data = await api.post<{ url: string; is_direct_ats: boolean }>(

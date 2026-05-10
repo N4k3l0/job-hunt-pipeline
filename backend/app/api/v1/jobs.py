@@ -13,7 +13,7 @@ from app.models.job import Job, JobContact, JobEntity, JobSource
 from app.models.scoring import JobScore
 from app.models.candidate import CandidateProfile
 from app.models.tracking import ApplicationTracking
-from app.services.discovery.ats_resolver import find_direct_apply, is_ats_url
+from app.services.discovery.ats_resolver import find_direct_apply, is_ats_url, _is_aggregator
 
 logger = logging.getLogger(__name__)
 
@@ -469,8 +469,10 @@ async def resolve_apply_url(job_id: UUID, user_id: CurrentUserId, db: DbSession)
         title=job.title or "",
         source_url=source,
     )
-    if resolved and resolved != job.apply_url and is_ats_url(resolved):
-        # Cache the better URL on the job so the next click skips resolution.
+    if resolved and resolved != job.apply_url and not _is_aggregator(resolved):
+        # Cache any verified non-aggregator URL — Claude can return company
+        # careers-page URLs that aren't on the strict ATS host list but are
+        # still canonical direct-apply links worth caching.
         job.apply_url = resolved
         await db.commit()
     final_url = resolved or source

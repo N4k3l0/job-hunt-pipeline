@@ -416,6 +416,117 @@ async def follow_to_ats_via_firecrawl(source_url: str) -> str | None:
     return None
 
 
+_AGGREGATOR_HOSTS: tuple[str, ...] = (
+    "weworkremotely.com", "remoteok.com", "remoteok.io",
+    "indeed.com", "linkedin.com", "glassdoor.com",
+    "ziprecruiter.com", "himalayas.app", "remotive.com",
+    "dailyremote.com", "arbeitnow.com", "google.com",
+    "monster.com", "simplyhired.com", "wellfound.com",
+)
+
+
+def _is_aggregator(url: str) -> bool:
+    try:
+        host = httpx.URL(url).host or ""
+    except Exception:
+        return False
+    return any(host == h or host.endswith("." + h) for h in _AGGREGATOR_HOSTS)
+
+
+async def find_direct_apply_via_claude(
+    company: str,
+    title: str,
+    source_url: str | None,
+) -> str | None:
+    """Last-resort: ask Claude with web_search to find the canonical
+    direct apply URL. Handles companies on ATSes we don't slug-guess
+    (BambooHR, ICIMS, Pinpoint, custom-hosted boards) and aggregator
+    company-name mismatches that break the regex.
+
+    ~5–10s and a few cents per call. Cached on job.apply_url so repeat
+    clicks on the same job are instant.
+    """
+    import anthropic
+    from app.core.config import get_settings
+    cfg = get_settings()
+
+    record_tool = {
+        "name": "record_apply_url",
+        "description": "Record the verified direct apply URL for the role.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "Direct apply URL on the company's ATS (Greenhouse/Lever/Ashby/Workable/etc.) or company careers page. Pass null if you cannot verify a direct posting exists.",
+                },
+                "confidence": {
+                    "type": "string",
+                    "enum": ["low", "medium", "high"],
+                },
+                "notes": {
+                    "type": "string",
+                    "description": "One sentence on what you searched.",
+                },
+            },
+            "required": ["confidence", "notes"],
+        },
+    }
+
+    system = (
+        "You find the direct application URL for a job posting.\n\n"
+        "GOAL: Return a URL on the company's actual ATS (Greenhouse, Lever, "
+        "Ashby, Workable, SmartRecruiters, BambooHR, ICIMS, Recruitee, "
+        "Personio, Teamtailor, Breezy, Pinpoint, Jobvite, etc.) or on the "
+        "company's own /careers or /jobs page where they list this specific role.\n\n"
+        "NEVER return:\n"
+        "- Aggregator URLs (weworkremotely, remoteok, indeed, linkedin/jobs, glassdoor, ziprecruiter, monster, wellfound)\n"
+        "- Search result pages\n"
+        "- Generic company homepages without the role\n\n"
+        "If the role exists ONLY on aggregators and not on the company's own site, return null.\n\n"
+        "Use web_search 2–5 times. Try queries like:\n"
+        "  '[Company] careers [Title]'\n"
+        "  'site:greenhouse.io OR site:lever.co OR site:ashbyhq.com [Company]'\n"
+        "Then call record_apply_url EXACTLY ONCE with your best answer."
+    )
+
+    user = (
+        f"Find the direct application URL for **{title}** at **{company}**.\n"
+        + (f"\nAggregator URL we already have (do NOT return this back): {source_url}" if source_url else "")
+    )
+
+    try:
+        client = anthropic.AsyncAnthropic(api_key=cfg.anthropic_api_key)
+        response = await client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=1500,
+            system=system,
+            tools=[
+                {"type": "web_search_20250305", "name": "web_search", "max_uses": 5},
+                record_tool,
+            ],
+            messages=[{"role": "user", "content": user}],
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Claude apply-resolver failed for %s @ %s: %s", title, company, e)
+        return None
+
+    for block in response.content:
+        if getattr(block, "type", None) == "tool_use" and block.name == "record_apply_url":
+            url = (block.input or {}).get("url")
+            if not url or not isinstance(url, str):
+                return None
+            url = url.strip()
+            if not url.startswith(("http://", "https://")):
+                return None
+            if _is_aggregator(url):
+                logger.warning("Claude returned aggregator URL %s — discarding", url)
+                return None
+            logger.info("Claude resolved %s @ %s → %s", title, company, url)
+            return url
+    return None
+
+
 async def find_direct_apply(
     company: str,
     title: str,
@@ -431,7 +542,9 @@ async def find_direct_apply(
        fall through to Firecrawl which renders the page properly.
     4. Slug-guess across Greenhouse → Lever → Ashby → SmartRecruiters
        (1-12s, cached on the row).
-    5. Otherwise → None, caller falls back to source URL.
+    5. Claude + web_search — handles ATSes we don't slug-guess (BambooHR,
+       ICIMS, Pinpoint, custom careers pages) and company-name mismatches.
+    6. Otherwise → None, caller falls back to source URL.
     """
     if source_url and is_ats_url(source_url):
         return source_url
@@ -455,5 +568,15 @@ async def find_direct_apply(
         except Exception as e:  # noqa: BLE001
             logger.warning("Firecrawl fallback failed for %s: %s", source_url, e)
 
-    # Step 4: API resolve (opens its own client with JSON headers)
-    return await resolve_ats_url(company, title)
+    # Step 4: API slug-guess (cheap, free)
+    via_slug = await resolve_ats_url(company, title)
+    if via_slug:
+        return via_slug
+
+    # Step 5: Claude + web_search (slow, $0.02-ish per call)
+    if company and title:
+        via_claude = await find_direct_apply_via_claude(company, title, source_url)
+        if via_claude:
+            return via_claude
+
+    return None
