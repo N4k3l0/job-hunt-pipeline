@@ -78,6 +78,48 @@ def _user_wants_product(target_roles: list[str] | None) -> bool:
     return any(_USER_WANTS_PRODUCT_RE.search(r or "") for r in target_roles)
 
 
+# Symmetric to _USER_WANTS_PRODUCT_RE: detects when target_roles
+# explicitly include an AI/automation engineering role. Without an
+# AI-side exclusion, a PM whose resume mentions Python/ML was seeing
+# "AI Engineer", "ML Engineer" leak in via skill-keyword matches AND
+# the scorer was running both paths and inflating those titles to 90.
+_USER_WANTS_AI_RE = _re.compile(
+    r"\b("
+    r"(ai|ml|data|llm|nlp|machine\s+learning|computer\s+vision|automation|rpa)"
+    r"\s+(engineer|developer|scientist|architect|specialist|ops)"
+    r"|mlops|llmops|aiops"
+    r"|prompt\s+engineer"
+    r"|(automation|ai|workflow)\s+(lead|architect)"
+    r"|software\s+engineer|backend\s+engineer|full[\s-]?stack\s+engineer"
+    r")",
+    _re.I,
+)
+
+
+def _user_wants_ai(target_roles: list[str] | None) -> bool:
+    """True only if target_roles contains an explicit AI/automation
+    engineering role. 'AI Product Manager' does NOT count — that's PM."""
+    if not target_roles:
+        return False
+    return any(_USER_WANTS_AI_RE.search(r or "") for r in target_roles)
+
+
+# Postgres POSIX regex for AI/automation engineering titles to EXCLUDE
+# from a non-AI user's inbox. Uses `\y` word boundaries.
+_AI_TITLE_REGEX = (
+    r"\y("
+    r"(ai|ml|data|llm|nlp|automation|rpa)"
+    r"\s+(engineer|engineers|engineering|developer|developers|"
+    r"scientist|scientists|architect|architects|specialist|specialists|ops)"
+    r"|machine\s+learning\s+(engineer|scientist|architect|specialist|ops)"
+    r"|computer\s+vision\s+(engineer|scientist|architect|specialist|ops)"
+    r"|mlops|llmops|aiops"
+    r"|prompt\s+engineer"
+    r"|software\s+engineer|backend\s+engineer|full[\s-]?stack\s+engineer"
+    r")\y"
+)
+
+
 def build_role_keywords(target_roles: list[str] | None) -> list[str]:
     """Expand a user's target_roles into SQL LIKE patterns. Mirrors the
     behaviour the inbox has used since launch — adding role-family synonyms
@@ -184,6 +226,13 @@ def apply_user_filters(
     # things like "9pm shift" or "Spammer".
     if not _user_wants_product(target_roles):
         query = query.where(not_(Job.title.op("~*")(_PRODUCT_TITLE_REGEX)))
+
+    # Symmetric AI/engineering exclusion: a PM whose resume mentions Python
+    # or ML was getting "AI Engineer" / "ML Engineer" jobs leaking in via
+    # skill-keyword matches, and the scorer was inflating them to 90.
+    # If the user hasn't explicitly targeted an engineering role, drop them.
+    if not _user_wants_ai(target_roles):
+        query = query.where(not_(Job.title.op("~*")(_AI_TITLE_REGEX)))
 
     if blocked_sources:
         query = query.where(

@@ -122,6 +122,17 @@ export function useDeleteResume() {
   });
 }
 
+export function useRescoreInbox() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post("/api/v1/candidates/rescore"),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      qc.invalidateQueries({ queryKey: ["analytics"] });
+    },
+  });
+}
+
 // ── Bullets ──────────────────────────────────────────────────────────────────
 
 export function useBullets() {

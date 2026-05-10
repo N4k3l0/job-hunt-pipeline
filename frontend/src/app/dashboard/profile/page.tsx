@@ -18,7 +18,7 @@ import {
   useProfile, useCreateProfile, useUpdateProfile,
   useResumes, useUploadResume, useDeleteResume,
   useWorkHistory, useSkills, useBullets,
-  useCurrentUser, useUpdateMe,
+  useCurrentUser, useUpdateMe, useRescoreInbox,
 } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/toast";
 
@@ -126,6 +126,7 @@ export default function ProfilePage() {
   const { data: bullets } = useBullets();
   const uploadResume = useUploadResume();
   const deleteResume = useDeleteResume();
+  const rescoreInbox = useRescoreInbox();
 
   // Form state
   const [headline, setHeadline] = useState("");
@@ -916,14 +917,31 @@ export default function ProfilePage() {
                   ))}
                 </div>
               </div>
-              <div className="flex items-center gap-3 mt-4">
+              <div className="flex flex-wrap items-center gap-3 mt-4">
                 <Button onClick={handleSavePreferences} disabled={isSavingProfile}>
                   {isSavingProfile ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                   {isSavingProfile ? "Saving..." : "Save Preferences"}
                 </Button>
+                {/* One-tap rescore: useful right after correcting target_roles
+                    or whenever the inbox feels off. Wipes existing scores
+                    and recomputes against the current profile. */}
+                <Button
+                  variant="outline"
+                  onClick={() => rescoreInbox.mutate()}
+                  disabled={rescoreInbox.isPending}
+                  title="Wipe existing scores and re-rank every job against your current profile."
+                >
+                  {rescoreInbox.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                  {rescoreInbox.isPending ? "Re-scoring…" : "Re-score inbox"}
+                </Button>
                 {prefsSaved && (
                   <span className="flex items-center gap-1.5 text-sm text-emerald-400">
                     <CheckCircle2 className="h-4 w-4" /> Saved
+                  </span>
+                )}
+                {rescoreInbox.isSuccess && (
+                  <span className="flex items-center gap-1.5 text-sm text-emerald-400">
+                    <CheckCircle2 className="h-4 w-4" /> Inbox refreshed
                   </span>
                 )}
               </div>

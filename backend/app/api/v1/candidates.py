@@ -85,11 +85,29 @@ async def update_profile(data: ProfileUpdate, user_id: CurrentUserId, db: DbSess
         raise HTTPException(status_code=404, detail="Profile not found")
 
     update_data = data.model_dump(exclude_none=True)
+
+    # Detect target_roles changes — if the user's intent shifted (e.g. PM
+    # → AI Engineer), every existing score is stale because the scorer
+    # gates which path runs by target_roles. We wipe-and-rescore in that
+    # case so the inbox reflects the new intent immediately.
+    old_roles = sorted(profile.target_roles or [])
+    new_roles = sorted(update_data.get("target_roles", profile.target_roles) or [])
+    roles_changed = "target_roles" in update_data and old_roles != new_roles
+
     for field, value in update_data.items():
         setattr(profile, field, value)
 
     await db.commit()
     await db.refresh(profile)
+
+    if roles_changed:
+        from app.workers.scoring_tasks import _batch_score_async
+        try:
+            await _batch_score_async(str(user_id), rescore_all=True)
+        except Exception as e:  # noqa: BLE001
+            import logging
+            logging.getLogger(__name__).error("Rescore after target_roles change failed: %s", e)
+
     return profile
 
 
@@ -302,6 +320,17 @@ async def upload_resume(
         logging.getLogger(__name__).error("Initial scoring after upload failed: %s", e)
 
     return resume
+
+
+@router.post("/rescore")
+async def rescore_inbox(user_id: CurrentUserId, db: DbSession):
+    """Wipe and recompute every JobScore for the current user. Use this
+    when the scorer logic changes or after correcting target_roles —
+    older scores would otherwise stay stale forever (the cron only
+    scores newly-discovered jobs)."""
+    from app.workers.scoring_tasks import _batch_score_async
+    await _batch_score_async(str(user_id), rescore_all=True)
+    return {"status": "complete"}
 
 
 @router.delete("/resumes/{resume_id}", status_code=status.HTTP_204_NO_CONTENT)

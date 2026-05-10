@@ -1,10 +1,61 @@
 import logging
+import re
 
 from app.services.scoring.pm_scorer import score_pm_path
 from app.services.scoring.ai_automation_scorer import score_ai_automation_path
 from app.services.scoring.geo_scorer import score_geography
 
 logger = logging.getLogger(__name__)
+
+
+# Detect which scoring paths the user actually wants, based on their
+# target_roles. Without this gate, a PM with Python/ML on her resume
+# scores 90 on "AI Engineer" because the AI path sees the title at full
+# weight and inflates skill overlap from her stack — even though she
+# doesn't want engineering roles.
+_PM_INTENT_RE = re.compile(
+    r"\b("
+    r"product\s+(manager|managers|management|owner|owners|lead|leader|leaders|director|strateg\w*|analyst|analytics)"
+    r"|head\s+of\s+product"
+    r"|(vp|vice\s+president|chief|svp|evp)\s+of\s+product"
+    r"|chief\s+product\s+officer|cpo"
+    r"|(senior|sr|principal|staff|lead|associate|junior|jr|group|head|technical|tpm)\s+pm"
+    r"|\bpm\b"
+    r")",
+    re.I,
+)
+
+# Engineering/automation roles. Carefully scoped to "<thing> engineer"
+# patterns so 'AI Product Manager' and 'Head of AI Product' don't match.
+_AI_INTENT_RE = re.compile(
+    r"\b("
+    r"(ai|ml|data|llm|nlp|machine\s+learning|computer\s+vision|automation|rpa)"
+    r"\s+(engineer|developer|scientist|architect|specialist|ops)"
+    r"|mlops|llmops|aiops"
+    r"|prompt\s+engineer"
+    r"|(automation|ai|workflow)\s+(lead|architect)"
+    r"|software\s+engineer|backend\s+engineer|full[\s-]?stack\s+engineer"
+    r")",
+    re.I,
+)
+
+
+def _user_role_intents(target_roles: list[str] | None) -> set[str]:
+    """Return the set of scoring paths the user wants — {'pm', 'ai'} or
+    a subset. Empty target_roles falls back to {'pm', 'ai'} so existing
+    users without auto-suggested roles still get scored on both paths."""
+    if not target_roles:
+        return {"pm", "ai"}
+    intents: set[str] = set()
+    for r in target_roles:
+        if not r:
+            continue
+        if _PM_INTENT_RE.search(r):
+            intents.add("pm")
+        if _AI_INTENT_RE.search(r):
+            intents.add("ai")
+    # If we couldn't classify any role, run both rather than score nothing.
+    return intents or {"pm", "ai"}
 
 
 def compute_job_score(
@@ -14,7 +65,9 @@ def compute_job_score(
 ) -> dict:
     """Compute overall fit score for a job against a candidate profile.
 
-    Runs both PM and AI Automation scoring paths, uses the higher score.
+    Runs the scoring path(s) the user's target_roles imply (PM, AI, or
+    both), picking the highest score across the active paths. A pure
+    PM user no longer sees AI Engineer roles inflated to 90.
 
     Args:
         job_data: Normalized job fields (title, company, location, country, remote_type, salary_*, seniority)
@@ -25,6 +78,7 @@ def compute_job_score(
     Returns:
         Dict with all score components, overall_fit, priority, role_path, reasoning
     """
+    intents = _user_role_intents(profile.get("target_roles"))
     # Compute geo/visa/remote scores (shared between paths)
     geo = score_geography(
         job_country=job_data.get("country"),
@@ -44,62 +98,64 @@ def compute_job_score(
         profile_max=profile.get("salary_max"),
     )
 
-    # Run PM scoring path
-    pm_scores = score_pm_path(
-        title=job_data.get("title", ""),
-        job_skills=job_entities.get("skills", []),
-        job_requirements=job_entities.get("requirements", []),
-        job_keywords=job_entities.get("keywords", []),
-        job_seniority=job_data.get("seniority"),
-        profile_skills=[s.get("skill_name", "") for s in profile.get("skills", [])],
-        profile_work_history=profile.get("work_history", []),
-    )
+    pm_scores = None
+    ai_scores = None
+    pm_total = ai_total = -1.0  # sentinel: only paths actually run can win
 
-    # Run AI Automation scoring path. Pass the raw description so the
-    # skill-overlap bucket can match user skills mentioned in the JD body
-    # even when the source's tag list is sparse.
-    ai_scores = score_ai_automation_path(
-        title=job_data.get("title", ""),
-        job_skills=job_entities.get("skills", []),
-        job_requirements=job_entities.get("requirements", []),
-        job_keywords=job_entities.get("keywords", []),
-        job_seniority=job_data.get("seniority"),
-        profile_skills=[s.get("skill_name", "") for s in profile.get("skills", [])],
-        profile_work_history=profile.get("work_history", []),
-        job_description=job_data.get("raw_description", "") or "",
-    )
+    if "pm" in intents:
+        pm_scores = score_pm_path(
+            title=job_data.get("title", ""),
+            job_skills=job_entities.get("skills", []),
+            job_requirements=job_entities.get("requirements", []),
+            job_keywords=job_entities.get("keywords", []),
+            job_seniority=job_data.get("seniority"),
+            profile_skills=[s.get("skill_name", "") for s in profile.get("skills", [])],
+            profile_work_history=profile.get("work_history", []),
+        )
+        pm_total = (
+            pm_scores["title_score"]
+            + pm_scores["skill_score"]
+            + pm_scores["seniority_score"]
+            + pm_scores["industry_score"]
+            + geo["geo_score"]
+            + geo["remote_score"]
+            + geo["visa_score"]
+            + salary_score
+        )
 
-    # Compute totals for each path
-    pm_total = (
-        pm_scores["title_score"]
-        + pm_scores["skill_score"]
-        + pm_scores["seniority_score"]
-        + pm_scores["industry_score"]
-        + geo["geo_score"]
-        + geo["remote_score"]
-        + geo["visa_score"]
-        + salary_score
-    )
+    if "ai" in intents:
+        # Pass the raw description so the skill-overlap bucket can match
+        # user skills mentioned in the JD body even when the source's tag
+        # list is sparse.
+        ai_scores = score_ai_automation_path(
+            title=job_data.get("title", ""),
+            job_skills=job_entities.get("skills", []),
+            job_requirements=job_entities.get("requirements", []),
+            job_keywords=job_entities.get("keywords", []),
+            job_seniority=job_data.get("seniority"),
+            profile_skills=[s.get("skill_name", "") for s in profile.get("skills", [])],
+            profile_work_history=profile.get("work_history", []),
+            job_description=job_data.get("raw_description", "") or "",
+        )
+        ai_total = (
+            ai_scores["title_score"]
+            + ai_scores["skill_score"]
+            + ai_scores["seniority_score"]
+            + ai_scores["industry_score"]
+            + geo["geo_score"]
+            + geo["remote_score"]
+            + geo["visa_score"]
+            + salary_score
+        )
 
-    ai_total = (
-        ai_scores["title_score"]
-        + ai_scores["skill_score"]
-        + ai_scores["seniority_score"]
-        + ai_scores["industry_score"]
-        + geo["geo_score"]
-        + geo["remote_score"]
-        + geo["visa_score"]
-        + salary_score
-    )
-
-    # Use the higher-scoring path
-    if pm_total >= ai_total:
+    # Pick the higher-scoring path among those that actually ran.
+    if pm_scores is not None and pm_total >= ai_total:
         role_path = "pm"
         path_scores = pm_scores
         overall_fit = pm_total
     else:
         role_path = "ai_automation"
-        path_scores = ai_scores
+        path_scores = ai_scores  # type: ignore[assignment]
         overall_fit = ai_total
 
     # Clamp to 0-100
@@ -129,8 +185,9 @@ def compute_job_score(
         "priority": priority,
         "reasoning": {
             "path_used": role_path,
-            "pm_total": round(pm_total, 1),
-            "ai_total": round(ai_total, 1),
+            "intents": sorted(intents),
+            "pm_total": round(pm_total, 1) if pm_scores is not None else None,
+            "ai_total": round(ai_total, 1) if ai_scores is not None else None,
             **path_scores.get("reasoning", {}),
             **geo.get("reasoning", {}),
         },
