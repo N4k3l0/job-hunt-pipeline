@@ -30,6 +30,7 @@ import {
   useStaleJobsPreview,
   useStaleJobsCleanup,
   useStaleJobsVerifyBatch,
+  useStaleJobsVerifyDebug,
 } from "@/hooks/use-api";
 
 interface UserRecord {
@@ -386,6 +387,7 @@ function StaleJobsCard() {
   const preview = useStaleJobsPreview(days);
   const cleanup = useStaleJobsCleanup();
   const verify = useStaleJobsVerifyBatch();
+  const debug = useStaleJobsVerifyDebug();
 
   // Verify mode runs in batches of 100 jobs each so we stay under
   // Vercel's 60s function timeout. Auto-chain until has_more=false so
@@ -477,6 +479,72 @@ function StaleJobsCard() {
                 ? "Every probed URL came back alive or ambiguous. No deaths."
                 : `Marked ${verifyTotals.expired} confirmed-dead jobs as expired.`}
             </p>
+          )}
+
+          {/* Diagnostic — explain why so many came back ambiguous. Probes
+              a small sample, groups outcomes by host, surfaces the actual
+              status code or error class so the admin can see if it's
+              anti-bot blocking, timeouts, or genuine network failures. */}
+          {verifyTotals && verifyTotals.ambiguous > 0 && (
+            <div className="pt-2 border-t border-white/[0.04]">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <p className="text-xs text-muted-foreground">
+                  {verifyTotals.ambiguous} ambiguous results — most are likely anti-bot blocking, not real deaths. Run diagnostic to see what&apos;s happening.
+                </p>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => debug.mutate({ limit: 50 })}
+                  disabled={debug.isPending}
+                >
+                  {debug.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                  Diagnose ambiguous
+                </Button>
+              </div>
+              {debug.data && (
+                <div className="mt-3 rounded-md border border-white/[0.06] bg-white/[0.015] p-3 space-y-3 text-xs">
+                  <div>
+                    <p className="font-mono text-muted-foreground mb-1.5">Outcomes ({debug.data.checked} probed)</p>
+                    <div className="flex flex-wrap gap-1.5 font-mono">
+                      {Object.entries(debug.data.by_outcome)
+                        .sort((a, b) => b[1] - a[1])
+                        .map(([outcome, count]) => (
+                          <Badge
+                            key={outcome}
+                            variant="outline"
+                            className="text-[11px]"
+                          >
+                            <span className={
+                              outcome === "404" || outcome === "410"
+                                ? "text-red-400"
+                                : outcome.startsWith("2") || outcome.startsWith("3")
+                                  ? "text-emerald-400"
+                                  : "text-amber-400"
+                            }>
+                              {outcome}
+                            </span>
+                            <span className="ml-1.5 text-muted-foreground">{count}</span>
+                          </Badge>
+                        ))}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="font-mono text-muted-foreground mb-1.5">By host</p>
+                    <ul className="space-y-1 font-mono">
+                      {debug.data.by_host.slice(0, 12).map((row) => (
+                        <li key={row.host} className="flex items-baseline gap-2">
+                          <span className="truncate flex-1">{row.host}</span>
+                          <span className="text-muted-foreground">{row.total}</span>
+                          <span className="text-muted-foreground/60">
+                            {Object.entries(row.by_outcome).map(([o, c]) => `${o}×${c}`).join(" ")}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              )}
+            </div>
           )}
         </div>
 

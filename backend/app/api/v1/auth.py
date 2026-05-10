@@ -349,3 +349,98 @@ async def admin_stale_jobs_verify(
     from app.services.maintenance.url_verifier import verify_batch
 
     return await verify_batch(db, limit=limit, age_days_min=age_days_min)
+
+
+@router.get("/admin/stale-jobs/verify-debug")
+async def admin_stale_jobs_verify_debug(
+    admin: AdminUser,
+    db: DbSession,
+    limit: int = 50,
+):
+    """Diagnostic: probe a small sample and return WHY each URL came back
+    ambiguous, grouped by host. Used to figure out whether high-ambiguous
+    counts are from anti-bot blocking (HTTP 403 / Cloudflare), timeouts,
+    or genuine network errors — so we can adjust strategy host by host
+    instead of guessing."""
+    import asyncio
+    import httpx
+    from collections import defaultdict
+    from sqlalchemy import select
+    from app.models.job import Job
+    from app.services.maintenance.url_verifier import (
+        PRE_APPLIED_STATUSES, _PROBE_HEADERS,
+    )
+
+    bounded = min(max(int(limit), 1), 200)
+    rows = (await db.execute(
+        select(Job)
+        .where(
+            Job.status.in_(PRE_APPLIED_STATUSES),
+            (Job.apply_url.is_not(None)) | (Job.job_url.is_not(None)),
+        )
+        .order_by(Job.discovered_at.asc().nulls_first())
+        .limit(bounded)
+    )).scalars().all()
+
+    sem = asyncio.Semaphore(8)
+
+    async def probe(client: httpx.AsyncClient, url: str) -> dict:
+        try:
+            host = httpx.URL(url).host or "(unknown)"
+        except Exception:
+            host = "(invalid-url)"
+        try:
+            async with sem:
+                r = await client.head(url, headers=_PROBE_HEADERS, follow_redirects=True)
+                if r.status_code in (405, 501):
+                    r = await client.get(url, headers=_PROBE_HEADERS, follow_redirects=True)
+                return {"host": host, "outcome": str(r.status_code)}
+        except httpx.TimeoutException:
+            return {"host": host, "outcome": "timeout"}
+        except httpx.ConnectError as e:
+            return {"host": host, "outcome": f"connect_error:{type(e).__name__}"}
+        except Exception as e:  # noqa: BLE001
+            return {"host": host, "outcome": f"{type(e).__name__}"}
+
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(connect=3.0, read=4.0, write=3.0, pool=3.0),
+        follow_redirects=True,
+    ) as client:
+        results = await asyncio.gather(*(
+            probe(client, j.apply_url or j.job_url or "") for j in rows
+        ))
+
+    # Group: { host: { outcome: count } }
+    by_host: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    by_outcome: dict[str, int] = defaultdict(int)
+    samples: list[dict] = []
+
+    for j, r in zip(rows, results):
+        host = r["host"]
+        outcome = r["outcome"]
+        by_host[host][outcome] += 1
+        by_outcome[outcome] += 1
+        if len(samples) < 30:
+            samples.append({
+                "url": (j.apply_url or j.job_url or "")[:200],
+                "host": host,
+                "outcome": outcome,
+                "company": j.company,
+                "title": j.title[:80] if j.title else None,
+            })
+
+    # Flatten to a sortable list, biggest hosts first.
+    host_breakdown = sorted(
+        [
+            {"host": h, "total": sum(d.values()), "by_outcome": dict(d)}
+            for h, d in by_host.items()
+        ],
+        key=lambda x: -x["total"],
+    )
+
+    return {
+        "checked": len(rows),
+        "by_outcome": dict(by_outcome),
+        "by_host": host_breakdown,
+        "samples": samples,
+    }

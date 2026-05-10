@@ -101,6 +101,20 @@ export function useStaleJobsVerifyBatch() {
   });
 }
 
+export interface VerifyDebugReport {
+  checked: number;
+  by_outcome: Record<string, number>;
+  by_host: { host: string; total: number; by_outcome: Record<string, number> }[];
+  samples: { url: string; host: string; outcome: string; company: string; title: string | null }[];
+}
+
+export function useStaleJobsVerifyDebug() {
+  return useMutation<VerifyDebugReport, Error, { limit?: number }>({
+    mutationFn: ({ limit = 50 } = {}) =>
+      api.get(`/api/v1/auth/admin/stale-jobs/verify-debug?limit=${limit}`),
+  });
+}
+
 export function useUpdateMe() {
   const qc = useQueryClient();
   return useMutation({
