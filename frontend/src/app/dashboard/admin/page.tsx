@@ -25,7 +25,12 @@ import {
   Trash2,
 } from "lucide-react";
 import { api } from "@/lib/api-client";
-import { useRunDiscovery, useStaleJobsPreview, useStaleJobsCleanup } from "@/hooks/use-api";
+import {
+  useRunDiscovery,
+  useStaleJobsPreview,
+  useStaleJobsCleanup,
+  useStaleJobsVerifyBatch,
+} from "@/hooks/use-api";
 
 interface UserRecord {
   id: string;
@@ -380,6 +385,39 @@ function StaleJobsCard() {
   const [days, setDays] = useState(30);
   const preview = useStaleJobsPreview(days);
   const cleanup = useStaleJobsCleanup();
+  const verify = useStaleJobsVerifyBatch();
+
+  // Verify mode runs in batches of 100 jobs each so we stay under
+  // Vercel's 60s function timeout. Auto-chain until has_more=false so
+  // the user clicks once and the whole catalogue gets probed.
+  const [verifyTotals, setVerifyTotals] = useState<{
+    checked: number; expired: number; alive: number; ambiguous: number;
+  } | null>(null);
+  const [verifying, setVerifying] = useState(false);
+  const [verifyDone, setVerifyDone] = useState(false);
+
+  const runVerify = async () => {
+    setVerifying(true);
+    setVerifyDone(false);
+    setVerifyTotals({ checked: 0, expired: 0, alive: 0, ambiguous: 0 });
+    let safetyCap = 50; // cap at 50 batches × 100 = 5k jobs/run
+    while (safetyCap-- > 0) {
+      try {
+        const batch = await verify.mutateAsync({ limit: 100 });
+        setVerifyTotals((prev) => ({
+          checked: (prev?.checked ?? 0) + batch.checked,
+          expired: (prev?.expired ?? 0) + batch.expired,
+          alive: (prev?.alive ?? 0) + batch.alive,
+          ambiguous: (prev?.ambiguous ?? 0) + batch.ambiguous,
+        }));
+        if (!batch.has_more || batch.checked === 0) break;
+      } catch {
+        break;
+      }
+    }
+    setVerifying(false);
+    setVerifyDone(true);
+  };
 
   return (
     <Card>
@@ -389,62 +427,133 @@ function StaleJobsCard() {
           Clean up stale jobs
         </CardTitle>
         <CardDescription>
-          Auto-archive jobs older than the cutoff that nobody&apos;s applied
-          to — clears the inbox of postings that were probably taken down or
-          paywalled. Doesn&apos;t delete rows; just flips status to
-          &quot;expired&quot; so they stop showing up.
+          Two modes: <span className="text-foreground">Verify URLs</span>{" "}
+          actually probes each posting and only marks confirmed-dead ones
+          (404 / 410). <span className="text-foreground">Quick clean</span>{" "}
+          uses a time-based cutoff — faster but less precise. Either way,
+          jobs anyone has approved or applied to are never touched.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="flex flex-wrap items-center gap-3">
-          <Label className="text-sm">Older than</Label>
-          <Input
-            type="number"
-            value={days}
-            min={7}
-            max={365}
-            onChange={(e) => setDays(Math.max(7, parseInt(e.target.value) || 30))}
-            className="w-24"
-          />
-          <span className="text-sm text-muted-foreground">days</span>
-          {preview.data && (
-            <Badge variant="outline" className="font-mono text-xs">
-              {preview.data.would_expire} of {preview.data.total_unapplied} unapplied jobs would expire
-            </Badge>
+      <CardContent className="space-y-6">
+
+        {/* ── Verify URLs ────────────────────────────── */}
+        <div className="space-y-3 rounded-lg border border-emerald-500/15 bg-emerald-500/[0.02] p-4">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div>
+              <p className="text-sm font-semibold flex items-center gap-2">
+                <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                Verify URLs (recommended)
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5 max-w-md">
+                Probes each unapplied posting&apos;s apply URL. Only marks expired on a real 404 or 410.
+                Runs in batches of 100; auto-continues to the end (~30s per batch on Vercel).
+              </p>
+            </div>
+            <Button onClick={runVerify} disabled={verifying} variant="outline">
+              {verifying ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Verifying…
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="h-4 w-4" />
+                  {verifyDone ? "Run again" : "Verify URLs"}
+                </>
+              )}
+            </Button>
+          </div>
+          {verifyTotals && (verifying || verifyDone) && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
+              <Stat label="Checked" value={verifyTotals.checked} tone="default" />
+              <Stat label="Expired" value={verifyTotals.expired} tone="warn" />
+              <Stat label="Alive" value={verifyTotals.alive} tone="ok" />
+              <Stat label="Ambiguous" value={verifyTotals.ambiguous} tone="muted" />
+            </div>
+          )}
+          {verifyTotals && verifyDone && (
+            <p className="text-xs text-muted-foreground">
+              {verifyTotals.expired === 0
+                ? "Every probed URL came back alive or ambiguous. No deaths."
+                : `Marked ${verifyTotals.expired} confirmed-dead jobs as expired.`}
+            </p>
           )}
         </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <Button
-            onClick={() => cleanup.mutate({ days })}
-            disabled={cleanup.isPending || !preview.data || preview.data.would_expire === 0}
-          >
-            {cleanup.isPending ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Cleaning…
-              </>
-            ) : (
-              <>
-                <Trash2 className="h-4 w-4" />
-                Expire {preview.data?.would_expire ?? 0} jobs
-              </>
+
+        {/* ── Time-based cleanup (legacy / quick) ───────────────── */}
+        <div className="space-y-3 rounded-lg border border-white/[0.06] p-4">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div>
+              <p className="text-sm font-semibold flex items-center gap-2">
+                <span className="inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground/50" />
+                Quick clean by age
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5 max-w-md">
+                Heuristic — flips anything older than the cutoff to expired.
+                Fast but can mark still-open postings as dead. Use for catch-up
+                sweeps; prefer Verify URLs for accuracy.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Label className="text-sm">Older than</Label>
+            <Input
+              type="number"
+              value={days}
+              min={7}
+              max={365}
+              onChange={(e) => setDays(Math.max(7, parseInt(e.target.value) || 30))}
+              className="w-24"
+            />
+            <span className="text-sm text-muted-foreground">days</span>
+            {preview.data && (
+              <Badge variant="outline" className="font-mono text-xs">
+                {preview.data.would_expire} of {preview.data.total_unapplied} would expire
+              </Badge>
             )}
-          </Button>
-          {cleanup.isSuccess && cleanup.data && (
-            <span className="flex items-center gap-1.5 text-sm text-emerald-400">
-              <CheckCircle2 className="h-4 w-4" /> Expired {cleanup.data.expired} jobs
-            </span>
-          )}
-          {cleanup.isError && (
-            <span className="flex items-center gap-1.5 text-sm text-destructive">
-              <AlertCircle className="h-4 w-4" /> {cleanup.error?.message || "Failed"}
-            </span>
-          )}
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => cleanup.mutate({ days })}
+              disabled={cleanup.isPending || !preview.data || preview.data.would_expire === 0}
+            >
+              {cleanup.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              {cleanup.isPending ? "Cleaning…" : `Expire ${preview.data?.would_expire ?? 0} jobs`}
+            </Button>
+            {cleanup.isSuccess && cleanup.data && (
+              <span className="flex items-center gap-1.5 text-sm text-emerald-400">
+                <CheckCircle2 className="h-4 w-4" /> Expired {cleanup.data.expired} jobs
+              </span>
+            )}
+            {cleanup.isError && (
+              <span className="flex items-center gap-1.5 text-sm text-destructive">
+                <AlertCircle className="h-4 w-4" /> {cleanup.error?.message || "Failed"}
+              </span>
+            )}
+          </div>
         </div>
-        <p className="text-xs text-muted-foreground">
-          Jobs that anyone has approved, applied to, or interviewed for are never touched.
-        </p>
+
       </CardContent>
     </Card>
+  );
+}
+
+function Stat({ label, value, tone }: {
+  label: string;
+  value: number;
+  tone: "default" | "ok" | "warn" | "muted";
+}) {
+  const color =
+    tone === "ok" ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/[0.03]"
+    : tone === "warn" ? "text-amber-400 border-amber-500/30 bg-amber-500/[0.03]"
+    : tone === "muted" ? "text-muted-foreground border-white/[0.06] bg-white/[0.015]"
+    : "text-foreground border-white/[0.08] bg-white/[0.02]";
+  return (
+    <div className={`rounded-md border px-2.5 py-1.5 ${color}`}>
+      <div className="text-[10px] uppercase tracking-wider opacity-70">{label}</div>
+      <div className="text-sm tabular-nums">{value}</div>
+    </div>
   );
 }

@@ -78,6 +78,29 @@ export function useStaleJobsCleanup() {
   });
 }
 
+export interface StaleVerifyBatch {
+  checked: number;
+  expired: number;
+  alive: number;
+  ambiguous: number;
+  has_more: boolean;
+}
+
+export function useStaleJobsVerifyBatch() {
+  const qc = useQueryClient();
+  return useMutation<StaleVerifyBatch, Error, { limit?: number; ageDaysMin?: number }>({
+    mutationFn: ({ limit = 100, ageDaysMin = 0 } = {}) =>
+      api.post(
+        `/api/v1/auth/admin/stale-jobs/verify?limit=${limit}&age_days_min=${ageDaysMin}`,
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      qc.invalidateQueries({ queryKey: ["analytics"] });
+      qc.invalidateQueries({ queryKey: ["admin", "stale-jobs"] });
+    },
+  });
+}
+
 export function useUpdateMe() {
   const qc = useQueryClient();
   return useMutation({
