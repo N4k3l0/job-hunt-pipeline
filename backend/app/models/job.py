@@ -100,6 +100,32 @@ class JobEntity(Base):
     job: Mapped["Job"] = relationship(back_populates="entities")
 
 
+class JobContact(Base):
+    """Decision-maker lookup for a job (hiring manager / dept head / CEO).
+    One row per job so two users at the same company+role share the cached
+    lookup — web_search calls are paid, no point re-querying."""
+    __tablename__ = "job_contacts"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="CASCADE"), unique=True
+    )
+    name: Mapped[str | None] = mapped_column(Text)
+    title: Mapped[str | None] = mapped_column(Text)
+    linkedin_url: Mapped[str | None] = mapped_column(Text)
+    email_guess: Mapped[str | None] = mapped_column(Text)
+    confidence: Mapped[str | None] = mapped_column(String(20))  # low/medium/high
+    source_notes: Mapped[str | None] = mapped_column(Text)
+    citations: Mapped[list[dict] | None] = mapped_column(JSONB)
+    searched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    job: Mapped["Job"] = relationship()
+
+
 class JobDuplicate(Base):
     __tablename__ = "job_duplicates"
 

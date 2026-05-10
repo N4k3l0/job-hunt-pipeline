@@ -12,11 +12,12 @@ import { Separator } from "@/components/ui/separator";
 import {
   CheckCircle2, XCircle, FileText, Mail, MessageSquare, Download,
   AlertCircle, Loader2, ExternalLink, MapPin, Building2, Globe, Copy, Check, Send,
-  RefreshCw, Sparkles, Wand2,
+  RefreshCw, Sparkles, Wand2, Search, Linkedin, AtSign, Quote,
 } from "lucide-react";
 import {
   useReviewQueue, useApproveTailored, useUpdateStatus, useGenerateTailored,
   useUpdateTailored, useRegenerateSection,
+  useJobContact, useFindJobContact,
 } from "@/hooks/use-api";
 import type { RegeneratableSection } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/toast";
@@ -56,6 +57,148 @@ const TAILORING_STEPS = [
 ];
 
 type EditableField = "tailored_summary" | "cover_letter" | "recruiter_message";
+
+function confidenceTone(c: string | null | undefined) {
+  if (c === "high") return "text-emerald-400 border-emerald-500/30 bg-emerald-500/5";
+  if (c === "medium") return "text-amber-400 border-amber-500/30 bg-amber-500/5";
+  return "text-muted-foreground border-white/[0.08]";
+}
+
+function ContactPanel({ jobId }: { jobId: string }) {
+  const { data, isLoading } = useJobContact(jobId);
+  const find = useFindJobContact(jobId);
+  const contact = find.data?.contact ?? data?.contact ?? null;
+  const noContactYet = !isLoading && !contact;
+
+  return (
+    <div className="rounded-xl border border-white/[0.06] bg-white/[0.015] p-4 mb-4">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <p className="text-xs uppercase tracking-wider text-muted-foreground mb-1">
+            Decision maker
+          </p>
+          {isLoading ? (
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          ) : contact ? (
+            <div className="space-y-1">
+              <p className="text-sm font-semibold">
+                {contact.name || "Unknown"}
+                {contact.title && (
+                  <span className="ml-2 font-normal text-muted-foreground">
+                    {contact.title}
+                  </span>
+                )}
+              </p>
+              {contact.confidence && (
+                <Badge
+                  variant="outline"
+                  className={`text-xs ${confidenceTone(contact.confidence)}`}
+                >
+                  {contact.confidence} confidence
+                </Badge>
+              )}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Not searched yet. Click below to find the hiring manager.
+            </p>
+          )}
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => find.mutate({ force: !!contact })}
+          disabled={find.isPending}
+        >
+          {find.isPending ? (
+            <>
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Searching…
+            </>
+          ) : contact ? (
+            <>
+              <RefreshCw className="h-3.5 w-3.5" />
+              Re-search
+            </>
+          ) : (
+            <>
+              <Search className="h-3.5 w-3.5" />
+              Find decision maker
+            </>
+          )}
+        </Button>
+      </div>
+
+      {find.isError && (
+        <p className="mt-3 text-sm text-destructive">
+          Lookup failed. Try again in a moment.
+        </p>
+      )}
+
+      {contact && (
+        <div className="mt-3 space-y-2 text-sm">
+          {contact.linkedin_url && (
+            <a
+              href={contact.linkedin_url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-2 text-blue-400 hover:text-blue-300"
+            >
+              <Linkedin className="h-3.5 w-3.5" />
+              {contact.linkedin_url.replace(/^https?:\/\//, "")}
+              <ExternalLink className="h-3 w-3 opacity-60" />
+            </a>
+          )}
+          {contact.email_guess && (
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <AtSign className="h-3.5 w-3.5" />
+              <code className="text-xs">{contact.email_guess}</code>
+              <span className="text-xs italic">(best-guess pattern)</span>
+            </div>
+          )}
+          {contact.source_notes && (
+            <p className="flex gap-2 text-xs text-muted-foreground italic">
+              <Quote className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+              {contact.source_notes}
+            </p>
+          )}
+          {contact.citations && contact.citations.length > 0 && (
+            <details className="text-xs text-muted-foreground">
+              <summary className="cursor-pointer hover:text-foreground">
+                Sources ({contact.citations.length})
+              </summary>
+              <ul className="mt-1 space-y-0.5 pl-4">
+                {contact.citations.map((c, i) => (
+                  <li key={i}>
+                    <a
+                      href={c.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="hover:text-foreground"
+                    >
+                      {c.title || c.url}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+          {contact.searched_at && (
+            <p className="text-xs text-muted-foreground/70">
+              Last searched {new Date(contact.searched_at).toLocaleDateString()}
+            </p>
+          )}
+        </div>
+      )}
+
+      {noContactYet && find.isPending && (
+        <p className="mt-3 text-xs text-muted-foreground">
+          Web-searching company leadership pages and LinkedIn… ~10–20s.
+        </p>
+      )}
+    </div>
+  );
+}
 
 function EditableMaterials({
   review,
@@ -99,6 +242,9 @@ function EditableMaterials({
         const v = value(f.key, review[f.key]);
         return (
           <TabsContent key={f.tab} value={f.tab}>
+            {f.tab === "outreach" && review.job_id && (
+              <ContactPanel jobId={review.job_id} />
+            )}
             <Card>
               <CardContent className="pt-4 space-y-2">
                 <div className="flex items-center justify-between gap-2 flex-wrap">

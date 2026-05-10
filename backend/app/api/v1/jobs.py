@@ -8,7 +8,7 @@ from sqlalchemy import select, func, and_
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUserId, DbSession
-from app.models.job import Job, JobEntity, JobSource
+from app.models.job import Job, JobContact, JobEntity, JobSource
 from app.models.scoring import JobScore
 from app.models.candidate import CandidateProfile
 from app.models.tracking import ApplicationTracking
@@ -548,3 +548,90 @@ async def unmark_applied(job_id: UUID, user_id: CurrentUserId, db: DbSession):
 
     await db.commit()
     return {"status": "rolled_back"}
+
+
+def _serialize_contact(contact: JobContact) -> dict:
+    return {
+        "name": contact.name,
+        "title": contact.title,
+        "linkedin_url": contact.linkedin_url,
+        "email_guess": contact.email_guess,
+        "confidence": contact.confidence,
+        "source_notes": contact.source_notes,
+        "citations": contact.citations or [],
+        "searched_at": contact.searched_at.isoformat() if contact.searched_at else None,
+        "cached": True,
+    }
+
+
+@router.get("/{job_id}/contact")
+async def get_contact(job_id: UUID, user_id: CurrentUserId, db: DbSession):
+    """Return the cached decision-maker lookup for this job, if any.
+    Lookups are cached at the job level (one row per job) since two
+    users at the same company+role would get the same result."""
+    job_result = await db.execute(select(Job).where(Job.id == job_id))
+    job = job_result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    contact_result = await db.execute(
+        select(JobContact).where(JobContact.job_id == job_id)
+    )
+    contact = contact_result.scalar_one_or_none()
+    if not contact:
+        return {"contact": None}
+    return {"contact": _serialize_contact(contact)}
+
+
+@router.post("/{job_id}/find-contact")
+async def find_contact(
+    job_id: UUID,
+    user_id: CurrentUserId,
+    db: DbSession,
+    force: bool = Query(False, description="Bypass cache and re-search"),
+):
+    """Run a Claude + web_search lookup for the hiring manager / decision
+    maker for this role. Result is cached on the job (one row per job).
+    Pass ?force=true to refresh."""
+    job_result = await db.execute(select(Job).where(Job.id == job_id))
+    job = job_result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    contact_result = await db.execute(
+        select(JobContact).where(JobContact.job_id == job_id)
+    )
+    contact = contact_result.scalar_one_or_none()
+
+    if contact and not force:
+        return {"contact": _serialize_contact(contact)}
+
+    from app.services.outreach.contact_finder import find_contact_for_job
+    try:
+        result = await find_contact_for_job(
+            company=job.company,
+            role=job.title,
+            location=job.location,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.error("find_contact_for_job failed for %s: %s", job_id, e)
+        raise HTTPException(status_code=502, detail=f"Contact lookup failed: {e}")
+
+    if contact is None:
+        contact = JobContact(job_id=job_id)
+        db.add(contact)
+
+    contact.name = result.get("name")
+    contact.title = result.get("title")
+    contact.linkedin_url = result.get("linkedin_url")
+    contact.email_guess = result.get("email_guess")
+    contact.confidence = result.get("confidence")
+    contact.source_notes = result.get("source_notes")
+    contact.citations = result.get("citations") or []
+    contact.searched_at = datetime.now(timezone.utc)
+
+    await db.commit()
+    await db.refresh(contact)
+    payload = _serialize_contact(contact)
+    payload["cached"] = False
+    return {"contact": payload}

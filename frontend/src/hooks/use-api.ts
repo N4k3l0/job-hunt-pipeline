@@ -148,6 +148,42 @@ export function useRescoreInbox() {
   });
 }
 
+export interface JobContact {
+  name: string | null;
+  title: string | null;
+  linkedin_url: string | null;
+  email_guess: string | null;
+  confidence: "low" | "medium" | "high" | null;
+  source_notes: string | null;
+  citations: { url: string; title: string }[];
+  searched_at: string | null;
+  cached: boolean;
+}
+
+export function useJobContact(jobId: string | undefined) {
+  return useQuery({
+    queryKey: ["jobs", jobId, "contact"],
+    queryFn: () =>
+      api.get<{ contact: JobContact | null }>(`/api/v1/jobs/${jobId}/contact`),
+    enabled: !!jobId,
+    // Cached server-side too — no need to re-fetch aggressively.
+    staleTime: 30 * 60 * 1000,
+  });
+}
+
+export function useFindJobContact(jobId: string | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ force = false }: { force?: boolean } = {}) =>
+      api.post<{ contact: JobContact }>(
+        `/api/v1/jobs/${jobId}/find-contact${force ? "?force=true" : ""}`,
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["jobs", jobId, "contact"] });
+    },
+  });
+}
+
 // ── Bullets ──────────────────────────────────────────────────────────────────
 
 export function useBullets() {
