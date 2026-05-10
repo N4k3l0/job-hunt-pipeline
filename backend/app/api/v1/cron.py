@@ -91,7 +91,29 @@ async def cron_discover_fast(authorization: str | None = Header(None)):
         # ("adzuna", _run_adzuna_async),  # disabled: upstream returning 400s
     ])
     scoring = await quick_score_all_users(per_user_timeout=10)
-    return {"status": "complete", "results": results, "scoring": scoring}
+
+    # Piggyback URL verification on the daily cron — Vercel Hobby caps
+    # at 2 cron slots and both are used for discovery. Probing 30 jobs/
+    # day (oldest first) lets the whole catalogue get a pass within
+    # ~6 weeks while costing only ~5–10 s of leftover budget. Wrapped
+    # in a 15 s asyncio timeout + try/except so a slow probe can't take
+    # the cron run down. Same logic the admin 'Verify URLs' button uses.
+    verify: dict[str, object] = {"status": "skipped"}
+    try:
+        from app.services.maintenance.url_verifier import verify_batch
+        from app.workers.discovery_tasks import create_worker_session
+        async def _do_verify():
+            async with create_worker_session()() as v_db:
+                return await verify_batch(v_db, limit=30, timeout_s=3.0)
+        result = await asyncio.wait_for(_do_verify(), timeout=15)
+        verify = {"status": "ok", **result}
+    except asyncio.TimeoutError:
+        verify = {"status": "timeout after 15s"}
+    except Exception as e:  # noqa: BLE001
+        logger.warning("URL-verify piggyback failed: %s", e)
+        verify = {"status": f"error: {type(e).__name__}: {e}"}
+
+    return {"status": "complete", "results": results, "scoring": scoring, "verify": verify}
 
 
 @router.get("/discover-remote")
