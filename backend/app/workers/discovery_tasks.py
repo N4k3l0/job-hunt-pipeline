@@ -273,8 +273,39 @@ async def _process_apify_async(actor_run_id: str, actor_type: str):
 # ── Keyword Collection ────────────────────────────────────────────────────────
 
 
+# Core keywords that are ALWAYS in the discovery pool regardless of who is
+# signed up. Without these, an early-user-base skewed toward AI ends up
+# with zero PM strings in the keyword pool — which silently drops PM
+# postings at the curated / RemoteOK / Arbeitnow filters and leaves new
+# PM users with an empty inbox even though those companies are posting
+# the roles. CLAUDE.md says target roles are PM + AI Automation, so we
+# anchor both families here.
+CORE_DISCOVERY_KEYWORDS: set[str] = {
+    # PM family
+    "product manager",
+    "senior product manager",
+    "product owner",
+    "product lead",
+    "head of product",
+    "technical product manager",
+    "ai product manager",
+    "group product manager",
+    "principal product manager",
+    # AI / automation family
+    "ai engineer",
+    "ml engineer",
+    "machine learning engineer",
+    "automation engineer",
+    "ai automation",
+    "llm engineer",
+    "prompt engineer",
+}
+
+
 async def _collect_all_keywords() -> list[str]:
-    """Collect search keywords from all users' profiles.
+    """Collect search keywords from all users' profiles, always merged
+    with CORE_DISCOVERY_KEYWORDS so both PM and AI families are covered
+    regardless of who is signed up.
 
     Combines:
       - custom `search_keywords` (free-text user input)
@@ -282,6 +313,9 @@ async def _collect_all_keywords() -> list[str]:
       - `candidate_skills` rows where category is `technical` or `tool`
         (e.g. "Python", "LangChain", "Figma") — the strongest signal for
         whether a posting is actually a fit for this user
+      - CORE_DISCOVERY_KEYWORDS — base PM + AI terms so neither family
+        gets shut out of the pipeline because no current user happens
+        to target it.
 
     Skills are short, concrete, and the same words employers put in their
     job descriptions, which makes them the most reliable expansion of the
@@ -294,7 +328,7 @@ async def _collect_all_keywords() -> list[str]:
         prof_result = await db.execute(
             select(CandidateProfile.search_keywords, CandidateProfile.target_roles)
         )
-        all_keywords: set[str] = set()
+        all_keywords: set[str] = set(CORE_DISCOVERY_KEYWORDS)
         for search_kw, target_roles in prof_result:
             if search_kw:
                 for kw in search_kw:
@@ -319,7 +353,7 @@ async def _collect_all_keywords() -> list[str]:
 
     keywords = list(all_keywords)
     logger.info(
-        "Collected %d unique search keywords (roles + skills) from all users: %s",
+        "Collected %d unique search keywords (roles + skills + core) from all users: %s",
         len(keywords), keywords,
     )
     return keywords
@@ -547,12 +581,20 @@ async def _run_curated_async():
     """Highest-signal source: poll a hand-picked list of remote-friendly
     companies on free public ATSes. Apply URLs are clean by construction
     (boards.greenhouse.io / jobs.lever.co / jobs.ashbyhq.com), so
-    swipe-to-apply works end-to-end without redirect resolution."""
+    swipe-to-apply works end-to-end without redirect resolution.
+
+    We deliberately skip the keyword filter here. The 117 curated
+    companies are already pre-filtered for quality, and dropping their
+    listings because the title doesn't contain a current user's tech
+    skills was silently starving PM users of supply — Asana/Calendly/etc.
+    post tons of PM roles whose titles never say 'python' or 'ml'. The
+    per-user inbox filter (apply_user_filters) is the right place to
+    decide what each user sees; ingest should keep the catalog wide.
+    """
     from app.services.discovery.curated_service import fetch_jobs
 
-    keywords = await _collect_all_keywords()
     try:
-        jobs = await fetch_jobs(keywords=set(keywords) if keywords else None)
+        jobs = await fetch_jobs(keywords=None)
         if jobs:
             await _ingest_raw_jobs(jobs)
     except Exception as e:
