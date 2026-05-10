@@ -109,7 +109,12 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
       popup.document.write(`<!doctype html>
 <html><head><title>Finding posting…</title>
 <style>
-  :root { color-scheme: dark; }
+  :root {
+    color-scheme: dark;
+    /* Stronger custom ease-out per Emil. Built-in CSS curves lack punch. */
+    --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+    --ease-soft: cubic-bezier(0.4, 0, 0.2, 1);
+  }
   * { box-sizing: border-box; }
   body {
     margin: 0; min-height: 100vh;
@@ -126,6 +131,17 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
     padding: 28px;
     background: rgba(255,255,255,0.015);
     box-shadow: 0 24px 48px -16px rgba(0,0,0,0.5);
+
+    /* Card entry: nothing appears from nothing. */
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    transition: opacity 360ms var(--ease-out), transform 360ms var(--ease-out);
+  }
+  @starting-style {
+    .card {
+      opacity: 0;
+      transform: translateY(8px) scale(0.98);
+    }
   }
   .badge {
     display: inline-flex; align-items: center; gap: 6px;
@@ -139,9 +155,14 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
   .pulse {
     width: 6px; height: 6px; border-radius: 50%;
     background: #fbbf24;
-    animation: pulse 1.4s ease-in-out infinite;
+    /* Transform-based pulse — runs on GPU, can't drop frames under load. */
+    animation: pulse 1.4s var(--ease-soft) infinite;
+    transform-origin: center;
   }
-  @keyframes pulse { 0%,100% { opacity: 0.4 } 50% { opacity: 1 } }
+  @keyframes pulse {
+    0%, 100% { transform: scale(1); opacity: 0.55; }
+    50%      { transform: scale(1.35); opacity: 1; }
+  }
   h1 {
     font-size: 18px; margin: 0 0 6px; font-weight: 600;
     letter-spacing: -0.01em;
@@ -153,15 +174,28 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
   .stage {
     color: #d4d4d4; font-size: 14px; margin-bottom: 14px;
     min-height: 21px; display: flex; align-items: center; gap: 10px;
-    transition: color 0.3s;
+    transition: color 200ms var(--ease-out);
+    /* Stagger entry per stage — set inline below */
+    opacity: 1;
+    transform: translateY(0);
   }
+  @starting-style {
+    .stage { opacity: 0; transform: translateY(6px); }
+  }
+  .stage:nth-child(4) { transition-delay: 0ms; }
+  .stage:nth-child(5) { transition-delay: 60ms; }
+  .stage:nth-child(6) { transition-delay: 120ms; }
+  .stage:nth-child(7) { transition-delay: 180ms; }
   .check {
+    position: relative;
     width: 14px; height: 14px; border-radius: 50%;
     background: rgba(255,255,255,0.04);
     border: 1px solid rgba(255,255,255,0.08);
     display: inline-flex; align-items: center; justify-content: center;
     font-size: 9px; flex-shrink: 0;
-    transition: all 0.3s;
+    /* Specific properties — not 'all'. */
+    transition: background-color 200ms var(--ease-out),
+                border-color 200ms var(--ease-out);
   }
   .stage.done .check {
     background: rgba(34,197,94,0.15);
@@ -174,8 +208,17 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
     border-color: rgba(251,191,36,0.4);
   }
   .stage.active .check::before {
-    content: ""; width: 6px; height: 6px; border-radius: 50%;
-    background: #fbbf24; animation: pulse 1.2s ease-in-out infinite;
+    content: "";
+    position: absolute;
+    width: 6px; height: 6px; border-radius: 50%;
+    background: #fbbf24;
+    /* Scale-pulse > opacity-pulse: GPU, also more 'alive'. */
+    animation: dot-pulse 1.2s var(--ease-soft) infinite;
+    transform-origin: center;
+  }
+  @keyframes dot-pulse {
+    0%, 100% { transform: scale(1); opacity: 0.7; }
+    50%      { transform: scale(1.3); opacity: 1; }
   }
   .bar {
     width: 100%; height: 6px;
@@ -187,7 +230,7 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
     height: 100%;
     background: linear-gradient(90deg, #f59e0b 0%, #fbbf24 50%, #fde047 100%);
     width: 0%; border-radius: 999px;
-    transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+    transition: width 0.6s var(--ease-out);
     box-shadow: 0 0 12px rgba(251,191,36,0.4);
   }
   .pct {
@@ -202,6 +245,23 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
     border-radius: 8px;
     font-size: 12px; color: #a3a3a3;
     line-height: 1.5;
+    /* Blur-crossfade for tip text changes — Emil's trick to mask
+       the visual gap when one string swaps for another. */
+    transition: opacity 220ms var(--ease-out), filter 220ms var(--ease-out);
+  }
+  .tip.swapping { opacity: 0; filter: blur(2px); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .card, .stage, .check, .fill, .tip {
+      transition-duration: 0ms !important;
+      animation: none !important;
+    }
+    @starting-style {
+      .card, .stage { opacity: 0; transform: none; }
+    }
+    .pulse, .stage.active .check::before {
+      animation: none !important;
+    }
   }
 </style></head>
 <body>
@@ -241,7 +301,15 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
       if (idx < i) el.classList.add('done');
       else if (idx === i) el.classList.add('active');
     });
-    if (stages[i] && stages[i].tip) tipEl.textContent = stages[i].tip;
+    if (stages[i] && stages[i].tip && stages[i].tip !== tipEl.textContent) {
+      // Blur-crossfade: dip out, swap text, fade back in. Emil's trick to
+      // mask the visual gap when one string replaces another.
+      tipEl.classList.add('swapping');
+      setTimeout(function () {
+        tipEl.textContent = stages[i].tip;
+        tipEl.classList.remove('swapping');
+      }, 200);
+    }
   }
 
   function tween(from, to, ms) {
@@ -261,10 +329,12 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
     });
   }
 
+  // 250ms instead of 100ms — a passive elapsed counter doesn't need
+  // 10fps updates. Less visual noise, same information.
   setInterval(function () {
     var s = (performance.now() - startedAt) / 1000;
     elapsedEl.textContent = s.toFixed(1) + 's';
-  }, 100);
+  }, 250);
 
   (async function () {
     for (var i = 0; i < stages.length; i++) {
@@ -317,7 +387,10 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
         popup.document.write(`<!doctype html>
 <html><head><title>No direct posting found</title>
 <style>
-  :root { color-scheme: dark; }
+  :root {
+    color-scheme: dark;
+    --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  }
   body {
     margin: 0; min-height: 100vh;
     display: flex; align-items: center; justify-content: center;
@@ -329,8 +402,14 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
     border: 1px solid rgba(255,255,255,0.06);
     border-radius: 16px; padding: 28px;
     background: rgba(255,255,255,0.015);
+    /* Card entry — same as the resolver card. */
+    opacity: 1; transform: translateY(0) scale(1);
+    transition: opacity 360ms var(--ease-out), transform 360ms var(--ease-out);
   }
-  h1 { font-size: 18px; margin: 0 0 8px; font-weight: 600; }
+  @starting-style {
+    .card { opacity: 0; transform: translateY(8px) scale(0.98); }
+  }
+  h1 { font-size: 18px; margin: 0 0 8px; font-weight: 600; letter-spacing: -0.01em; }
   p  { color: #a3a3a3; font-size: 14px; line-height: 1.55; margin: 0 0 14px; }
   .role { color: #fafafa; font-weight: 500; }
   a.btn, button.btn {
@@ -339,15 +418,27 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
     font-size: 14px; font-weight: 500; text-decoration: none;
     margin-top: 8px; cursor: pointer; border: 1px solid rgba(255,255,255,0.08);
     background: rgba(255,255,255,0.03); color: #fafafa;
-    transition: all 0.15s;
+    /* Specific properties — never 'all'. Press feedback via transform. */
+    transition: background-color 160ms var(--ease-out),
+                border-color 160ms var(--ease-out),
+                transform 160ms var(--ease-out);
+    will-change: transform;
   }
   a.btn:hover, button.btn:hover {
     background: rgba(255,255,255,0.06);
     border-color: rgba(255,255,255,0.14);
   }
+  /* Buttons must feel like they hear the press. */
+  a.btn:active, button.btn:active { transform: scale(0.97); }
   a.primary { background: rgba(251,191,36,0.1); border-color: rgba(251,191,36,0.3); color: #fbbf24; }
   a.primary:hover { background: rgba(251,191,36,0.16); }
   .muted { font-size: 12px; color: #737373; margin-top: 14px; text-align: center; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .card, a.btn, button.btn { transition: none !important; }
+    @starting-style { .card { opacity: 0; transform: none; } }
+    a.btn:active, button.btn:active { transform: none; }
+  }
 </style></head>
 <body>
   <div class="card">
