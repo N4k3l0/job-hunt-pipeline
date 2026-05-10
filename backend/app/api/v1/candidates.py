@@ -427,14 +427,14 @@ async def upload_resume(
         import logging
         logging.getLogger(__name__).error("Resume parse failed: %s", e)
 
-    # Score the top 300 newest unscored jobs against the freshly-parsed
-    # profile so the inbox is populated when the user lands on it. Scoring
-    # is pure deterministic compute (no LLM calls), so 300 jobs runs in
-    # a few seconds — comfortably inside the 60s Vercel budget alongside
-    # the parse. The cron handles the longer tail later.
+    # Full rescore against the freshly-parsed profile. Resume parsing
+    # wipes + rebuilds work_history / skills / bullets, so any existing
+    # JobScore rows reflect a stale profile and must be recomputed.
+    # Pure deterministic compute (no LLM calls) — 1.7k jobs scores in
+    # ~3s, well inside the Vercel 60s budget alongside the LLM parse.
     from app.workers.scoring_tasks import _batch_score_async
     try:
-        await _batch_score_async(str(user_id), rescore_all=False)
+        await _batch_score_async(str(user_id), rescore_all=True)
     except Exception as e:  # noqa: BLE001
         import logging
         logging.getLogger(__name__).error("Initial scoring after upload failed: %s", e)

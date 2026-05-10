@@ -98,6 +98,30 @@ async def _parse_resume_async(resume_id: str, user_id: str):
             # never overwrite an explicit user choice.
             if suggested_roles and not profile.target_roles:
                 profile.target_roles = suggested_roles
+
+            # When a profile already exists, the user is uploading an
+            # UPDATED version of their resume (more experience, new
+            # skills, etc.). Wipe the previously-parsed children and
+            # rebuild from the new parse so the profile reflects the
+            # latest resume only — otherwise we accumulate doubled
+            # work history, doubled skills, and stale bullets.
+            #
+            # User-set fields on the profile row itself (target_roles,
+            # preferred_countries, visa_statuses, remote_preference,
+            # salary, search_keywords, blocked_sources) survive untouched.
+            from sqlalchemy import delete
+            await db.execute(
+                delete(CandidateWorkHistory).where(CandidateWorkHistory.profile_id == profile.id)
+            )
+            await db.execute(
+                delete(CandidateSkill).where(CandidateSkill.profile_id == profile.id)
+            )
+            await db.execute(
+                delete(CandidateEducation).where(CandidateEducation.profile_id == profile.id)
+            )
+            await db.execute(
+                delete(CandidateBullet).where(CandidateBullet.profile_id == profile.id)
+            )
             await db.flush()
 
         # Populate work history from parsed data
