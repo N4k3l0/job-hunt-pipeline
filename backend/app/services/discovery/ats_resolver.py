@@ -364,6 +364,58 @@ async def resolve_ats_url(company: str, title: str) -> str | None:
     return None
 
 
+# Aggregators whose pages either gate the apply link behind paywall/JS
+# UX (WeWorkRemotely's notification upsell) or block plain-httpx GETs
+# entirely. For these we fall back to Firecrawl, which renders JS and
+# returns the underlying ATS link that's actually on the page.
+_FIRECRAWL_FALLBACK_HOSTS: tuple[str, ...] = (
+    "weworkremotely.com",
+    "dailyremote.com",
+    "remotive.com",
+    "remoteok.com",
+    "himalayas.app",
+)
+
+
+def _needs_firecrawl(url: str) -> bool:
+    try:
+        host = httpx.URL(url).host or ""
+    except Exception:
+        return False
+    return any(host == h or host.endswith("." + h) for h in _FIRECRAWL_FALLBACK_HOSTS)
+
+
+async def follow_to_ats_via_firecrawl(source_url: str) -> str | None:
+    """Same body-scan as follow_to_ats, but the page comes from Firecrawl
+    so JS-rendered DOM and anti-bot paywalls don't hide the apply link.
+
+    Used as a slow-path fallback when the cheap httpx GET returns nothing
+    on a known-difficult aggregator (WeWorkRemotely's '$5/mo to see this'
+    upsell, Cloudflare on DailyRemote, etc.).
+    """
+    from app.services.discovery.firecrawl_service import scrape_html
+
+    body = await scrape_html(source_url, timeout=25.0)
+    if not body:
+        return None
+
+    for m in _ATS_URL_RE.finditer(body):
+        candidate = m.group(0)
+        try:
+            host = httpx.URL(candidate).host or ""
+            path = httpx.URL(candidate).path or ""
+        except Exception:
+            continue
+        if host in ("greenhouse.io", "lever.co", "workable.com",
+                    "ashbyhq.com", "smartrecruiters.com", "personio.com"):
+            continue
+        if not path or path == "/":
+            continue
+        logger.info("Firecrawl body-scan resolved %s → %s", source_url, candidate)
+        return candidate
+    return None
+
+
 async def find_direct_apply(
     company: str,
     title: str,
@@ -374,9 +426,12 @@ async def find_direct_apply(
     1. If source URL is already on a known ATS → use it (zero network).
     2. Follow source URL's redirect chain — aggregators often 30x to the
        ATS for free (~200ms).
-    3. Slug-guess across Greenhouse → Lever → Ashby → SmartRecruiters
+    3. For known-difficult aggregators (WeWorkRemotely, DailyRemote,
+       etc.) where the apply link is gated behind JS / paywall UX,
+       fall through to Firecrawl which renders the page properly.
+    4. Slug-guess across Greenhouse → Lever → Ashby → SmartRecruiters
        (1-12s, cached on the row).
-    4. Otherwise → None, caller falls back to source URL.
+    5. Otherwise → None, caller falls back to source URL.
     """
     if source_url and is_ats_url(source_url):
         return source_url
@@ -385,11 +440,20 @@ async def find_direct_apply(
         timeout=TIMEOUT,
         follow_redirects=True,
     ) as client:
-        # Step 2: follow the source's redirect chain
+        # Step 2: cheap httpx GET + body scan
         if source_url:
             via_redirect = await follow_to_ats(client, source_url)
             if via_redirect:
                 return via_redirect
 
-    # Step 3: API resolve (opens its own client with JSON headers)
+    # Step 3: Firecrawl fallback for known-difficult aggregators
+    if source_url and _needs_firecrawl(source_url):
+        try:
+            via_firecrawl = await follow_to_ats_via_firecrawl(source_url)
+            if via_firecrawl:
+                return via_firecrawl
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Firecrawl fallback failed for %s: %s", source_url, e)
+
+    # Step 4: API resolve (opens its own client with JSON headers)
     return await resolve_ats_url(company, title)

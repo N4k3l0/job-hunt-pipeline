@@ -245,19 +245,17 @@ async def admin_run_discovery(admin: AdminUser):
     from app.workers.discovery_tasks import (
         _run_curated_async, _run_arbeitnow_async,
         _run_remoteok_async, _run_himalayas_async,
-        _run_remotive_async,
+        _run_remotive_async, _run_weworkremotely_async,
         _run_dailyremote_async, quick_score_all_users,
     )
 
-    # WeWorkRemotely is excluded — see /api/v1/cron.py for context. Their
-    # posting pages now sit behind a notification-paywall UX so the apply
-    # link is unusable on the free tier.
     runners: list[tuple[str, callable]] = [
         ("curated", _run_curated_async),
         ("arbeitnow", _run_arbeitnow_async),
         ("remoteok", _run_remoteok_async),
         ("himalayas", _run_himalayas_async),
         ("remotive", _run_remotive_async),
+        ("weworkremotely", _run_weworkremotely_async),
         ("dailyremote", _run_dailyremote_async),
     ]
 

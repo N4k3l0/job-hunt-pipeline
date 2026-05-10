@@ -238,24 +238,6 @@ def apply_user_filters(
         query = query.where(
             JobSource.name.notin_(blocked_sources) | (JobSource.name.is_(None))
         )
-
-    # Hide WeWorkRemotely listings whose apply_url isn't already a direct
-    # ATS link. WWR's posting pages now sit behind a notification-paywall
-    # UX that makes the apply link unreachable on the free tier — clicking
-    # 'Apply' on those wastes the user's time. We keep WWR listings that
-    # link straight to greenhouse / lever / ashby / workable / smart-
-    # recruiters / personio, since those are still applicable for free.
-    _ATS_HOST_RE = (
-        r"\.(greenhouse|lever|ashbyhq|workable|smartrecruiters|personio|"
-        r"recruitee|teamtailor|breezy|jobvite)\.(io|com|co)"
-    )
-    query = query.where(
-        or_(
-            JobSource.name != "weworkremotely",
-            JobSource.name.is_(None),
-            Job.apply_url.op("~*")(_ATS_HOST_RE),
-        )
-    )
     if remote_preference and remote_preference != "any":
         # Soft remote filter: when the user wants full_remote, also include
         # jobs we couldn't classify ('unknown'). Our classify_remote()
