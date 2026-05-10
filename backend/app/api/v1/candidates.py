@@ -461,6 +461,22 @@ async def delete_resume(resume_id: UUID, user_id: CurrentUserId, db: DbSession):
     resume = result.scalar_one_or_none()
     if not resume:
         raise HTTPException(status_code=404, detail="Resume not found")
+
+    # NULL the FK on any TailoredApplication referencing this resume —
+    # base_resume_id has no ON DELETE behavior set, so without this the
+    # delete fails with a foreign-key violation as soon as the user has
+    # generated even one tailored application using this resume. Profile
+    # data (work_history / skills / bullets) is FK'd to candidate_profiles
+    # so it's untouched, which is what we want — the parsed structure
+    # survives even when the source file is removed.
+    from sqlalchemy import update
+    from app.models.tailoring import TailoredApplication
+    await db.execute(
+        update(TailoredApplication)
+        .where(TailoredApplication.base_resume_id == resume_id)
+        .values(base_resume_id=None)
+    )
+
     await db.delete(resume)
     await db.commit()
 
