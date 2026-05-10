@@ -15,6 +15,7 @@ import {
   AlertCircle, Loader2, ExternalLink, MapPin, Building2, Globe, Copy, Check, Send,
   RefreshCw, Sparkles, Wand2, Search, Linkedin, AtSign, Quote,
 } from "lucide-react";
+import { TailoredBulletsPanel } from "@/components/tailored-bullets-panel";
 import {
   useReviewQueue, useApproveTailored, useUpdateStatus, useGenerateTailored,
   useUpdateTailored, useRegenerateSection,
@@ -230,9 +231,9 @@ function EditableMaterials({
     key: EditableField; label: string; tab: string; placeholder: string; usage: string;
   }[] = [
     {
-      key: "tailored_summary", label: "Resume", tab: "resume",
+      key: "tailored_summary", label: "Summary", tab: "summary",
       placeholder: "No tailored summary generated yet.",
-      usage: "Goes into the Resume / CV upload field on the company's ATS. Use Print / PDF to export it as a file.",
+      usage: "The 2–3 sentence opener for the top of your CV. Paste it into your resume's Professional Summary section.",
     },
     {
       key: "cover_letter", label: "Cover", tab: "cover",
@@ -247,12 +248,20 @@ function EditableMaterials({
   ];
 
   return (
-    <Tabs defaultValue="resume">
+    <Tabs defaultValue="summary">
       <TabsList className="w-full">
-        <TabsTrigger value="resume" className="flex-1"><FileText className="h-3.5 w-3.5 mr-1.5" />Resume</TabsTrigger>
+        <TabsTrigger value="summary" className="flex-1"><FileText className="h-3.5 w-3.5 mr-1.5" />Summary</TabsTrigger>
+        <TabsTrigger value="bullets" className="flex-1"><Wand2 className="h-3.5 w-3.5 mr-1.5" />Bullets</TabsTrigger>
         <TabsTrigger value="cover" className="flex-1"><Mail className="h-3.5 w-3.5 mr-1.5" />Cover</TabsTrigger>
         <TabsTrigger value="outreach" className="flex-1"><MessageSquare className="h-3.5 w-3.5 mr-1.5" />Outreach</TabsTrigger>
       </TabsList>
+      <TabsContent value="bullets">
+        <p className="text-xs text-muted-foreground mb-3 px-1 leading-relaxed">
+          Each bullet from your resume bank, re-ranked + rewritten for THIS job. Goes into the
+          Experience section of your CV — pick the top 3–6 by relevance and copy.
+        </p>
+        {review.job_id && <TailoredBulletsPanel jobId={review.job_id} />}
+      </TabsContent>
       {fields.map((f) => {
         const v = value(f.key, review[f.key]);
         return (
