@@ -49,7 +49,21 @@ async function apiRequest<T>(
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
-    throw new Error(error.detail || `API error: ${response.status}`);
+    // FastAPI returns either a string detail (most endpoints) or a structured
+    // dict (e.g. /apply's no_direct_posting). Preserve both: stringify for
+    // the message, but attach the original detail so callers can read
+    // structured codes.
+    const detailRaw = (error as { detail?: unknown }).detail;
+    const message =
+      typeof detailRaw === "string"
+        ? detailRaw
+        : detailRaw && typeof detailRaw === "object" && "message" in detailRaw
+          ? String((detailRaw as { message: unknown }).message)
+          : `API error: ${response.status}`;
+    const err = new Error(message) as Error & { detail?: unknown; status?: number };
+    err.detail = detailRaw;
+    err.status = response.status;
+    throw err;
   }
 
   // 204 No Content has no body — calling .json() on it rejects, which was
@@ -108,7 +122,17 @@ export const api = {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
-      throw new Error(error.detail || `Upload error: ${response.status}`);
+      const detailRaw = (error as { detail?: unknown }).detail;
+      const message =
+        typeof detailRaw === "string"
+          ? detailRaw
+          : detailRaw && typeof detailRaw === "object" && "message" in detailRaw
+            ? String((detailRaw as { message: unknown }).message)
+            : `Upload error: ${response.status}`;
+      const err = new Error(message) as Error & { detail?: unknown; status?: number };
+      err.detail = detailRaw;
+      err.status = response.status;
+      throw err;
     }
 
     return response.json() as Promise<T>;

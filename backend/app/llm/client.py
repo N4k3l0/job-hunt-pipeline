@@ -103,8 +103,17 @@ class LLMClient:
         user_prompt: str,
         tools: list[dict[str, Any]],
         max_tokens: int = 4096,
+        tool_choice: dict[str, Any] | None = None,
     ) -> dict:
-        """Generate structured output using Claude's tool use."""
+        """Generate structured output using Claude's tool use.
+
+        Default tool_choice is `any` — i.e. force the model to call ONE
+        of the provided tools. Previously this was `auto`, which let the
+        model fall back to text and silently break callers (deep scorer,
+        decision-maker finder, target-role auto-suggest) that all
+        require a structured tool response. Override via the parameter
+        if a caller really wants opt-in behavior.
+        """
         model = MODELS.get(task_type, MODELS["parsing"])
 
         kwargs: dict[str, Any] = dict(
@@ -113,7 +122,7 @@ class LLMClient:
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
             tools=tools,
-            tool_choice={"type": "auto"},
+            tool_choice=tool_choice or {"type": "any"},
         )
         if self._accepts_temperature(model):
             kwargs["temperature"] = 0.0

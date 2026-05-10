@@ -301,8 +301,73 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
         window.open(data.url, "_blank") || (window.location.href = data.url);
       }
     } catch (e: any) {
-      if (popup && !popup.closed) popup.close();
-      toast.error("Couldn't open posting", { description: e?.message });
+      // Backend returns 422 with code='no_direct_posting' when the
+      // resolver chain (cheap → Firecrawl → slug-guess → Claude) all
+      // fail to find a non-aggregator URL. Render a clear failure
+      // screen in the popup with manual escape hatches instead of
+      // closing it silently.
+      const detail = e?.detail || e?.response?.data?.detail;
+      const isNoDirect = detail && typeof detail === "object" && detail.code === "no_direct_posting";
+      if (popup && !popup.closed && isNoDirect) {
+        const company = String(detail.company || "");
+        const title = String(detail.title || "");
+        const aggUrl = String(detail.aggregator_url || "");
+        const careersQ = encodeURIComponent(`${company} careers`);
+        popup.document.open();
+        popup.document.write(`<!doctype html>
+<html><head><title>No direct posting found</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0; min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    background: #0a0a0a; color: #fafafa; padding: 24px;
+  }
+  .card {
+    width: 100%; max-width: 460px;
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 16px; padding: 28px;
+    background: rgba(255,255,255,0.015);
+  }
+  h1 { font-size: 18px; margin: 0 0 8px; font-weight: 600; }
+  p  { color: #a3a3a3; font-size: 14px; line-height: 1.55; margin: 0 0 14px; }
+  .role { color: #fafafa; font-weight: 500; }
+  a.btn, button.btn {
+    display: block; width: 100%; text-align: center;
+    padding: 11px 14px; border-radius: 10px;
+    font-size: 14px; font-weight: 500; text-decoration: none;
+    margin-top: 8px; cursor: pointer; border: 1px solid rgba(255,255,255,0.08);
+    background: rgba(255,255,255,0.03); color: #fafafa;
+    transition: all 0.15s;
+  }
+  a.btn:hover, button.btn:hover {
+    background: rgba(255,255,255,0.06);
+    border-color: rgba(255,255,255,0.14);
+  }
+  a.primary { background: rgba(251,191,36,0.1); border-color: rgba(251,191,36,0.3); color: #fbbf24; }
+  a.primary:hover { background: rgba(251,191,36,0.16); }
+  .muted { font-size: 12px; color: #737373; margin-top: 14px; text-align: center; }
+</style></head>
+<body>
+  <div class="card">
+    <h1>No direct posting found</h1>
+    <p>We searched the company's ATS, careers page, and aggregators, but couldn't verify a direct application URL for <span class="role">${title}</span> at <span class="role">${company}</span>.</p>
+    <p>Try one of these to find it manually:</p>
+    <a class="btn primary" href="https://www.google.com/search?q=${careersQ}" target="_blank" rel="noopener">Open ${company} careers page</a>
+    ${aggUrl ? `<a class="btn" href="${aggUrl}" target="_blank" rel="noopener">View the aggregator listing anyway</a>` : ""}
+    <button class="btn" onclick="window.close()">Close</button>
+    <p class="muted">If this role really doesn't have a direct apply page, the company may only post via aggregators.</p>
+  </div>
+</body></html>`);
+        popup.document.close();
+      } else {
+        if (popup && !popup.closed) popup.close();
+      }
+      const msg = isNoDirect
+        ? `No direct posting found for "${detail.title}" at "${detail.company}".`
+        : (e?.message || "Couldn't open posting");
+      toast.error("Couldn't open posting", { description: msg });
     } finally {
       setApplying(false);
     }

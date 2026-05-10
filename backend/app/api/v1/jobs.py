@@ -477,31 +477,23 @@ async def resolve_apply_url(job_id: UUID, user_id: CurrentUserId, db: DbSession)
         await db.commit()
     final_url = resolved or source
 
-    # If the only URL we have is on an aggregator with a paywall-ish
-    # apply UX (WeWorkRemotely's '$5/mo to see' upsell etc.), don't
-    # send the user there — they can't actually apply. Fall back to a
-    # Google search scoped to common ATS hosts + the company careers
-    # page. That lands them on a free posting they can actually act on.
-    PAYWALLED_HOSTS = (
-        "weworkremotely.com",
-    )
-    if final_url:
-        try:
-            host = (httpx.URL(final_url).host or "")
-        except Exception:
-            host = ""
-        if (
-            not is_ats_url(final_url)
-            and any(host == h or host.endswith("." + h) for h in PAYWALLED_HOSTS)
-            and (job.company or job.title)
-        ):
-            from urllib.parse import quote_plus
-            q = quote_plus(
-                f'"{job.company}" "{job.title}" '
-                "(site:greenhouse.io OR site:lever.co OR site:ashbyhq.com "
-                "OR site:workable.com OR site:smartrecruiters.com OR careers)"
-            )
-            final_url = f"https://www.google.com/search?q={q}"
+    # If the only URL we have is still on an aggregator (resolver came up
+    # empty), refuse to send the user there. We don't want to fall back to
+    # a Google search either — that just kicks the same problem to the
+    # user. Return a 422 with company/title context so the frontend can
+    # render an explicit "couldn't find a direct posting" message and
+    # offer a manual escape hatch.
+    if final_url and _is_aggregator(final_url):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "no_direct_posting",
+                "message": "Couldn't find a direct posting for this role on a free ATS or the company's careers page.",
+                "company": job.company,
+                "title": job.title,
+                "aggregator_url": final_url,
+            },
+        )
 
     if not final_url:
         raise HTTPException(status_code=404, detail="No URL available for this job")

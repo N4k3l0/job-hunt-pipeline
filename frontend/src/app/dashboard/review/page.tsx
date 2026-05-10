@@ -225,10 +225,24 @@ function EditableMaterials({
   const value = (field: EditableField, fallback: string | null) =>
     draft?.[field] ?? fallback ?? "";
 
-  const fields: { key: EditableField; label: string; tab: string; placeholder: string }[] = [
-    { key: "tailored_summary", label: "Resume", tab: "resume", placeholder: "No tailored summary generated yet." },
-    { key: "cover_letter", label: "Cover", tab: "cover", placeholder: "No cover letter generated yet." },
-    { key: "recruiter_message", label: "Outreach", tab: "outreach", placeholder: "No outreach message generated yet." },
+  const fields: {
+    key: EditableField; label: string; tab: string; placeholder: string; usage: string;
+  }[] = [
+    {
+      key: "tailored_summary", label: "Resume", tab: "resume",
+      placeholder: "No tailored summary generated yet.",
+      usage: "Goes into the Resume / CV upload field on the company's ATS. Use Print / PDF to export it as a file.",
+    },
+    {
+      key: "cover_letter", label: "Cover", tab: "cover",
+      placeholder: "No cover letter generated yet.",
+      usage: "Paste into the cover-letter text box on the application form. If they ask for an attachment, use Print / PDF.",
+    },
+    {
+      key: "recruiter_message", label: "Outreach", tab: "outreach",
+      placeholder: "No outreach message generated yet.",
+      usage: "Send via LinkedIn (or email) to the hiring manager AFTER you've submitted the application. The 'Find decision maker' button below pulls the right person.",
+    },
   ];
 
   return (
@@ -242,6 +256,9 @@ function EditableMaterials({
         const v = value(f.key, review[f.key]);
         return (
           <TabsContent key={f.tab} value={f.tab}>
+            <p className="text-xs text-muted-foreground mb-2 px-1 leading-relaxed">
+              {f.usage}
+            </p>
             {f.tab === "outreach" && review.job_id && (
               <ContactPanel jobId={review.job_id} />
             )}
@@ -451,16 +468,54 @@ export default function ReviewQueuePage() {
   const selected = selectedId ? items.find((i: any) => i.id === selectedId) : items[0];
 
   /**
-   * One-button apply: opens the apply URL immediately so the user is in the form
-   * while they decide. The status flip is delayed by the toast's undo window so
-   * an accidental click can be reverted with no server round-trip wasted.
+   * Opens the company's posting via the resolver chain (handles WWR-style
+   * paywalls + Claude fallback). Does NOT mark the job as applied — that
+   * was the old "Open & Apply" behavior, but the dashboard's 'Applied'
+   * stat then ticked up before the user had actually submitted anything.
+   * Users now confirm separately via 'I applied' once the form is in.
    */
-  const handleOpenAndApply = async (review: any) => {
+  const handleOpenPosting = async (review: any) => {
     if (!(await persistDraftIfDirty(review.id))) return;
-    const applyUrl = review.job?.apply_url || review.job?.job_url;
-    if (applyUrl) {
-      window.open(applyUrl, "_blank", "noopener,noreferrer");
+    const jobId = review.job_id;
+    if (!jobId) {
+      toast.error("Couldn't open posting", { description: "Missing job_id on review row." });
+      return;
     }
+    // Open a placeholder popup synchronously so the popup blocker is happy,
+    // then navigate it once the resolver finishes.
+    const popup = window.open("about:blank", "_blank");
+    if (popup) {
+      popup.document.write(
+        '<title>Opening posting…</title>' +
+        '<style>body{margin:0;display:flex;align-items:center;justify-content:center;' +
+        'height:100vh;font-family:system-ui;background:#0a0a0a;color:#a3a3a3}</style>' +
+        '<div>Resolving direct apply link…</div>'
+      );
+    }
+    try {
+      const data = await api.post<{ url: string; is_direct_ats: boolean }>(
+        `/api/v1/jobs/${jobId}/apply`,
+      );
+      if (popup && !popup.closed) {
+        try { popup.opener = null; } catch {}
+        popup.location.replace(data.url);
+      } else {
+        window.open(data.url, "_blank") || (window.location.href = data.url);
+      }
+    } catch (e: any) {
+      if (popup && !popup.closed) popup.close();
+      toast.error("Couldn't open posting", { description: e?.message });
+    }
+  };
+
+  /**
+   * Explicit user action: 'I just submitted this application.' Approves
+   * the tailored pack (creates the tracking row) and flips status to
+   * applied with a 7-day follow-up. Kept separate from handleOpenPosting
+   * so opening the page never side-effects the user's stats.
+   */
+  const handleMarkApplied = async (review: any) => {
+    if (!(await persistDraftIfDirty(review.id))) return;
     const followUp = new Date();
     followUp.setDate(followUp.getDate() + 7);
     const followUpIso = followUp.toISOString().slice(0, 10);
@@ -960,17 +1015,22 @@ export default function ReviewQueuePage() {
                   Approve
                 </Button>
                 <Button
+                  variant="outline"
                   size="sm"
-                  onClick={() => handleOpenAndApply(review)}
-                  disabled={!review.job?.apply_url && !review.job?.job_url}
-                  title={
-                    !review.job?.apply_url && !review.job?.job_url
-                      ? "No application link available"
-                      : "Opens the apply page and marks Applied (with 5s undo)"
-                  }
+                  onClick={() => handleOpenPosting(review)}
+                  disabled={!review.job_id}
+                  title="Opens the company's posting. Doesn't change your application status."
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  Open posting
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => handleMarkApplied(review)}
+                  title="Click this AFTER you've actually submitted the application."
                 >
                   <Send className="h-3.5 w-3.5" />
-                  Open & Apply
+                  I applied
                 </Button>
               </div>
             </CardContent>
