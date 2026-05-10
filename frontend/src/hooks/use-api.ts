@@ -129,6 +129,40 @@ export function useUploadResume() {
   });
 }
 
+export interface SampleApplication {
+  id: string;
+  kind: "cover_letter" | "outreach" | "summary";
+  label: string | null;
+  content: string;
+  created_at: string | null;
+}
+
+export function useSampleApplications() {
+  return useQuery({
+    queryKey: ["sample-applications"],
+    queryFn: () => api.get<SampleApplication[]>("/api/v1/candidates/sample-applications"),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useCreateSampleApplication() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { kind: string; label: string | null; content: string }) =>
+      api.post<SampleApplication>("/api/v1/candidates/sample-applications", data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["sample-applications"] }),
+  });
+}
+
+export function useDeleteSampleApplication() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api.delete(`/api/v1/candidates/sample-applications/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["sample-applications"] }),
+  });
+}
+
 export function useDeleteResume() {
   const qc = useQueryClient();
   return useMutation({

@@ -5,6 +5,8 @@ from sqlalchemy import select, delete
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUserId, DbSession
+from pydantic import BaseModel, Field
+
 from app.models.candidate import (
     CandidateProfile,
     CandidateWorkHistory,
@@ -12,6 +14,7 @@ from app.models.candidate import (
     CandidateEducation,
     CandidateBullet,
     Resume,
+    SampleApplication,
 )
 from app.schemas.candidate import (
     ProfileCreate,
@@ -474,6 +477,112 @@ async def trigger_parse(resume_id: UUID, user_id: CurrentUserId, db: DbSession):
     from app.workers.parsing_tasks import _parse_resume_async
     await _parse_resume_async(str(resume.id), str(user_id))
     return {"status": "complete", "resume_id": str(resume_id)}
+
+
+# ── Sample Applications (style training) ────────────────────────────────────
+
+
+_VALID_SAMPLE_KINDS = {"cover_letter", "outreach", "summary"}
+_MAX_SAMPLES_PER_KIND = 5
+_MAX_SAMPLE_CHARS = 8000
+
+
+class SampleApplicationCreate(BaseModel):
+    kind: str = Field(..., description="cover_letter | outreach | summary")
+    label: str | None = Field(None, max_length=200)
+    content: str = Field(..., min_length=20, max_length=_MAX_SAMPLE_CHARS)
+
+
+class SampleApplicationResponse(BaseModel):
+    id: str
+    kind: str
+    label: str | None
+    content: str
+    created_at: str
+
+
+def _sample_to_dict(s: SampleApplication) -> dict:
+    return {
+        "id": str(s.id),
+        "kind": s.kind,
+        "label": s.label,
+        "content": s.content,
+        "created_at": s.created_at.isoformat() if s.created_at else None,
+    }
+
+
+@router.get("/sample-applications")
+async def list_sample_applications(user_id: CurrentUserId, db: DbSession):
+    """List the user's writing samples, newest first. Tailor service uses
+    these to mimic the candidate's voice when generating new drafts."""
+    result = await db.execute(
+        select(SampleApplication)
+        .where(SampleApplication.user_id == user_id)
+        .order_by(SampleApplication.created_at.desc())
+    )
+    return [_sample_to_dict(s) for s in result.scalars().all()]
+
+
+@router.post("/sample-applications", status_code=status.HTTP_201_CREATED)
+async def create_sample_application(
+    data: SampleApplicationCreate,
+    user_id: CurrentUserId,
+    db: DbSession,
+):
+    """Add a writing sample (cover letter / outreach / summary). Capped
+    at 5 per kind so the prompt context stays bounded — pruning the
+    oldest sample of that kind when the cap is hit, so saving new ones
+    feels natural ('replace my oldest example')."""
+    if data.kind not in _VALID_SAMPLE_KINDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"kind must be one of {sorted(_VALID_SAMPLE_KINDS)}",
+        )
+
+    count_result = await db.execute(
+        select(SampleApplication)
+        .where(
+            SampleApplication.user_id == user_id,
+            SampleApplication.kind == data.kind,
+        )
+        .order_by(SampleApplication.created_at.asc())
+    )
+    existing = list(count_result.scalars().all())
+    if len(existing) >= _MAX_SAMPLES_PER_KIND:
+        # Drop the oldest so the new one fits inside the cap.
+        await db.delete(existing[0])
+        await db.flush()
+
+    sample = SampleApplication(
+        user_id=user_id,
+        kind=data.kind,
+        label=(data.label or None),
+        content=data.content.strip(),
+    )
+    db.add(sample)
+    await db.commit()
+    await db.refresh(sample)
+    return _sample_to_dict(sample)
+
+
+@router.delete(
+    "/sample-applications/{sample_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_sample_application(
+    sample_id: UUID, user_id: CurrentUserId, db: DbSession
+):
+    result = await db.execute(
+        select(SampleApplication).where(
+            SampleApplication.id == sample_id,
+            SampleApplication.user_id == user_id,
+        )
+    )
+    sample = result.scalar_one_or_none()
+    if not sample:
+        raise HTTPException(status_code=404, detail="Sample not found")
+    await db.delete(sample)
+    await db.commit()
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

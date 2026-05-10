@@ -19,6 +19,7 @@ import {
   useResumes, useUploadResume, useDeleteResume,
   useWorkHistory, useSkills, useBullets,
   useCurrentUser, useUpdateMe, useRescoreInbox,
+  useSampleApplications, useCreateSampleApplication, useDeleteSampleApplication,
 } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/toast";
 
@@ -664,6 +665,8 @@ export default function ProfilePage() {
               )}
             </CardContent>
           </Card>
+
+          <WritingSamplesCard />
         </TabsContent>
 
         {/* ── Preferences Tab ────────────────────────────────────── */}
@@ -950,5 +953,169 @@ export default function ProfilePage() {
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+
+/* ── Writing Samples ──────────────────────────────────────────────────────
+ * Lets users paste in past cover letters / outreach messages / resume
+ * summaries that the tailor service feeds Claude as style examples. Without
+ * any samples, generation falls back to default behavior. Capped at 5 per
+ * kind on the backend so prompt context stays bounded.
+ */
+const SAMPLE_KINDS: { value: "cover_letter" | "outreach" | "summary"; label: string; placeholder: string }[] = [
+  {
+    value: "cover_letter",
+    label: "Cover letter",
+    placeholder: "Paste a cover letter you've written before. Claude will mimic your sentence rhythm, openers, and how you frame achievements — without copying any specific facts.",
+  },
+  {
+    value: "outreach",
+    label: "Outreach message",
+    placeholder: "Paste a recruiter / hiring-manager message you've sent before. Especially useful for LinkedIn — recruiters can clock generic AI-written messages instantly.",
+  },
+  {
+    value: "summary",
+    label: "Resume summary",
+    placeholder: "Paste a professional summary you've written before — the 2-3 line opener at the top of a resume.",
+  },
+];
+
+function WritingSamplesCard() {
+  const { data: samples, isLoading } = useSampleApplications();
+  const create = useCreateSampleApplication();
+  const remove = useDeleteSampleApplication();
+
+  const [kind, setKind] = useState<"cover_letter" | "outreach" | "summary">("cover_letter");
+  const [label, setLabel] = useState("");
+  const [content, setContent] = useState("");
+  const placeholder = SAMPLE_KINDS.find((k) => k.value === kind)?.placeholder ?? "";
+
+  const handleSave = () => {
+    if (content.trim().length < 20) return;
+    create.mutate(
+      { kind, label: label.trim() || null, content: content.trim() },
+      {
+        onSuccess: () => {
+          setLabel("");
+          setContent("");
+        },
+      },
+    );
+  };
+
+  const grouped = (samples ?? []).reduce<Record<string, typeof samples>>(
+    (acc, s) => {
+      (acc[s.kind] ||= []).push(s);
+      return acc;
+    },
+    {} as Record<string, typeof samples>,
+  );
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Your writing samples</CardTitle>
+        <CardDescription>
+          Paste past cover letters, outreach messages, or resume summaries here.
+          Claude reads them when generating new drafts so your applications
+          sound like <span className="text-foreground font-medium">you</span>,
+          not generic AI. Optional — leave empty for default behavior.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        {/* Add new sample */}
+        <div className="space-y-3 rounded-lg border border-white/[0.06] p-4">
+          <div className="flex flex-wrap gap-2">
+            {SAMPLE_KINDS.map((k) => (
+              <Button
+                key={k.value}
+                size="sm"
+                variant={kind === k.value ? "default" : "outline"}
+                onClick={() => setKind(k.value)}
+              >
+                {k.label}
+              </Button>
+            ))}
+          </div>
+          <Input
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="Optional label (e.g. 'AI Engineer @ Anthropic — landed interview')"
+            className="text-sm"
+          />
+          <textarea
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            placeholder={placeholder}
+            spellCheck
+            className="block w-full min-h-[180px] resize-y rounded-lg bg-white/[0.02] border border-white/[0.04] focus:border-amber-500/30 focus:outline-none p-3 text-sm leading-relaxed font-sans whitespace-pre-line transition-colors"
+          />
+          <div className="flex items-center gap-3">
+            <Button
+              size="sm"
+              onClick={handleSave}
+              disabled={create.isPending || content.trim().length < 20}
+            >
+              {create.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {create.isPending ? "Saving…" : "Save sample"}
+            </Button>
+            <span className="text-xs text-muted-foreground">
+              {content.trim().length < 20
+                ? `${20 - content.trim().length} more chars`
+                : `${content.trim().length} chars`}
+            </span>
+          </div>
+        </div>
+
+        {/* List existing samples grouped by kind */}
+        {isLoading ? (
+          <div className="flex justify-center py-4">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : !samples || samples.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-4">
+            No samples yet. Drafts will use the default voice.
+          </p>
+        ) : (
+          <div className="space-y-4">
+            {SAMPLE_KINDS.map((k) => {
+              const items = grouped[k.value] || [];
+              if (items.length === 0) return null;
+              return (
+                <div key={k.value} className="space-y-2">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">
+                    {k.label} <span className="text-muted-foreground/60">({items.length}/5)</span>
+                  </p>
+                  {items.map((s) => (
+                    <div
+                      key={s.id}
+                      className="rounded-lg border border-white/[0.06] p-3 space-y-2"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <p className="text-sm font-medium leading-snug">
+                          {s.label || <span className="text-muted-foreground italic">Untitled</span>}
+                        </p>
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          onClick={() => remove.mutate(s.id)}
+                          title="Delete sample"
+                        >
+                          <Trash2 className="h-4 w-4 text-muted-foreground hover:text-destructive" />
+                        </Button>
+                      </div>
+                      <p className="text-xs text-muted-foreground leading-relaxed line-clamp-3 whitespace-pre-line">
+                        {s.content}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

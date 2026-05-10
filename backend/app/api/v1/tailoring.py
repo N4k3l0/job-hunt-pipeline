@@ -291,6 +291,9 @@ async def regenerate_section(
     from app.llm.prompts.tailor_resume import (
         SYSTEM_PROMPT, COVER_LETTER_PROMPT, OUTREACH_PROMPT, SUMMARY_REGEN_PROMPT,
     )
+    from app.services.tailoring.tailor_service import (
+        _load_samples_by_kind, _style_examples_block,
+    )
 
     profile_result = await db.execute(
         select(CandidateProfile)
@@ -300,6 +303,22 @@ async def regenerate_section(
         )
     )
     profile = profile_result.scalar_one_or_none()
+    samples_by_kind = await _load_samples_by_kind(db, str(user_id))
+    # Map regenerate-section names to sample kinds.
+    _section_to_kind = {
+        "tailored_summary": "summary",
+        "cover_letter": "cover_letter",
+        "recruiter_message": "outreach",
+    }
+    _section_to_label = {
+        "tailored_summary": "summary",
+        "cover_letter": "cover letter",
+        "recruiter_message": "outreach message",
+    }
+    style_block = _style_examples_block(
+        samples_by_kind.get(_section_to_kind.get(body.section, ""), []),
+        _section_to_label.get(body.section, "draft"),
+    )
 
     job = app.job
     requirements = job.entities.requirements if job.entities else []
@@ -320,7 +339,7 @@ async def regenerate_section(
     top_exp = "\n".join(top_exp_lines) or "(no prior tailored bullets — use the candidate's master profile)"
 
     if body.section == "tailored_summary":
-        prompt = SUMMARY_REGEN_PROMPT.format(
+        prompt = style_block + SUMMARY_REGEN_PROMPT.format(
             job_title=job.title,
             job_company=job.company,
             job_requirements="; ".join(requirements[:15]),
@@ -347,7 +366,7 @@ async def regenerate_section(
             candidate_summary=app.tailored_summary or (profile.master_summary if profile else ""),
             top_experience=top_exp,
         )
-        prompt = base + ("\n\n" + guidance_block if guidance_block else "")
+        prompt = style_block + base + ("\n\n" + guidance_block if guidance_block else "")
         new_content = (await llm_client.generate(
             task_type="tailoring",
             system_prompt=SYSTEM_PROMPT,
@@ -363,7 +382,7 @@ async def regenerate_section(
             job_company=job.company,
             strongest_matches="; ".join(strongest),
         )
-        prompt = base + ("\n\n" + guidance_block if guidance_block else "")
+        prompt = style_block + base + ("\n\n" + guidance_block if guidance_block else "")
         new_content = (await llm_client.generate(
             task_type="tailoring",
             system_prompt=SYSTEM_PROMPT,

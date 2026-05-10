@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.job import Job
-from app.models.candidate import CandidateProfile, Resume, CandidateBullet
+from app.models.candidate import CandidateProfile, Resume, CandidateBullet, SampleApplication
 from app.models.tailoring import TailoredApplication
 from app.llm.client import llm_client
 from app.llm.prompts.tailor_resume import (
@@ -19,6 +19,58 @@ from app.llm.prompts.tailor_resume import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# Cap injected examples per kind. Past 3 the prompt gets long for marginal
+# style improvement, and Claude starts pattern-matching too literally.
+_MAX_SAMPLES_INJECTED = 3
+_MAX_SAMPLE_CHARS_INJECTED = 4000
+
+
+async def _load_samples_by_kind(db: AsyncSession, user_id: str) -> dict[str, list[str]]:
+    """Pull the user's writing samples grouped by kind. Used to mimic
+    voice when generating new drafts. Returns an empty mapping when the
+    user has no samples — generation falls back to default behavior."""
+    result = await db.execute(
+        select(SampleApplication)
+        .where(SampleApplication.user_id == user_id)
+        .order_by(SampleApplication.created_at.desc())
+    )
+    by_kind: dict[str, list[str]] = {}
+    for s in result.scalars().all():
+        kind_list = by_kind.setdefault(s.kind, [])
+        if len(kind_list) >= _MAX_SAMPLES_INJECTED:
+            continue
+        snippet = (s.content or "").strip()[:_MAX_SAMPLE_CHARS_INJECTED]
+        if snippet:
+            kind_list.append(snippet)
+    return by_kind
+
+
+def _style_examples_block(samples: list[str], artifact_label: str) -> str:
+    """Render a <style_examples> block to prepend to the user prompt.
+    Empty string when no samples — caller can string-concat unconditionally.
+
+    Important: this teaches VOICE, not facts. The system prompt's hard
+    rule against fabricating experience / metrics / employers still
+    applies — Claude should mimic rhythm, tone, openers, closers, but
+    NEVER lift specific claims from these examples into the new draft.
+    """
+    if not samples:
+        return ""
+    rendered = "\n\n".join(
+        f"<example index=\"{i + 1}\">\n{s}\n</example>"
+        for i, s in enumerate(samples)
+    )
+    return (
+        f"<style_examples artifact=\"{artifact_label}\">\n"
+        f"The candidate has written {artifact_label}s like the ones below. "
+        f"Match their VOICE — sentence rhythm, tone, openers, common phrases, "
+        f"how they frame achievements. Do NOT copy facts, employers, or "
+        f"metrics from these examples; only the writing style.\n\n"
+        f"{rendered}\n"
+        f"</style_examples>\n\n"
+    )
 
 
 async def generate_tailored_application(
@@ -76,20 +128,27 @@ async def generate_tailored_application(
     work_history_text = _format_work_history(profile.work_history)
     skills_text = ", ".join(s.skill_name for s in profile.skills)
 
+    # Pull the user's writing samples once — Claude will read them as
+    # style examples when drafting each artifact below.
+    samples_by_kind = await _load_samples_by_kind(db, user_id)
+
     # ── Step 1: Tailor resume ─────────────────────────────────────────────
     logger.info("Tailoring resume for job %s", job_id)
     await _step("Tailoring resume")
 
-    resume_prompt = TAILOR_RESUME_PROMPT.format(
-        job_title=job.title,
-        job_company=job.company,
-        job_requirements="; ".join(job_requirements[:15]),
-        job_skills=", ".join(job_skills[:20]),
-        job_keywords=", ".join(job_keywords[:20]),
-        candidate_headline=profile.headline or "",
-        candidate_summary=profile.master_summary or "",
-        work_history_text=work_history_text,
-        skills_text=skills_text,
+    resume_prompt = (
+        _style_examples_block(samples_by_kind.get("summary", []), "summary")
+        + TAILOR_RESUME_PROMPT.format(
+            job_title=job.title,
+            job_company=job.company,
+            job_requirements="; ".join(job_requirements[:15]),
+            job_skills=", ".join(job_skills[:20]),
+            job_keywords=", ".join(job_keywords[:20]),
+            candidate_headline=profile.headline or "",
+            candidate_summary=profile.master_summary or "",
+            work_history_text=work_history_text,
+            skills_text=skills_text,
+        )
     )
 
     tailored_resume = await llm_client.generate_structured(
@@ -111,12 +170,15 @@ async def generate_tailored_application(
     cover_letter = await llm_client.generate(
         task_type="tailoring",
         system_prompt=SYSTEM_PROMPT,
-        user_prompt=COVER_LETTER_PROMPT.format(
-            job_title=job.title,
-            job_company=job.company,
-            job_requirements="; ".join(job_requirements[:10]),
-            candidate_summary=tailored_resume.get("tailored_summary", ""),
-            top_experience=top_exp,
+        user_prompt=(
+            _style_examples_block(samples_by_kind.get("cover_letter", []), "cover letter")
+            + COVER_LETTER_PROMPT.format(
+                job_title=job.title,
+                job_company=job.company,
+                job_requirements="; ".join(job_requirements[:10]),
+                candidate_summary=tailored_resume.get("tailored_summary", ""),
+                top_experience=top_exp,
+            )
         ),
     )
 
@@ -127,10 +189,13 @@ async def generate_tailored_application(
     outreach = await llm_client.generate(
         task_type="tailoring",
         system_prompt=SYSTEM_PROMPT,
-        user_prompt=OUTREACH_PROMPT.format(
-            job_title=job.title,
-            job_company=job.company,
-            strongest_matches="; ".join(tailored_resume.get("strongest_matches", [])),
+        user_prompt=(
+            _style_examples_block(samples_by_kind.get("outreach", []), "outreach message")
+            + OUTREACH_PROMPT.format(
+                job_title=job.title,
+                job_company=job.company,
+                strongest_matches="; ".join(tailored_resume.get("strongest_matches", [])),
+            )
         ),
         max_tokens=500,
     )

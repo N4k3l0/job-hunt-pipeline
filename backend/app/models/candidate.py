@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, date
 
-from sqlalchemy import String, Text, DateTime, Date, Float, Integer, ForeignKey, func
+from sqlalchemy import String, Text, DateTime, Date, Float, Integer, ForeignKey, Index, func
 from sqlalchemy.dialects.postgresql import UUID, JSONB, ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -149,3 +149,30 @@ class Resume(Base):
     )
 
     user: Mapped["User"] = relationship(back_populates="resumes")
+
+
+class SampleApplication(Base):
+    """User-uploaded writing samples used to teach the tailor service the
+    candidate's voice. Three kinds (cover_letter, outreach, summary) so
+    samples for one artifact don't bleed into another (a chatty cover
+    letter shouldn't make outreach long-winded). Optional — if the user
+    hasn't uploaded any of a given kind, generation falls back to the
+    default prompt behavior."""
+    __tablename__ = "sample_applications"
+    __table_args__ = (
+        Index("ix_sample_applications_user_kind", "user_id", "kind"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE")
+    )
+    # cover_letter | outreach | summary
+    kind: Mapped[str] = mapped_column(String(50))
+    label: Mapped[str | None] = mapped_column(Text)
+    content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
