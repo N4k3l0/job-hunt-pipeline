@@ -71,6 +71,10 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const undos = useRef<Map<string, () => void>>(new Map());
   // Track which toasts have already committed so dismissing them doesn't re-fire.
   const committed = useRef<Set<string>>(new Set());
+  // For pause-on-tab-hidden (Sonner principle): remember when each toast
+  // was scheduled and how much of its budget is left, so we can re-arm
+  // the timer with the remaining duration when the user comes back.
+  const schedule = useRef<Map<string, { dueAt: number; remaining: number; fire: () => void }>>(new Map());
 
   const dismiss = useCallback((id: string) => {
     const t = timers.current.get(id);
@@ -103,27 +107,34 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     const id = newId();
     const full = { ...item, id } as ToastItem;
     setToasts((prev) => [...prev, full]);
+
+    const arm = (duration: number, fire: () => void) => {
+      const timer = setTimeout(fire, duration);
+      timers.current.set(id, timer);
+      schedule.current.set(id, { dueAt: Date.now() + duration, remaining: duration, fire });
+    };
+
     if (full.variant === "action") {
       const a = full as ActionToast;
       commits.current.set(id, a.onCommit);
       if (a.onUndo) undos.current.set(id, a.onUndo);
-      const timer = setTimeout(() => {
+      arm(a.duration, () => {
         if (!committed.current.has(id)) {
           committed.current.add(id);
           void a.onCommit();
         }
         timers.current.delete(id);
+        schedule.current.delete(id);
         commits.current.delete(id);
         undos.current.delete(id);
         setToasts((prev) => prev.filter((x) => x.id !== id));
-      }, a.duration);
-      timers.current.set(id, timer);
+      });
     } else if (full.variant !== "loading" && full.duration > 0) {
-      const timer = setTimeout(() => {
+      arm(full.duration, () => {
         timers.current.delete(id);
+        schedule.current.delete(id);
         setToasts((prev) => prev.filter((x) => x.id !== id));
-      }, full.duration);
-      timers.current.set(id, timer);
+      });
     }
     return id;
   }, []);
@@ -158,6 +169,35 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => () => {
     timers.current.forEach(clearTimeout);
     timers.current.clear();
+  }, []);
+
+  // Pause toast timers when the tab is hidden, resume when it returns.
+  // Per Sonner principle: "Handle edge cases invisibly" — if the user
+  // alt-tabs, an action toast shouldn't auto-commit while they're not
+  // looking at it. Same for auto-dismiss timers.
+  useEffect(() => {
+    function onVisibility() {
+      if (document.hidden) {
+        const now = Date.now();
+        timers.current.forEach((t, id) => {
+          clearTimeout(t);
+          const sched = schedule.current.get(id);
+          if (sched) {
+            sched.remaining = Math.max(0, sched.dueAt - now);
+          }
+        });
+        timers.current.clear();
+      } else {
+        schedule.current.forEach((sched, id) => {
+          if (timers.current.has(id)) return;
+          const t = setTimeout(sched.fire, sched.remaining);
+          timers.current.set(id, t);
+          sched.dueAt = Date.now() + sched.remaining;
+        });
+      }
+    }
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
   }, []);
 
   return (
@@ -216,8 +256,7 @@ function ToastItemView({
   return (
     <div
       className={cn(
-        "pointer-events-auto group relative overflow-hidden rounded-xl border border-white/10 bg-background/95 backdrop-blur-md shadow-lg shadow-black/30",
-        "animate-in slide-in-from-bottom-2 fade-in duration-200",
+        "toast-item pointer-events-auto group relative overflow-hidden rounded-xl border border-white/10 bg-background/95 backdrop-blur-md shadow-lg shadow-black/30",
       )}
     >
       <div className="flex items-start gap-3 px-4 py-3">
@@ -231,14 +270,14 @@ function ToastItemView({
         {isAction && (
           <button
             onClick={() => onUndo(toast.id)}
-            className="text-xs font-semibold text-amber-400 hover:text-amber-300 px-2 py-1 -my-1 rounded-md hover:bg-amber-500/10 transition-colors"
+            className="toast-btn text-xs font-semibold text-amber-400 hover:text-amber-300 px-2 py-1 -my-1 rounded-md hover:bg-amber-500/10"
           >
             {(toast as ActionToast).actionLabel}
           </button>
         )}
         <button
           onClick={() => onDismiss(toast.id)}
-          className="text-muted-foreground/40 hover:text-muted-foreground transition-colors -mr-1 -my-0.5 p-1"
+          className="toast-btn text-muted-foreground/40 hover:text-muted-foreground -mr-1 -my-0.5 p-1"
           aria-label="Dismiss"
         >
           <X className="h-3.5 w-3.5" />
@@ -247,6 +286,48 @@ function ToastItemView({
       {isAction && toast.duration > 0 && (
         <CountdownBar duration={toast.duration} />
       )}
+      <style jsx>{`
+        /* Slide + fade in with a strong custom ease-out (Emil's curve).
+           Slightly slower than the default 200ms because toasts entering
+           too fast feel sudden — the eye catches them better at 380ms. */
+        .toast-item {
+          animation: toast-enter 380ms cubic-bezier(0.23, 1, 0.32, 1) both;
+          transform-origin: bottom right;
+        }
+        @keyframes toast-enter {
+          from {
+            opacity: 0;
+            transform: translateY(12px) scale(0.96);
+            filter: blur(2px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+            filter: blur(0);
+          }
+        }
+        /* Specific transition properties + press feedback per Emil's
+           "buttons must feel responsive" rule. */
+        .toast-btn {
+          transition: background-color 160ms cubic-bezier(0.23, 1, 0.32, 1),
+                      color 160ms cubic-bezier(0.23, 1, 0.32, 1),
+                      transform 120ms cubic-bezier(0.23, 1, 0.32, 1);
+        }
+        .toast-btn:active {
+          transform: scale(0.94);
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .toast-item {
+            animation: none;
+          }
+          .toast-btn {
+            transition: none;
+          }
+          .toast-btn:active {
+            transform: none;
+          }
+        }
+      `}</style>
     </div>
   );
 }

@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { useJobs } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/toast";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 
@@ -346,19 +347,20 @@ export default function JobsInboxPage() {
           <Loader2 className="h-5 w-5 animate-spin text-muted-foreground/50" />
         </div>
       ) : filtered.length === 0 ? (
-        <div className="text-center py-20">
-          <Inbox className="h-10 w-10 mx-auto text-white/[0.15] mb-4" />
-          <p className="text-base text-muted-foreground">
-            {total === 0
-              ? "No jobs discovered yet."
-              : "No jobs match your filters."}
-          </p>
-          {total === 0 && (
-            <p className="text-sm text-muted-foreground mt-2">
-              Import a job or wait for discovery to run.
-            </p>
-          )}
-        </div>
+        total === 0 ? (
+          <EmptyState
+            icon={Inbox}
+            title="Inbox is empty"
+            description="Discovery runs daily at 06:00 UTC. Want jobs sooner? Trigger a sweep from the Admin page or paste a URL on Import."
+            action={{ label: "Import a job", href: "/dashboard/import" }}
+          />
+        ) : (
+          <EmptyState
+            icon={Inbox}
+            title="No jobs match these filters"
+            description="Try widening the region or relaxing the source filter — your match pool will open back up."
+          />
+        )
       ) : (
         <div className="space-y-1.5">
           {filtered.map((job: any) => {

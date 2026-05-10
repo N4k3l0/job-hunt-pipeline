@@ -116,20 +116,24 @@ export default function LoginPage() {
       />
 
       <div className="w-full max-w-sm space-y-8">
-        {/* Brand mark + name + tagline */}
+        {/* Brand mark + name + tagline. Stagger entry: icon first, then
+            title, tagline, card. Each row delays ~80ms after the previous
+            so the eye lands on one thing at a time — Emil's cascading
+            entry. The icon also pulses on entry (scale 0.85 → 1) which
+            mirrors the "balloon with shape even when deflated" rule. */}
         <div className="text-center space-y-3">
-          <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-amber-500/20 bg-amber-500/5 shadow-[0_0_24px_rgba(251,191,36,0.15)]">
+          <div className="login-stagger-pop inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-amber-500/20 bg-amber-500/5 shadow-[0_0_24px_rgba(251,191,36,0.15)]">
             <Sparkles className="h-5 w-5 text-amber-400" />
           </div>
-          <div>
-            <h1 className="font-display text-3xl font-semibold tracking-tight">Job Hunt Pipeline</h1>
-            <p className="text-sm text-muted-foreground mt-1">
+          <div className="space-y-1">
+            <h1 className="login-stagger font-display text-3xl font-semibold tracking-tight [animation-delay:80ms]">Job Hunt Pipeline</h1>
+            <p className="login-stagger text-sm text-muted-foreground [animation-delay:160ms]">
               Smarter applications, less noise.
             </p>
           </div>
         </div>
 
-        <Card className="border-white/[0.06] shadow-2xl shadow-black/40">
+        <Card className="login-stagger border-white/[0.06] shadow-2xl shadow-black/40 [animation-delay:240ms]">
           <CardContent className="p-6">
             {sent ? (
               <div className="flex flex-col items-center text-center gap-4 py-2">
@@ -214,10 +218,41 @@ export default function LoginPage() {
           </CardContent>
         </Card>
 
-        <p className="text-center text-sm text-muted-foreground">
+        <p className="login-stagger text-center text-sm text-muted-foreground [animation-delay:320ms]">
           Invite-only · Contact your admin if you don't have access
         </p>
       </div>
+
+      {/* Stagger keyframes scoped to the page so they don't leak globally.
+          Strong custom ease per Emil. Reduced-motion users skip the
+          movement entirely but still see the final composition. */}
+      <style jsx global>{`
+        .login-stagger {
+          opacity: 0;
+          transform: translateY(8px);
+          animation: login-fadeup 480ms cubic-bezier(0.23, 1, 0.32, 1) both;
+        }
+        .login-stagger-pop {
+          opacity: 0;
+          transform: scale(0.85);
+          animation: login-pop 520ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+        }
+        @keyframes login-fadeup {
+          from { opacity: 0; transform: translateY(8px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes login-pop {
+          from { opacity: 0; transform: scale(0.85); }
+          to   { opacity: 1; transform: scale(1); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .login-stagger, .login-stagger-pop {
+            animation: none;
+            opacity: 1;
+            transform: none;
+          }
+        }
+      `}</style>
     </div>
   );
 }

@@ -13,7 +13,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   User, Upload, FileText, Plus, X, Globe, DollarSign, Search,
   Briefcase, GraduationCap, Loader2, CheckCircle2, Trash2, Circle, ArrowRight,
+  Sparkles, FileSignature, Quote,
 } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   useProfile, useCreateProfile, useUpdateProfile,
   useResumes, useUploadResume, useDeleteResume,
@@ -515,9 +517,11 @@ export default function ProfilePage() {
             </CardHeader>
             <CardContent>
               {!bullets || bullets.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-4">
-                  No bullets yet. They'll be extracted when your resume is parsed.
-                </p>
+                <EmptyState
+                  icon={Sparkles}
+                  title="No bullets yet"
+                  description="Upload a resume on the Resumes tab — Claude extracts your strongest achievement lines and stores them here for tailoring."
+                />
               ) : (
                 <div className="space-y-1.5">
                   {bullets.map((b: any) => (
@@ -624,9 +628,11 @@ export default function ProfilePage() {
                   <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                 </div>
               ) : !resumes || resumes.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-6">
-                  No resumes uploaded yet.
-                </p>
+                <EmptyState
+                  icon={FileSignature}
+                  title="No resumes yet"
+                  description="Drop a PDF or DOCX above. Claude parses it into structured profile data, then uses it to tailor every application."
+                />
               ) : (
                 <div className="space-y-2">
                   {resumes.map((resume: any) => (
@@ -1074,9 +1080,11 @@ function WritingSamplesCard() {
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           </div>
         ) : !samples || samples.length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-4">
-            No samples yet. Drafts will use the default voice.
-          </p>
+          <EmptyState
+            icon={Quote}
+            title="No samples yet"
+            description="Drafts use the default AI voice. Paste 1–2 of your past cover letters or outreach messages above so Claude writes the next ones in your style."
+          />
         ) : (
           <div className="space-y-4">
             {SAMPLE_KINDS.map((k) => {

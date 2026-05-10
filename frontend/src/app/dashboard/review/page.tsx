@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   CheckCircle2, XCircle, FileText, Mail, MessageSquare, Download,
   AlertCircle, Loader2, ExternalLink, MapPin, Building2, Globe, Copy, Check, Send,
@@ -678,12 +679,13 @@ export default function ReviewQueuePage() {
           <p className="text-muted-foreground">Tailored applications ready for review</p>
         </div>
         <Card>
-          <CardContent className="py-12 text-center">
-            <FileText className="h-10 w-10 mx-auto text-muted-foreground/20 mb-3" />
-            <p className="text-muted-foreground">No applications pending review.</p>
-            <p className="text-sm text-muted-foreground mt-1">
-              Generate tailored materials from the Jobs Inbox.
-            </p>
+          <CardContent className="p-0">
+            <EmptyState
+              icon={Sparkles}
+              title="Review queue is empty"
+              description="Pick a job from the Inbox and hit Generate Application — the tailored resume, cover, and outreach will land here ready to review."
+              action={{ label: "Go to Inbox", href: "/dashboard/jobs" }}
+            />
           </CardContent>
         </Card>
       </div>

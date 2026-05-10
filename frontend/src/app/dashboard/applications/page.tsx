@@ -8,9 +8,10 @@ import { Button } from "@/components/ui/button";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ChevronDown, Bell, Loader2, Send } from "lucide-react";
+import { ChevronDown, Bell, Loader2, Send, Briefcase } from "lucide-react";
 import { useApplicationPipeline, useUpdateStatus, useReminders } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/toast";
+import { EmptyState } from "@/components/ui/empty-state";
 
 /** Format a date string ("YYYY-MM-DD") relative to today: "Today",
  *  "Tomorrow", "in 3 days", "3 days ago". Empty input returns null.
@@ -131,11 +132,13 @@ export default function ApplicationsPage() {
 
       {items.length === 0 ? (
         <Card>
-          <CardContent className="py-12 text-center">
-            <p className="text-muted-foreground">No applications tracked yet.</p>
-            <p className="text-sm text-muted-foreground mt-1">
-              Approve tailored materials from the Review Queue to start tracking.
-            </p>
+          <CardContent className="p-0">
+            <EmptyState
+              icon={Briefcase}
+              title="No applications tracked yet"
+              description="As you mark jobs Applied from the Review Queue, they'll show up here grouped by status."
+              action={{ label: "Open Review Queue", href: "/dashboard/review" }}
+            />
           </CardContent>
         </Card>
       ) : (
