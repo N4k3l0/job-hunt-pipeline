@@ -671,3 +671,219 @@ async def find_contact(
     payload = _serialize_contact(contact)
     payload["cached"] = False
     return {"contact": payload}
+
+
+# ── Bullet tailoring ────────────────────────────────────────────────────────
+
+
+_TAILOR_BULLETS_TOOL = {
+    "name": "rank_and_rewrite_bullets",
+    "description": (
+        "Rank the candidate's resume bullets by relevance to the target job, "
+        "and rewrite each one to emphasize the angle that this specific role "
+        "cares about. Never invent facts."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "ranked_bullets": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "bullet_id": {
+                            "type": "string",
+                            "description": "The id field copied verbatim from the input bullet.",
+                        },
+                        "relevance": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 5,
+                            "description": (
+                                "5 = direct hit on a stated requirement; "
+                                "4 = strong match; 3 = useful supporting evidence; "
+                                "2 = tangential; 1 = irrelevant — leave it but flag it."
+                            ),
+                        },
+                        "tailored": {
+                            "type": "string",
+                            "description": (
+                                "Rewritten bullet emphasizing the angle this job cares about. "
+                                "Must cover the SAME achievement as the original — never invent "
+                                "a tool, metric, employer, or outcome that isn't in the original."
+                            ),
+                        },
+                        "why_it_matches": {
+                            "type": "string",
+                            "description": (
+                                "One sentence: which JD requirement / skill / responsibility "
+                                "does this bullet hit? Be specific."
+                            ),
+                        },
+                    },
+                    "required": ["bullet_id", "relevance", "tailored", "why_it_matches"],
+                },
+            },
+        },
+        "required": ["ranked_bullets"],
+    },
+}
+
+
+_TAILOR_BULLETS_SYSTEM = (
+    "You rank a candidate's resume bullets by relevance to a specific job posting "
+    "and rewrite each one to emphasize the angle that job cares about.\n\n"
+    "Hard rules:\n"
+    "- The tailored rewrite covers the SAME achievement as the original. Never invent "
+    "  tools, metrics, employers, or outcomes the candidate didn't state.\n"
+    "- Emphasize keywords, skills, and outcomes that match the job's requirements.\n"
+    "- Match the candidate's voice. If style examples are provided, mimic their "
+    "  rhythm, tone, openers, and how they frame achievements.\n"
+    "- Score relevance 1–5: 5 = direct hit on a stated requirement; 4 = strong match; "
+    "  3 = useful supporting evidence; 2 = tangential; 1 = irrelevant.\n"
+    "- Return EVERY bullet you were given, in descending relevance order.\n\n"
+    "Call rank_and_rewrite_bullets exactly once with all of them."
+)
+
+
+@router.post("/{job_id}/tailor-bullets")
+async def tailor_bullets(
+    job_id: UUID,
+    user_id: CurrentUserId,
+    db: DbSession,
+):
+    """Rank + rewrite the user's resume bullets for a specific job.
+
+    Reuses the bullet bank populated by the resume parser plus the user's
+    writing samples (so rewrites match their voice). Returns one row per
+    original bullet with: original text, tailored rewrite, relevance score
+    (1-5), and a one-sentence justification.
+
+    Strict guardrails: the LLM is told never to invent facts. It rewrites
+    the same achievement under a different emphasis — same employer, same
+    metrics, same scope.
+    """
+    from app.models.candidate import CandidateProfile, CandidateBullet
+    from app.llm.client import llm_client
+    from app.services.tailoring.tailor_service import (
+        _load_samples_by_kind, _style_examples_block,
+    )
+
+    # Load job + entities for the JD context.
+    job_result = await db.execute(
+        select(Job).where(Job.id == job_id).options(selectinload(Job.entities))
+    )
+    job = job_result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Load profile + bullets.
+    profile_result = await db.execute(
+        select(CandidateProfile).where(CandidateProfile.user_id == user_id)
+    )
+    profile = profile_result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(
+            status_code=400,
+            detail="Set up your profile first — Profile → Resumes.",
+        )
+
+    bullets_result = await db.execute(
+        select(CandidateBullet)
+        .where(CandidateBullet.profile_id == profile.id)
+        .order_by(CandidateBullet.created_at.desc())
+    )
+    bullets = bullets_result.scalars().all()
+    if not bullets:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "No bullets to tailor — upload a resume on Profile → Resumes "
+                "and the parser will populate your bullet bank."
+            ),
+        )
+
+    # Cap the prompt — beyond ~30 bullets the LLM context wastes the budget
+    # on bullets that clearly won't make any cut anyway.
+    bullets = list(bullets)[:30]
+
+    # Pull the user's writing samples — summary samples teach voice for
+    # achievement bullets specifically.
+    samples_by_kind = await _load_samples_by_kind(db, str(user_id))
+    style_block = _style_examples_block(
+        samples_by_kind.get("summary", []) + samples_by_kind.get("cover_letter", []),
+        "achievement bullet",
+    )
+
+    # JD context: pull entity-extracted skills / requirements / keywords if
+    # we have them; fall back to raw description otherwise.
+    job_skills = (job.entities.skills if job.entities else None) or []
+    job_requirements = (job.entities.requirements if job.entities else None) or []
+    job_keywords = (job.entities.keywords if job.entities else None) or []
+
+    # Bullet input format — ID is the stable key the LLM echoes back so we
+    # can map rewrites to originals reliably.
+    bullets_payload = "\n".join(
+        f'- id="{b.id}" text="{(b.text or "").strip()}" '
+        f'tags={(b.domain_tags or [])} keywords={(b.keywords or [])[:6]}'
+        for b in bullets
+    )
+
+    user_prompt = (
+        f"{style_block}"
+        "## Job\n"
+        f"Title: {job.title}\n"
+        f"Company: {job.company}\n"
+        f"Required skills: {', '.join(job_skills[:20]) or '(unspecified)'}\n"
+        f"Requirements: {'; '.join(job_requirements[:15]) or '(unspecified)'}\n"
+        f"Keywords: {', '.join(job_keywords[:20]) or '(unspecified)'}\n"
+        f"Description excerpt:\n{(job.raw_description or '')[:2000]}\n\n"
+        "## Candidate context\n"
+        f"Headline: {profile.headline or '(none)'}\n"
+        f"Summary: {profile.master_summary or '(none)'}\n\n"
+        "## Bullets to rank + rewrite\n"
+        f"{bullets_payload}\n"
+    )
+
+    try:
+        result = await llm_client.generate_structured(
+            task_type="tailoring",
+            system_prompt=_TAILOR_BULLETS_SYSTEM,
+            user_prompt=user_prompt,
+            tools=[_TAILOR_BULLETS_TOOL],
+            max_tokens=4096,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Bullet tailoring failed for job %s", job_id)
+        raise HTTPException(status_code=502, detail=f"Bullet tailoring failed: {type(e).__name__}: {e}")
+
+    # Map LLM output back to originals so the frontend gets full context.
+    bullet_map = {str(b.id): b for b in bullets}
+    out: list[dict] = []
+    for r in result.get("ranked_bullets", []):
+        bid = str(r.get("bullet_id", ""))
+        original = bullet_map.get(bid)
+        if not original:
+            continue
+        out.append({
+            "id": bid,
+            "original": original.text,
+            "tailored": r.get("tailored") or "",
+            "relevance": int(r.get("relevance") or 1),
+            "why_it_matches": r.get("why_it_matches") or "",
+        })
+
+    # If the LLM dropped any bullets, append them at the end with relevance=0
+    # so the user can still see they exist (and re-tailor if needed).
+    seen = {row["id"] for row in out}
+    for b in bullets:
+        if str(b.id) not in seen:
+            out.append({
+                "id": str(b.id),
+                "original": b.text,
+                "tailored": b.text,
+                "relevance": 0,
+                "why_it_matches": "(not ranked by the model)",
+            })
+
+    return {"bullets": out, "job_id": str(job_id)}

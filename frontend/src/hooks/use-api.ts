@@ -300,6 +300,20 @@ export function useJobContact(jobId: string | undefined) {
   });
 }
 
+export interface TailoredBullet {
+  id: string;
+  original: string;
+  tailored: string;
+  relevance: number; // 0-5; 0 = LLM didn't rank it
+  why_it_matches: string;
+}
+
+export function useTailorBullets(jobId: string | undefined) {
+  return useMutation<{ bullets: TailoredBullet[]; job_id: string }>({
+    mutationFn: () => api.post(`/api/v1/jobs/${jobId}/tailor-bullets`),
+  });
+}
+
 export function useFindJobContact(jobId: string | undefined) {
   const qc = useQueryClient();
   return useMutation({
