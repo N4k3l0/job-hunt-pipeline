@@ -181,7 +181,7 @@ async def cron_stats(authorization: str | None = Header(None)):
     async with create_worker_session()() as db:
         # Visible jobs total
         total = (await db.execute(
-            select(func.count(Job.id)).where(Job.status.notin_(["duplicate", "raw"]))
+            select(func.count(Job.id)).where(Job.status.notin_(["duplicate", "raw", "expired", "dismissed"]))
         )).scalar() or 0
 
         recent_6h = (await db.execute(text(

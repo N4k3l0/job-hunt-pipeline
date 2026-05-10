@@ -53,7 +53,7 @@ async def get_overview(user_id: CurrentUserId, db: DbSession):
     jobs_query = (
         select(func.count(func.distinct(Job.id)))
         .outerjoin(JobSource, JobSource.id == Job.source_id)
-        .where(Job.status.notin_(["duplicate", "raw"]))
+        .where(Job.status.notin_(["duplicate", "raw", "expired", "dismissed"]))
     )
     jobs_query = apply_user_filters(
         jobs_query,

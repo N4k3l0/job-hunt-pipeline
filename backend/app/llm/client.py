@@ -139,7 +139,17 @@ class LLMClient:
             if block.type == "tool_use":
                 return block.input
 
-        return {"text": response.content[0].text}
+        # Fallback: no tool_use block in the response. With tool_choice=any
+        # this shouldn't happen, but be defensive — pull the first text
+        # block if present, else surface a clear error rather than crashing
+        # on a missing attribute.
+        for block in response.content:
+            if getattr(block, "type", None) == "text" and getattr(block, "text", None):
+                return {"text": block.text}
+        raise RuntimeError(
+            "LLM returned no tool_use or text content. "
+            f"stop_reason={getattr(response, 'stop_reason', '?')}"
+        )
 
 
 # Singleton

@@ -272,3 +272,64 @@ async def admin_run_discovery(admin: AdminUser):
     results = dict(pairs)
     scoring = await quick_score_all_users(per_user_timeout=10)
     return {"status": "complete", "results": results, "scoring": scoring}
+
+
+@router.get("/admin/stale-jobs/preview")
+async def admin_stale_jobs_preview(
+    admin: AdminUser,
+    db: DbSession,
+    days: int = 30,
+):
+    """How many old jobs would the cleanup mark as expired? Caller can
+    sanity-check the count before running the destructive endpoint.
+
+    Stale = discovered more than `days` ago AND status is still in the
+    pre-applied bucket (raw / normalized / enriched / scored / discovered
+    / shortlisted). Jobs that someone applied to / interviewed for /
+    archived manually are NEVER touched.
+    """
+    from sqlalchemy import select, func, text
+    from app.models.job import Job
+
+    # Use SQL interval literal — far less fragile than Python timedeltas.
+    pre_applied = ("raw", "normalized", "deduplicated", "enriched",
+                   "scored", "discovered", "shortlisted")
+    count_q = (
+        select(func.count(Job.id))
+        .where(
+            Job.status.in_(pre_applied),
+            Job.discovered_at < func.now() - text(f"interval '{int(days)} days'"),
+        )
+    )
+    count = (await db.execute(count_q)).scalar() or 0
+    total_q = select(func.count(Job.id)).where(Job.status.in_(pre_applied))
+    total = (await db.execute(total_q)).scalar() or 0
+    return {"would_expire": count, "total_unapplied": total, "days": days}
+
+
+@router.post("/admin/stale-jobs/cleanup")
+async def admin_stale_jobs_cleanup(
+    admin: AdminUser,
+    db: DbSession,
+    days: int = 30,
+):
+    """Mark stale unapplied jobs as 'expired' so they drop out of every
+    user's inbox. Doesn't delete the rows — preserves them for audit
+    and so application_tracking FKs don't break. Re-runnable: only
+    flips rows currently in the pre-applied bucket."""
+    from sqlalchemy import update, func as sa_func, text
+    from app.models.job import Job
+
+    pre_applied = ("raw", "normalized", "deduplicated", "enriched",
+                   "scored", "discovered", "shortlisted")
+    stmt = (
+        update(Job)
+        .where(
+            Job.status.in_(pre_applied),
+            Job.discovered_at < sa_func.now() - text(f"interval '{int(days)} days'"),
+        )
+        .values(status="expired")
+    )
+    result = await db.execute(stmt)
+    await db.commit()
+    return {"expired": result.rowcount, "days": days}

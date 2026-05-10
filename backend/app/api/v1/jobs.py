@@ -55,7 +55,7 @@ async def list_jobs(
         .outerjoin(JobScore, and_(JobScore.job_id == Job.id, JobScore.user_id == user_id))
         .outerjoin(JobSource, JobSource.id == Job.source_id)
         .outerjoin(JobEntity, JobEntity.job_id == Job.id)
-        .where(Job.status.notin_(["duplicate", "raw"]))
+        .where(Job.status.notin_(["duplicate", "raw", "expired", "dismissed"]))
     )
 
     # Pull profile preferences once and run them through the shared filter
@@ -159,7 +159,7 @@ async def list_jobs(
         .outerjoin(JobScore, and_(JobScore.job_id == Job.id, JobScore.user_id == user_id))
         .outerjoin(JobSource, JobSource.id == Job.source_id)
         .outerjoin(JobEntity, JobEntity.job_id == Job.id)
-        .where(Job.status.notin_(["duplicate", "raw"]))
+        .where(Job.status.notin_(["duplicate", "raw", "expired", "dismissed"]))
     )
     count_base = apply_user_filters(
         count_base,
@@ -357,10 +357,24 @@ async def deep_score_job(
             "deep_score": result,
         }
     except ValueError as e:
+        # Profile or job missing — caller can fix by setting up profile.
         raise HTTPException(status_code=404, detail=str(e))
     except RuntimeError as e:
         logger.error("Deep scoring failed for job %s: %s", job_id, e)
-        raise HTTPException(status_code=502, detail="Deep scoring failed — LLM did not return structured output")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Deep scoring failed — {e}",
+        )
+    except Exception as e:  # noqa: BLE001
+        # Anthropic API errors, network issues, validation problems —
+        # surface the actual message so the frontend toast can show it.
+        # Used to swallow these as generic 500s and the user just saw
+        # 'Analysis failed' with no clue what was wrong.
+        logger.exception("Deep scoring unexpected failure for job %s", job_id)
+        raise HTTPException(
+            status_code=500,
+            detail=f"{type(e).__name__}: {e}",
+        )
 
 
 @router.post("/discover")

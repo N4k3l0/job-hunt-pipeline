@@ -22,9 +22,10 @@ import {
   CheckCircle2,
   AlertCircle,
   RefreshCw,
+  Trash2,
 } from "lucide-react";
 import { api } from "@/lib/api-client";
-import { useRunDiscovery } from "@/hooks/use-api";
+import { useRunDiscovery, useStaleJobsPreview, useStaleJobsCleanup } from "@/hooks/use-api";
 
 interface UserRecord {
   id: string;
@@ -312,6 +313,9 @@ export default function AdminPage() {
         </CardContent>
       </Card>
 
+      {/* Stale Jobs Cleanup */}
+      <StaleJobsCard />
+
       {/* Users List */}
       <Card>
         <CardHeader>
@@ -361,5 +365,86 @@ export default function AdminPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+
+/**
+ * Bulk-archive jobs older than N days that nobody applied to. Marks them
+ * status='expired' so they drop out of every inbox while staying in the
+ * DB (so application_tracking FKs don't break and audit history survives).
+ *
+ * Re-runnable. Default cutoff = 30 days; user can change with the input.
+ */
+function StaleJobsCard() {
+  const [days, setDays] = useState(30);
+  const preview = useStaleJobsPreview(days);
+  const cleanup = useStaleJobsCleanup();
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Trash2 className="h-5 w-5 text-amber-400" />
+          Clean up stale jobs
+        </CardTitle>
+        <CardDescription>
+          Auto-archive jobs older than the cutoff that nobody&apos;s applied
+          to — clears the inbox of postings that were probably taken down or
+          paywalled. Doesn&apos;t delete rows; just flips status to
+          &quot;expired&quot; so they stop showing up.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <Label className="text-sm">Older than</Label>
+          <Input
+            type="number"
+            value={days}
+            min={7}
+            max={365}
+            onChange={(e) => setDays(Math.max(7, parseInt(e.target.value) || 30))}
+            className="w-24"
+          />
+          <span className="text-sm text-muted-foreground">days</span>
+          {preview.data && (
+            <Badge variant="outline" className="font-mono text-xs">
+              {preview.data.would_expire} of {preview.data.total_unapplied} unapplied jobs would expire
+            </Badge>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            onClick={() => cleanup.mutate({ days })}
+            disabled={cleanup.isPending || !preview.data || preview.data.would_expire === 0}
+          >
+            {cleanup.isPending ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Cleaning…
+              </>
+            ) : (
+              <>
+                <Trash2 className="h-4 w-4" />
+                Expire {preview.data?.would_expire ?? 0} jobs
+              </>
+            )}
+          </Button>
+          {cleanup.isSuccess && cleanup.data && (
+            <span className="flex items-center gap-1.5 text-sm text-emerald-400">
+              <CheckCircle2 className="h-4 w-4" /> Expired {cleanup.data.expired} jobs
+            </span>
+          )}
+          {cleanup.isError && (
+            <span className="flex items-center gap-1.5 text-sm text-destructive">
+              <AlertCircle className="h-4 w-4" /> {cleanup.error?.message || "Failed"}
+            </span>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Jobs that anyone has approved, applied to, or interviewed for are never touched.
+        </p>
+      </CardContent>
+    </Card>
   );
 }

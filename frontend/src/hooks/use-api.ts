@@ -54,6 +54,30 @@ export function useRunDiscovery() {
   });
 }
 
+export function useStaleJobsPreview(days = 30) {
+  return useQuery({
+    queryKey: ["admin", "stale-jobs", days],
+    queryFn: () =>
+      api.get<{ would_expire: number; total_unapplied: number; days: number }>(
+        `/api/v1/auth/admin/stale-jobs/preview?days=${days}`,
+      ),
+    staleTime: 60 * 1000,
+  });
+}
+
+export function useStaleJobsCleanup() {
+  const qc = useQueryClient();
+  return useMutation<{ expired: number; days: number }, Error, { days?: number }>({
+    mutationFn: ({ days = 30 } = {}) =>
+      api.post(`/api/v1/auth/admin/stale-jobs/cleanup?days=${days}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      qc.invalidateQueries({ queryKey: ["analytics"] });
+      qc.invalidateQueries({ queryKey: ["admin", "stale-jobs"] });
+    },
+  });
+}
+
 export function useUpdateMe() {
   const qc = useQueryClient();
   return useMutation({
