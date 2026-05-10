@@ -335,6 +335,49 @@ async def admin_stale_jobs_cleanup(
     return {"expired": result.rowcount, "days": days}
 
 
+@router.post("/admin/stale-jobs/cleanup-by-source")
+async def admin_stale_jobs_cleanup_by_source(
+    admin: AdminUser,
+    db: DbSession,
+    source: str,
+    days: int = 14,
+):
+    """Source-specific age cleanup. Adzuna's free API only serves recent
+    listings and their postings rotate within ~2–3 weeks, so anything
+    we ingested via Adzuna more than 14 days ago is almost certainly
+    gone from the underlying employer. Same pattern works for any
+    aggregator that anti-bots us (we can't verify their URLs).
+
+    Same safety guarantees as the generic cleanup: never touches jobs
+    in the applied / interviewing / offered / archived buckets.
+    """
+    from sqlalchemy import update, select, func as sa_func, text
+    from app.models.job import Job, JobSource
+
+    pre_applied = ("raw", "normalized", "deduplicated", "enriched",
+                   "scored", "discovered", "shortlisted")
+
+    src_row = (await db.execute(
+        select(JobSource.id).where(JobSource.name == source)
+    )).first()
+    if not src_row:
+        raise HTTPException(status_code=404, detail=f"Source '{source}' not found")
+    source_id = src_row[0]
+
+    stmt = (
+        update(Job)
+        .where(
+            Job.source_id == source_id,
+            Job.status.in_(pre_applied),
+            Job.discovered_at < sa_func.now() - text(f"interval '{int(days)} days'"),
+        )
+        .values(status="expired")
+    )
+    result = await db.execute(stmt)
+    await db.commit()
+    return {"expired": result.rowcount, "source": source, "days": days}
+
+
 @router.post("/admin/stale-jobs/verify")
 async def admin_stale_jobs_verify(
     admin: AdminUser,

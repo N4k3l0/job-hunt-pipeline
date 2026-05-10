@@ -83,7 +83,23 @@ export interface StaleVerifyBatch {
   expired: number;
   alive: number;
   ambiguous: number;
+  skipped?: number;
   has_more: boolean;
+}
+
+export function useCleanupBySource() {
+  const qc = useQueryClient();
+  return useMutation<{ expired: number; source: string; days: number }, Error, { source: string; days?: number }>({
+    mutationFn: ({ source, days = 14 }) =>
+      api.post(
+        `/api/v1/auth/admin/stale-jobs/cleanup-by-source?source=${encodeURIComponent(source)}&days=${days}`,
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      qc.invalidateQueries({ queryKey: ["analytics"] });
+      qc.invalidateQueries({ queryKey: ["admin", "stale-jobs"] });
+    },
+  });
 }
 
 export function useStaleJobsVerifyBatch() {

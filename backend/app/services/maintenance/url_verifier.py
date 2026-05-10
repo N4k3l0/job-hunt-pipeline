@@ -40,7 +40,32 @@ _PROBE_HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/json",
 }
 
-Verdict = Literal["dead", "alive", "ambiguous"]
+# Hosts that systematically anti-bot or rate-limit our serverless probes.
+# Probing them returns 429 / 403 regardless of whether the underlying job
+# is alive, so the verdict is meaningless and we burn the budget. We
+# return 'skipped' for these — the verify caller can then handle them
+# via a different path (source-specific age cleanup, manual review, etc.)
+# instead of letting them dominate the 'ambiguous' bucket.
+_ANTI_BOT_HOSTS: tuple[str, ...] = (
+    "adzuna.com", "www.adzuna.com",
+    "linkedin.com", "www.linkedin.com",
+    "indeed.com", "www.indeed.com",
+    "glassdoor.com", "www.glassdoor.com",
+    "ziprecruiter.com", "www.ziprecruiter.com",
+    "monster.com", "www.monster.com",
+    "wellfound.com", "www.wellfound.com",
+)
+
+
+def _is_anti_bot_host(url: str) -> bool:
+    try:
+        host = (httpx.URL(url).host or "").lower()
+    except Exception:
+        return False
+    return any(host == h or host.endswith("." + h) for h in _ANTI_BOT_HOSTS)
+
+
+Verdict = Literal["dead", "alive", "ambiguous", "skipped"]
 
 
 async def _probe(client: httpx.AsyncClient, url: str, sem: asyncio.Semaphore) -> Verdict:
@@ -109,7 +134,12 @@ async def verify_batch(
     ) as client:
         async def check_one(job: Job) -> tuple[Job, Verdict]:
             url = job.apply_url or job.job_url or ""
-            verdict = await _probe(client, url, sem) if url else "ambiguous"
+            if not url:
+                return job, "ambiguous"
+            if _is_anti_bot_host(url):
+                # Systematic 403/429 from these hosts — verdict meaningless.
+                return job, "skipped"
+            verdict = await _probe(client, url, sem)
             return job, verdict
 
         results = await asyncio.gather(*(check_one(j) for j in rows))
@@ -117,12 +147,15 @@ async def verify_batch(
     expired = 0
     alive = 0
     ambiguous = 0
+    skipped = 0
     for job, verdict in results:
         if verdict == "dead":
             job.status = "expired"
             expired += 1
         elif verdict == "alive":
             alive += 1
+        elif verdict == "skipped":
+            skipped += 1
         else:
             ambiguous += 1
 
@@ -131,8 +164,8 @@ async def verify_batch(
 
     if expired:
         logger.info(
-            "URL-verify batch: checked=%d expired=%d alive=%d ambiguous=%d",
-            len(rows), expired, alive, ambiguous,
+            "URL-verify batch: checked=%d expired=%d alive=%d ambiguous=%d skipped=%d",
+            len(rows), expired, alive, ambiguous, skipped,
         )
 
     return {
@@ -140,5 +173,6 @@ async def verify_batch(
         "expired": expired,
         "alive": alive,
         "ambiguous": ambiguous,
+        "skipped": skipped,
         "has_more": len(rows) >= bounded,
     }

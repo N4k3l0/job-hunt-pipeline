@@ -31,6 +31,7 @@ import {
   useStaleJobsCleanup,
   useStaleJobsVerifyBatch,
   useStaleJobsVerifyDebug,
+  useCleanupBySource,
 } from "@/hooks/use-api";
 
 interface UserRecord {
@@ -388,12 +389,13 @@ function StaleJobsCard() {
   const cleanup = useStaleJobsCleanup();
   const verify = useStaleJobsVerifyBatch();
   const debug = useStaleJobsVerifyDebug();
+  const cleanupSource = useCleanupBySource();
 
   // Verify mode runs in batches of 100 jobs each so we stay under
   // Vercel's 60s function timeout. Auto-chain until has_more=false so
   // the user clicks once and the whole catalogue gets probed.
   const [verifyTotals, setVerifyTotals] = useState<{
-    checked: number; expired: number; alive: number; ambiguous: number;
+    checked: number; expired: number; alive: number; ambiguous: number; skipped: number;
   } | null>(null);
   const [verifying, setVerifying] = useState(false);
   const [verifyDone, setVerifyDone] = useState(false);
@@ -401,7 +403,7 @@ function StaleJobsCard() {
   const runVerify = async () => {
     setVerifying(true);
     setVerifyDone(false);
-    setVerifyTotals({ checked: 0, expired: 0, alive: 0, ambiguous: 0 });
+    setVerifyTotals({ checked: 0, expired: 0, alive: 0, ambiguous: 0, skipped: 0 });
     let safetyCap = 50; // cap at 50 batches × 100 = 5k jobs/run
     while (safetyCap-- > 0) {
       try {
@@ -411,6 +413,7 @@ function StaleJobsCard() {
           expired: (prev?.expired ?? 0) + batch.expired,
           alive: (prev?.alive ?? 0) + batch.alive,
           ambiguous: (prev?.ambiguous ?? 0) + batch.ambiguous,
+          skipped: (prev?.skipped ?? 0) + (batch.skipped ?? 0),
         }));
         if (!batch.has_more || batch.checked === 0) break;
       } catch {
@@ -466,11 +469,12 @@ function StaleJobsCard() {
             </Button>
           </div>
           {verifyTotals && (verifying || verifyDone) && (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs font-mono">
               <Stat label="Checked" value={verifyTotals.checked} tone="default" />
               <Stat label="Expired" value={verifyTotals.expired} tone="warn" />
               <Stat label="Alive" value={verifyTotals.alive} tone="ok" />
               <Stat label="Ambiguous" value={verifyTotals.ambiguous} tone="muted" />
+              <Stat label="Skipped" value={verifyTotals.skipped} tone="muted" />
             </div>
           )}
           {verifyTotals && verifyDone && (
@@ -545,6 +549,40 @@ function StaleJobsCard() {
                 </div>
               )}
             </div>
+          )}
+        </div>
+
+        {/* ── Anti-bot source cleanup ──────────────────────────── */}
+        <div className="space-y-3 rounded-lg border border-amber-500/15 bg-amber-500/[0.02] p-4">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div>
+              <p className="text-sm font-semibold flex items-center gap-2">
+                <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-400" />
+                Clean Adzuna jobs older than 14 days
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5 max-w-md">
+                Adzuna&apos;s API only serves recent listings (postings rotate within ~2–3 weeks)
+                AND their redirect URLs anti-bot our verifier with HTTP 429. We can&apos;t verify them,
+                so we age-cleanup with a tighter 14-day cutoff just for this source.
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => cleanupSource.mutate({ source: "adzuna", days: 14 })}
+              disabled={cleanupSource.isPending}
+            >
+              {cleanupSource.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+              {cleanupSource.isPending ? "Cleaning…" : "Expire Adzuna >14d"}
+            </Button>
+          </div>
+          {cleanupSource.isSuccess && cleanupSource.data && (
+            <p className="text-xs text-emerald-400">
+              Expired {cleanupSource.data.expired} {cleanupSource.data.source} jobs older than {cleanupSource.data.days} days.
+            </p>
+          )}
+          {cleanupSource.isError && (
+            <p className="text-xs text-destructive">{cleanupSource.error?.message}</p>
           )}
         </div>
 
