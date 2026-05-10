@@ -226,3 +226,49 @@ async def update_user_role(
     user.role = role
     await db.commit()
     return {"status": "updated", "user_id": user_id, "role": role}
+
+
+@router.post("/admin/run-discovery")
+async def admin_run_discovery(admin: AdminUser):
+    """Kick off every discovery source + a quick-score pass right now.
+    Same code paths the Vercel cron uses — useful when a new user joins
+    and you don't want to wait for 06:00 UTC for their inbox to populate.
+
+    Runs everything concurrently so total wall time ~ slowest source
+    (≈30–45 s in practice). Comfortably inside Vercel's 60 s budget.
+    """
+    import asyncio
+    import time
+    import logging
+    log = logging.getLogger(__name__)
+
+    from app.workers.discovery_tasks import (
+        _run_curated_async, _run_arbeitnow_async,
+        _run_remoteok_async, _run_himalayas_async,
+        _run_remotive_async, _run_weworkremotely_async,
+        _run_dailyremote_async, quick_score_all_users,
+    )
+
+    runners: list[tuple[str, callable]] = [
+        ("curated", _run_curated_async),
+        ("arbeitnow", _run_arbeitnow_async),
+        ("remoteok", _run_remoteok_async),
+        ("himalayas", _run_himalayas_async),
+        ("remotive", _run_remotive_async),
+        ("weworkremotely", _run_weworkremotely_async),
+        ("dailyremote", _run_dailyremote_async),
+    ]
+
+    async def _run_one(name: str, runner):
+        started = time.monotonic()
+        try:
+            await runner()
+            return name, f"ok ({time.monotonic() - started:.1f}s)"
+        except Exception as e:  # noqa: BLE001
+            log.error("admin run-discovery: %s failed: %s", name, e)
+            return name, f"error: {type(e).__name__}: {e}"
+
+    pairs = await asyncio.gather(*(_run_one(n, r) for n, r in runners))
+    results = dict(pairs)
+    scoring = await quick_score_all_users(per_user_timeout=10)
+    return {"status": "complete", "results": results, "scoring": scoring}

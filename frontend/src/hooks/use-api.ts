@@ -39,6 +39,21 @@ export function useInviteUser() {
   });
 }
 
+export function useRunDiscovery() {
+  const qc = useQueryClient();
+  return useMutation<{
+    status: string;
+    results: Record<string, string>;
+    scoring: Record<string, string>;
+  }>({
+    mutationFn: () => api.post("/api/v1/auth/admin/run-discovery"),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      qc.invalidateQueries({ queryKey: ["analytics"] });
+    },
+  });
+}
+
 export function useUpdateMe() {
   const qc = useQueryClient();
   return useMutation({

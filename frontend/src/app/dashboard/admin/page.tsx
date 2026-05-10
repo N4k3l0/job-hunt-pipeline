@@ -21,8 +21,10 @@ import {
   Loader2,
   CheckCircle2,
   AlertCircle,
+  RefreshCw,
 } from "lucide-react";
 import { api } from "@/lib/api-client";
+import { useRunDiscovery } from "@/hooks/use-api";
 
 interface UserRecord {
   id: string;
@@ -32,6 +34,7 @@ interface UserRecord {
 }
 
 export default function AdminPage() {
+  const runDiscovery = useRunDiscovery();
   const [email, setEmail] = useState("");
   const [inviteLoading, setInviteLoading] = useState(false);
   const [inviteResult, setInviteResult] = useState<{
@@ -229,6 +232,81 @@ export default function AdminPage() {
                   </p>
                 </div>
               )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Run Discovery Now */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <RefreshCw className="h-5 w-5 text-emerald-400" />
+            Run discovery now
+          </CardTitle>
+          <CardDescription>
+            Pulls fresh jobs from every source and re-scores everyone&apos;s
+            inbox. Same code path as the 06:00 UTC cron, but on-demand.
+            Takes ~30–45 s.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              onClick={() => runDiscovery.mutate()}
+              disabled={runDiscovery.isPending}
+            >
+              {runDiscovery.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Running…
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="h-4 w-4" />
+                  Run now
+                </>
+              )}
+            </Button>
+            {runDiscovery.isSuccess && runDiscovery.data && (
+              <span className="flex items-center gap-1.5 text-sm text-emerald-400">
+                <CheckCircle2 className="h-4 w-4" /> Done
+              </span>
+            )}
+            {runDiscovery.isError && (
+              <span className="flex items-center gap-1.5 text-sm text-destructive">
+                <AlertCircle className="h-4 w-4" /> Failed
+              </span>
+            )}
+          </div>
+          {runDiscovery.isSuccess && runDiscovery.data && (
+            <div className="mt-4 rounded-lg border border-white/[0.06] bg-white/[0.015] p-3 text-xs space-y-2">
+              <div>
+                <p className="font-medium text-muted-foreground mb-1">Sources</p>
+                <ul className="space-y-0.5 font-mono">
+                  {Object.entries(runDiscovery.data.results).map(([name, status]) => (
+                    <li key={name} className="flex justify-between gap-3">
+                      <span>{name}</span>
+                      <span className={status.startsWith("ok") ? "text-emerald-400" : "text-amber-400"}>
+                        {status}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <p className="font-medium text-muted-foreground mb-1">Scoring</p>
+                <ul className="space-y-0.5 font-mono">
+                  {Object.entries(runDiscovery.data.scoring).map(([uid, status]) => (
+                    <li key={uid} className="flex justify-between gap-3">
+                      <span className="truncate">{uid.slice(0, 8)}…</span>
+                      <span className={status.startsWith("ok") ? "text-emerald-400" : "text-amber-400"}>
+                        {status}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             </div>
           )}
         </CardContent>
