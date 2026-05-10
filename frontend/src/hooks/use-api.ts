@@ -426,7 +426,10 @@ export function useDeepScore() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (jobId: string) => api.post<{ deep_score: any }>(`/api/v1/jobs/${jobId}/deep-score`),
-    onSuccess: (_data, jobId) => qc.invalidateQueries({ queryKey: ["job", jobId] }),
+    // useJob caches under ["jobs", jobId] (plural); the previous
+    // ["job", jobId] key never matched, so the UI didn't refetch and
+    // the new deep_score never showed up despite the server saving it.
+    onSuccess: (_data, jobId) => qc.invalidateQueries({ queryKey: ["jobs", jobId] }),
   });
 }
 
