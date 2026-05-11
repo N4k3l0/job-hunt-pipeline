@@ -5,6 +5,13 @@ from sqlalchemy import String, Text, Integer, DateTime, ForeignKey, Float, Index
 from sqlalchemy.dialects.postgresql import UUID, JSONB, ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+try:
+    from pgvector.sqlalchemy import Vector
+    _HAS_PGVECTOR = True
+except Exception:  # pragma: no cover
+    Vector = None  # type: ignore
+    _HAS_PGVECTOR = False
+
 from app.core.database import Base
 
 
@@ -96,6 +103,11 @@ class JobEntity(Base):
     application_questions: Mapped[list[str] | None] = mapped_column(JSONB)
     years_experience_min: Mapped[int | None] = mapped_column(Integer)
     years_experience_max: Mapped[int | None] = mapped_column(Integer)
+    # Semantic-scoring embedding — 512-dim Voyage (voyage-3-lite).
+    # Populated at ingest, used by the new scorer for cosine similarity
+    # against the candidate profile vector.
+    if _HAS_PGVECTOR:
+        embedding: Mapped[list[float] | None] = mapped_column(Vector(512), nullable=True)
 
     job: Mapped["Job"] = relationship(back_populates="entities")
 

@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     jsearch_rapidapi_key: str = ""
     firecrawl_api_key: str = ""
     anthropic_api_key: str = ""
+    # Voyage AI for embeddings — drives semantic job scoring. If unset,
+    # the scorer falls back to the rule-based path so the app still works
+    # but loses the semantic match upgrade.
+    voyage_api_key: str = ""
 
     # Frontend URL — used to build the magic-link redirect_to in the invite
     # flow. Falls back to the first cors_origin if unset.

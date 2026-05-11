@@ -102,6 +102,23 @@ export function useCleanupBySource() {
   });
 }
 
+export interface EmbeddingsBackfillBatch {
+  embedded: number;
+  remaining: number;
+  has_more: boolean;
+}
+
+export function useEmbeddingsBackfill() {
+  const qc = useQueryClient();
+  return useMutation<EmbeddingsBackfillBatch, Error, { limit?: number }>({
+    mutationFn: ({ limit = 200 } = {}) =>
+      api.post(`/api/v1/auth/admin/embeddings/backfill?limit=${limit}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+    },
+  });
+}
+
 export function useStaleJobsVerifyBatch() {
   const qc = useQueryClient();
   return useMutation<StaleVerifyBatch, Error, { limit?: number; ageDaysMin?: number }>({

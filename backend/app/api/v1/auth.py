@@ -378,6 +378,37 @@ async def admin_stale_jobs_cleanup_by_source(
     return {"expired": result.rowcount, "source": source, "days": days}
 
 
+@router.post("/admin/embeddings/backfill")
+async def admin_embeddings_backfill(
+    admin: AdminUser,
+    db: DbSession,
+    limit: int = 200,
+):
+    """Embed jobs that don't have a semantic vector yet. Used to bring
+    the historical catalog up to date after the embedding migration —
+    new jobs ingested after that point get embedded inline during
+    discovery, so this only matters for pre-existing rows.
+
+    Batches of up to 128 jobs per Voyage call. The caller chains calls
+    via has_more until the catalogue is fully embedded.
+    """
+    from app.workers.discovery_tasks import _embed_unembedded_jobs
+    embedded = await _embed_unembedded_jobs(limit=min(max(int(limit), 1), 500))
+
+    # Quick check: how many rows still need embedding after this pass?
+    from sqlalchemy import select, func
+    from app.models.job import JobEntity
+    remaining_q = (
+        select(func.count(JobEntity.id)).where(JobEntity.embedding.is_(None))
+    )
+    remaining = (await db.execute(remaining_q)).scalar() or 0
+    return {
+        "embedded": embedded,
+        "remaining": remaining,
+        "has_more": remaining > 0,
+    }
+
+
 @router.post("/admin/stale-jobs/verify")
 async def admin_stale_jobs_verify(
     admin: AdminUser,

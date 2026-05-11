@@ -153,11 +153,42 @@ def compute_job_score(
     if pm_scores is not None and pm_total >= ai_total:
         role_path = "pm"
         path_scores = pm_scores
-        overall_fit = pm_total
+        rule_overall = pm_total
     else:
         role_path = "ai_automation"
         path_scores = ai_scores  # type: ignore[assignment]
-        overall_fit = ai_total
+        rule_overall = ai_total
+
+    # ── Semantic component ────────────────────────────────────────────
+    # Cosine similarity between the profile embedding and the job
+    # embedding, scaled to a 0-65 contribution. Falls back to the
+    # rule-based path's score if either embedding is missing — keeps
+    # the system working during backfill and if Voyage is unconfigured.
+    from app.services.scoring.embedder import cosine_similarity
+    profile_vec = profile.get("embedding")
+    job_vec = job_entities.get("embedding")
+    if profile_vec is not None and job_vec is not None:
+        cos = cosine_similarity(profile_vec, job_vec)
+        # Voyage cosine ranges typically 0.4–0.85 for real pairs. Stretch
+        # that into the 0-65 band so the spread between 'unrelated' and
+        # 'strong match' translates to a meaningful score delta.
+        # Linear remap: 0.30 → 0, 0.85 → 65.
+        stretched = max(0.0, min(1.0, (cos - 0.30) / 0.55))
+        semantic_component = stretched * 65.0
+        # Compose semantic (65) + geo (10) + remote (10) + seniority (15) = 100.
+        seniority = path_scores["seniority_score"] if path_scores else 0.0
+        overall_fit = (
+            semantic_component
+            + geo["geo_score"]
+            + geo["remote_score"]
+            + seniority
+        )
+        semantic_score = cos  # store the raw cosine on the row
+    else:
+        # No embedding yet — use the rule-based total as-is so the inbox
+        # still surfaces SOMETHING while backfill runs.
+        overall_fit = rule_overall
+        semantic_score = 0.0
 
     # Clamp to 0-100
     overall_fit = max(0.0, min(100.0, overall_fit))
@@ -174,22 +205,24 @@ def compute_job_score(
 
     return {
         "role_path": role_path,
-        "title_score": path_scores["title_score"],
-        "skill_score": path_scores["skill_score"],
-        "seniority_score": path_scores["seniority_score"],
-        "industry_score": path_scores["industry_score"],
+        "title_score": path_scores["title_score"] if path_scores else 0.0,
+        "skill_score": path_scores["skill_score"] if path_scores else 0.0,
+        "seniority_score": path_scores["seniority_score"] if path_scores else 0.0,
+        "industry_score": path_scores["industry_score"] if path_scores else 0.0,
         "geo_score": geo["geo_score"],
         "remote_score": geo["remote_score"],
         "visa_score": geo["visa_score"],
         "salary_score": salary_score,
+        "semantic_score": round(semantic_score, 4),
         "overall_fit": round(overall_fit, 1),
         "priority": priority,
         "reasoning": {
             "path_used": role_path,
             "intents": sorted(intents),
-            "pm_total": round(pm_total, 1) if pm_scores is not None else None,
-            "ai_total": round(ai_total, 1) if ai_scores is not None else None,
-            **path_scores.get("reasoning", {}),
+            "scoring_mode": "semantic" if profile_vec and job_vec else "rule-based",
+            "semantic_cosine": round(semantic_score, 4) if semantic_score else None,
+            "rule_overall": round(rule_overall, 1) if path_scores else None,
+            **(path_scores.get("reasoning", {}) if path_scores else {}),
             **geo.get("reasoning", {}),
         },
     }

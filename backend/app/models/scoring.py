@@ -33,6 +33,10 @@ class JobScore(Base):
     remote_score: Mapped[float] = mapped_column(Float, default=0.0)
     salary_score: Mapped[float] = mapped_column(Float, default=0.0)
     visa_score: Mapped[float] = mapped_column(Float, default=0.0)
+    # Cached cosine similarity (0..1) between profile + job embeddings,
+    # written by compute_job_score. Stored so the inbox query doesn't
+    # recompute it on every read.
+    semantic_score: Mapped[float] = mapped_column(Float, default=0.0)
     overall_fit: Mapped[float] = mapped_column(Float, default=0.0)
     priority: Mapped[str] = mapped_column(String(20), default="low")  # high, medium, low, archive
     reasoning: Mapped[dict | None] = mapped_column(JSONB)

@@ -198,7 +198,65 @@ async def _ingest_raw_jobs(jobs: list[dict]) -> tuple[int, int]:
 
         await db.commit()
         logger.info("Ingestion complete: %d stored, %d duplicates skipped", stored, skipped)
-        return stored, skipped
+
+    # Batched embedding pass for the rows we just inserted. Done in a
+    # SECOND session after commit so the embed API failures can't roll
+    # back the ingest. ~14 batches × 1-2s each for a 1.7k-job catalogue.
+    # No-ops if Voyage isn't configured — scorer falls back to rules.
+    if stored > 0:
+        try:
+            await _embed_unembedded_jobs(limit=stored + 50)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Post-ingest embedding pass failed: %s", e)
+
+    return stored, skipped
+
+
+async def _embed_unembedded_jobs(limit: int = 200) -> int:
+    """Find JobEntity rows with NULL embedding, embed them in batches,
+    write back. Returns count embedded. Used by:
+      - the post-ingest hook above (small N, the rows we just added)
+      - the admin backfill button (large N, for the historical catalogue)
+    """
+    from app.services.scoring.embedder import embed_texts, job_corpus, MAX_BATCH
+    from app.models.job import Job, JobEntity
+
+    async with create_worker_session()() as db:
+        # Pull rows missing an embedding, joined with their parent Job so
+        # we can build the embedding corpus from title + description.
+        q = (
+            select(JobEntity, Job)
+            .join(Job, Job.id == JobEntity.job_id)
+            .where(JobEntity.embedding.is_(None))
+            .limit(limit)
+        )
+        result = await db.execute(q)
+        pairs = result.all()
+        if not pairs:
+            return 0
+
+        corpora = [
+            job_corpus(
+                title=job.title or "",
+                company=job.company or "",
+                description=job.raw_description,
+                skills=entity.skills or [],
+                requirements=entity.requirements or [],
+                keywords=entity.keywords or [],
+            )
+            for entity, job in pairs
+        ]
+
+        vectors = await embed_texts(corpora, input_type="document")
+        if vectors is None:
+            return 0  # Voyage unconfigured — nothing to do.
+
+        # Write back in chunks so we don't lose progress if commit fails.
+        for (entity, _job), vector in zip(pairs, vectors):
+            entity.embedding = vector
+        await db.commit()
+        logger.info("Embedded %d jobs", len(pairs))
+        return len(pairs)
 
 
 async def quick_score_all_users(per_user_timeout: int = 12) -> dict[str, str]:

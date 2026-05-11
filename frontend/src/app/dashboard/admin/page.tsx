@@ -23,6 +23,7 @@ import {
   AlertCircle,
   RefreshCw,
   Trash2,
+  Sparkles,
 } from "lucide-react";
 import { api } from "@/lib/api-client";
 import {
@@ -32,6 +33,7 @@ import {
   useStaleJobsVerifyBatch,
   useStaleJobsVerifyDebug,
   useCleanupBySource,
+  useEmbeddingsBackfill,
 } from "@/hooks/use-api";
 
 interface UserRecord {
@@ -321,6 +323,8 @@ export default function AdminPage() {
       </Card>
 
       {/* Stale Jobs Cleanup */}
+      <EmbeddingsBackfillCard />
+
       <StaleJobsCard />
 
       {/* Users List */}
@@ -645,6 +649,94 @@ function StaleJobsCard() {
     </Card>
   );
 }
+
+/**
+ * Bulk-embed historical jobs that don't yet have a semantic vector.
+ * Used as a one-shot after the embeddings migration runs against prod —
+ * new jobs ingested after that point get embedded inline during
+ * discovery, so this button only matters during the rollout window.
+ *
+ * Auto-chains batches of 200 until has_more=false, mirroring the
+ * verify-URLs flow elsewhere on this page.
+ */
+function EmbeddingsBackfillCard() {
+  const backfill = useEmbeddingsBackfill();
+  const [totals, setTotals] = useState<{
+    embedded: number; remaining: number;
+  } | null>(null);
+  const [running, setRunning] = useState(false);
+  const [done, setDone] = useState(false);
+
+  const runBackfill = async () => {
+    setRunning(true);
+    setDone(false);
+    setTotals({ embedded: 0, remaining: 0 });
+    let safetyCap = 30; // 30 batches × 200 = 6 k jobs/run, more than enough
+    while (safetyCap-- > 0) {
+      try {
+        const batch = await backfill.mutateAsync({ limit: 200 });
+        setTotals((prev) => ({
+          embedded: (prev?.embedded ?? 0) + batch.embedded,
+          remaining: batch.remaining,
+        }));
+        if (!batch.has_more || batch.embedded === 0) break;
+      } catch {
+        break;
+      }
+    }
+    setRunning(false);
+    setDone(true);
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Sparkles className="h-5 w-5 text-amber-400" />
+          Backfill semantic embeddings
+        </CardTitle>
+        <CardDescription>
+          One-shot setup for the new semantic scorer. Embeds every job in
+          your catalogue that doesn&apos;t yet have a vector — needed once
+          after the database migration runs. New jobs ingested after this
+          get embedded inline during discovery; this button only matters
+          for the historical catalogue. ~30 s for a 1 700-job catalogue.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <Button onClick={runBackfill} disabled={running}>
+            {running ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Embedding…
+              </>
+            ) : (
+              <>
+                <Sparkles className="h-4 w-4" />
+                {done ? "Run again" : "Run backfill"}
+              </>
+            )}
+          </Button>
+          {totals && (running || done) && (
+            <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+              <Stat label="Embedded" value={totals.embedded} tone="ok" />
+              <Stat label="Remaining" value={totals.remaining} tone="muted" />
+            </div>
+          )}
+        </div>
+        {totals && done && (
+          <p className="text-xs text-muted-foreground">
+            {totals.remaining === 0
+              ? "All jobs in the catalogue now have semantic vectors. The new scorer is fully active."
+              : `Embedded ${totals.embedded} jobs · ${totals.remaining} still need vectors (likely API rate limit — click Run again).`}
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 
 function Stat({ label, value, tone }: {
   label: string;

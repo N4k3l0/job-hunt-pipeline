@@ -180,6 +180,11 @@ async def _batch_score_async(user_id: str, rescore_all: bool = False):
                     "keywords": job.entities.keywords or [],
                     "visa_notes": job.entities.visa_notes,
                     "sponsorship_available": job.entities.sponsorship_available,
+                    # Pull the cached embedding so compute_job_score can do
+                    # cosine similarity against the profile vector. NULL
+                    # until the row gets backfilled — scorer falls back
+                    # to the rule-based path in that case.
+                    "embedding": getattr(job.entities, "embedding", None),
                 }
 
             # Deterministic filter: skip if title score would be 0 on both paths
@@ -230,6 +235,10 @@ async def _load_profile(db, user_id: str) -> dict | None:
         "remote_preference": profile.remote_preference or "any",
         "salary_min": profile.salary_min,
         "salary_max": profile.salary_max,
+        # Cached profile embedding — drives semantic similarity in
+        # compute_job_score. NULL until the resume has been parsed (and
+        # re-parsed under the new path that calls embed_one).
+        "embedding": getattr(profile, "embedding", None),
         "skills": [
             {"skill_name": s.skill_name, "category": s.category}
             for s in profile.skills

@@ -25,6 +25,13 @@ httpx>=0.28.0
 # AI/LLM
 anthropic>=0.40.0
 
+# Embeddings — semantic scoring replaces the rule-based title+skill+industry
+# buckets in the inbox scorer. Voyage AI is Anthropic's recommended pairing.
+# pgvector gives SQLAlchemy the column type to read/write the vectors stored
+# in Postgres (Supabase has the extension built in).
+voyageai>=0.3.0
+pgvector>=0.3.0
+
 # PDF generation — REMOVED for Vercel deploy. WeasyPrint requires cairo/pango
 # system libraries that Vercel's Python runtime does not provide. Tailored
 # resumes are now rendered as a print-friendly HTML page on the frontend.

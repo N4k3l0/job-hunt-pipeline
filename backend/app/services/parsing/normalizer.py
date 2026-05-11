@@ -317,12 +317,15 @@ async def normalize_and_store_job(
     db.add(job)
     await db.flush()
 
-    # Create job entities
+    # Create job entities — embedding gets backfilled in a batched pass
+    # AFTER ingest finishes (see _ingest_raw_jobs in discovery_tasks).
+    # Inline per-row embed would mean 1k+ separate API calls during a
+    # discovery batch, blowing Vercel's 60s function budget.
     entities = JobEntity(
         job_id=job.id,
-        skills=parsed_data.get("required_skills", []),
-        requirements=parsed_data.get("requirements", []),
-        keywords=parsed_data.get("keywords", []),
+        skills=parsed_data.get("required_skills", []) or [],
+        requirements=parsed_data.get("requirements", []) or [],
+        keywords=parsed_data.get("keywords", []) or [],
         nice_to_have=parsed_data.get("nice_to_have_skills", []),
         visa_notes=parsed_data.get("visa_notes"),
         sponsorship_available=parsed_data.get("sponsorship_available"),
