@@ -212,51 +212,65 @@ async def _ingest_raw_jobs(jobs: list[dict]) -> tuple[int, int]:
     return stored, skipped
 
 
-async def _embed_unembedded_jobs(limit: int = 200) -> int:
-    """Find JobEntity rows with NULL embedding, embed them in batches,
-    write back. Returns count embedded. Used by:
-      - the post-ingest hook above (small N, the rows we just added)
-      - the admin backfill button (large N, for the historical catalogue)
+async def _embed_unembedded_jobs(limit: int = 50) -> int:
+    """Find JobEntity rows with NULL embedding, embed them, write back.
+
+    Uses raw SQL deliberately — earlier ORM-based version had unclear
+    failures during backfill (function returned 'Failed to fetch'
+    without a usable error). Raw SQL sidesteps any SQLAlchemy / pgvector
+    type-mapping issue at the cost of being slightly less typesafe.
+
+    Returns count embedded.
     """
-    from app.services.scoring.embedder import embed_texts, job_corpus, MAX_BATCH
-    from app.models.job import Job, JobEntity
+    from app.services.scoring.embedder import embed_texts, job_corpus
+    from sqlalchemy import text
 
     async with create_worker_session()() as db:
-        # Pull rows missing an embedding, joined with their parent Job so
-        # we can build the embedding corpus from title + description.
-        q = (
-            select(JobEntity, Job)
-            .join(Job, Job.id == JobEntity.job_id)
-            .where(JobEntity.embedding.is_(None))
-            .limit(limit)
-        )
-        result = await db.execute(q)
-        pairs = result.all()
-        if not pairs:
+        # Fetch rows missing an embedding via raw SQL — pulls everything
+        # job_corpus needs in one round-trip without depending on the
+        # JobEntity.embedding column type being correctly mapped.
+        q = text("""
+            SELECT je.id AS entity_id,
+                   j.title, j.company, j.raw_description,
+                   je.skills, je.requirements, je.keywords
+            FROM job_entities je
+            JOIN jobs j ON j.id = je.job_id
+            WHERE je.embedding IS NULL
+            LIMIT :limit
+        """)
+        result = await db.execute(q, {"limit": limit})
+        rows = result.fetchall()
+        if not rows:
             return 0
 
         corpora = [
             job_corpus(
-                title=job.title or "",
-                company=job.company or "",
-                description=job.raw_description,
-                skills=entity.skills or [],
-                requirements=entity.requirements or [],
-                keywords=entity.keywords or [],
+                title=row.title or "",
+                company=row.company or "",
+                description=row.raw_description,
+                skills=row.skills or [],
+                requirements=row.requirements or [],
+                keywords=row.keywords or [],
             )
-            for entity, job in pairs
+            for row in rows
         ]
 
         vectors = await embed_texts(corpora, input_type="document")
         if vectors is None:
-            return 0  # Voyage unconfigured — nothing to do.
+            return 0  # Voyage unconfigured.
 
-        # Write back in chunks so we don't lose progress if commit fails.
-        for (entity, _job), vector in zip(pairs, vectors):
-            entity.embedding = vector
+        # Write back via parameterised UPDATE. pgvector accepts a Python
+        # list serialised as '[v1,v2,...]' for the vector type, so we
+        # build the string explicitly to keep the cast out of SQLAlchemy.
+        for row, vector in zip(rows, vectors):
+            vec_str = "[" + ",".join(f"{v:.6f}" for v in vector) + "]"
+            await db.execute(
+                text("UPDATE job_entities SET embedding = :vec WHERE id = :id"),
+                {"vec": vec_str, "id": str(row.entity_id)},
+            )
         await db.commit()
-        logger.info("Embedded %d jobs", len(pairs))
-        return len(pairs)
+        logger.info("Embedded %d jobs (raw SQL)", len(rows))
+        return len(rows)
 
 
 async def quick_score_all_users(per_user_timeout: int = 12) -> dict[str, str]:
