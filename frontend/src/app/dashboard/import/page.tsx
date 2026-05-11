@@ -294,38 +294,54 @@ function BookmarkletCard() {
           </div>
         </div>
 
-        {/* Step 2: bookmark THIS page */}
+        {/* Step 2: right-click bookmarks bar */}
         <div className="space-y-2">
           <p className="text-sm font-medium flex items-center gap-2">
             <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-500/15 text-amber-400 text-xs font-bold">2</span>
-            Bookmark this page
+            Right-click the bookmarks bar
           </p>
-          <p className="text-sm text-muted-foreground pl-7 leading-relaxed">
-            Press <kbd className="px-1.5 py-0.5 rounded border border-white/10 bg-white/[0.04] text-xs">⌘ D</kbd> (Mac)
-            or <kbd className="px-1.5 py-0.5 rounded border border-white/10 bg-white/[0.04] text-xs">Ctrl D</kbd> (Windows / Linux)
-            to bookmark this page. A &quot;Bookmark added&quot; dialog appears — keep it open.
-          </p>
+          <div className="pl-7 space-y-2 text-sm text-muted-foreground leading-relaxed">
+            <p>
+              If the bookmarks bar isn&apos;t visible, show it first:{" "}
+              <kbd className="px-1.5 py-0.5 rounded border border-white/10 bg-white/[0.04] text-xs">⌘⇧B</kbd> (Mac)
+              {" "}/{" "}
+              <kbd className="px-1.5 py-0.5 rounded border border-white/10 bg-white/[0.04] text-xs">Ctrl+Shift+B</kbd> (Windows / Linux).
+              Then <span className="text-foreground">right-click in any empty area of the bookmarks bar</span> —
+              the empty space to the right of your existing bookmarks, NOT on an existing bookmark.
+            </p>
+            <p>
+              Choose <code className="px-1.5 py-0.5 rounded bg-white/[0.04] text-xs text-foreground">Add page…</code> (Chrome / Brave / Edge),
+              {" "}<code className="px-1.5 py-0.5 rounded bg-white/[0.04] text-xs text-foreground">New Bookmark…</code> (Firefox),
+              or use the Bookmarks menu → <code className="px-1.5 py-0.5 rounded bg-white/[0.04] text-xs text-foreground">Edit Bookmarks</code> → <code className="px-1.5 py-0.5 rounded bg-white/[0.04] text-xs text-foreground">+</code> (Safari).
+            </p>
+            <p className="text-xs italic">
+              ⚠ The <kbd className="px-1 py-0.5 rounded border border-white/10 bg-white/[0.04] text-[10px]">⌘D</kbd> /{" "}
+              <kbd className="px-1 py-0.5 rounded border border-white/10 bg-white/[0.04] text-[10px]">Ctrl+D</kbd> shortcut won&apos;t
+              work — that dialog only shows Name + Folder, not URL. Use the right-click path above.
+            </p>
+          </div>
         </div>
 
-        {/* Step 3: edit the bookmark */}
+        {/* Step 3: fill the dialog */}
         <div className="space-y-2">
           <p className="text-sm font-medium flex items-center gap-2">
             <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-500/15 text-amber-400 text-xs font-bold">3</span>
-            Edit the bookmark
+            Fill in the bookmark
           </p>
           <div className="pl-7 space-y-2 text-sm text-muted-foreground leading-relaxed">
-            <p>In the dialog (or right after, via the bookmarks manager):</p>
+            <p>The dialog that opens has BOTH Name and URL fields. Fill them in:</p>
             <ul className="space-y-1 pl-5 list-disc">
               <li>
-                <span className="text-foreground">Name</span>: change to{" "}
+                <span className="text-foreground">Name</span>:{" "}
                 <code className="px-1.5 py-0.5 rounded bg-white/[0.04] text-xs text-foreground">Save to JobHunt</code>
               </li>
               <li>
-                <span className="text-foreground">URL</span>: replace the existing URL
-                with the one you copied in step 1{" "}
+                <span className="text-foreground">URL</span>: paste the URL you copied in step 1{" "}
                 (<kbd className="px-1.5 py-0.5 rounded border border-white/10 bg-white/[0.04] text-xs">⌘ V</kbd>
                 {" "}/{" "}
                 <kbd className="px-1.5 py-0.5 rounded border border-white/10 bg-white/[0.04] text-xs">Ctrl V</kbd>)
+                {" "}— must start with{" "}
+                <code className="px-1.5 py-0.5 rounded bg-white/[0.04] text-xs text-foreground">javascript:</code>
               </li>
               <li>Save / Done</li>
             </ul>
