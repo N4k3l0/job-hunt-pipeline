@@ -220,19 +220,24 @@ def parse_job_from_text(text: str, source: str = "manual"):
     _run_async(_parse_job_from_text_async(text, source))
 
 
-async def _parse_job_from_text_async(text: str, source: str):
+async def _parse_job_from_text_async(text: str, source: str) -> str | None:
+    """Parse pasted job text into a Job row. Returns the new job's id
+    so callers (e.g. the /import/text endpoint) can run follow-up work
+    against it — typically the apply-link resolver, since user-pasted
+    text often omits the source URL."""
     from app.services.parsing.normalizer import normalize_and_store_job
 
     parsed = await parse_job_text(text)
 
     async with create_worker_session()() as db:
-        await normalize_and_store_job(
+        job = await normalize_and_store_job(
             db=db,
             parsed_data=parsed,
             raw_content=text,
             source_name=source,
         )
         await db.commit()
+        return str(job.id) if job else None
 
 
 def _parse_date(date_str: str | None):

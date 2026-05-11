@@ -516,18 +516,47 @@ async def import_job_url(request: JobImportURL, user_id: CurrentUserId, db: DbSe
 @router.post("/import/text")
 async def import_job_text(request: JobImportText, user_id: CurrentUserId, db: DbSession):
     """Import a job by pasting text (Claude parsing). Runs inline —
-    see import/url above for context. Total time ~5–10s (just Claude
-    parse + scoring; no Firecrawl scrape since the user gave us the text)."""
+    see import/url above for context. Total time ~5–10s for the parse;
+    if the pasted text didn't include an apply URL, we also run the
+    full resolver chain (~5–10s extra) so the Apply button works
+    instantly later instead of doing the lookup on first click.
+    """
     from app.workers.parsing_tasks import _parse_job_from_text_async
     from app.workers.scoring_tasks import _batch_score_async
+
     try:
-        await _parse_job_from_text_async(request.text, request.source)
+        job_id = await _parse_job_from_text_async(request.text, request.source)
     except Exception as e:  # noqa: BLE001
         logger.exception("Job text import failed")
         raise HTTPException(
             status_code=502,
             detail=f"Couldn't import job: {type(e).__name__}: {e}",
         )
+
+    # If Claude didn't pull a URL from the text, run the resolver chain
+    # now (slug-guess → web_search) and cache whatever it finds on the
+    # row. Means clicking Apply later is instant instead of starting a
+    # 5–10s lookup.
+    if job_id:
+        job_row = (await db.execute(select(Job).where(Job.id == job_id))).scalar_one_or_none()
+        if job_row and not job_row.apply_url and (job_row.company or job_row.title):
+            try:
+                resolved = await find_direct_apply(
+                    company=job_row.company or "",
+                    title=job_row.title or "",
+                    source_url=None,
+                )
+                if resolved and not _is_aggregator(resolved):
+                    job_row.apply_url = resolved
+                    await db.commit()
+                    logger.info(
+                        "Resolved apply URL inline for text-imported job %s → %s",
+                        job_id, resolved,
+                    )
+            except Exception as e:  # noqa: BLE001
+                # Resolver failure isn't fatal — Apply click will retry.
+                logger.warning("Inline apply-resolver failed for %s: %s", job_id, e)
+
     try:
         await _batch_score_async(str(user_id), rescore_all=False)
     except Exception as e:  # noqa: BLE001
