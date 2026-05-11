@@ -674,10 +674,13 @@ function EmbeddingsBackfillCard() {
     setDone(false);
     setRunError(null);
     setTotals({ embedded: 0, remaining: 0 });
-    let safetyCap = 30; // 30 batches × 200 = 6 k jobs/run
+    // 60 batches × 50 = 3 k jobs/run — comfortably covers the 1.7 k
+    // catalogue + headroom. Smaller batches needed because 200/batch
+    // was timing out the Vercel function (60 s ceiling on Hobby).
+    let safetyCap = 60;
     while (safetyCap-- > 0) {
       try {
-        const batch = await backfill.mutateAsync({ limit: 200 });
+        const batch = await backfill.mutateAsync({ limit: 50 });
         setTotals((prev) => ({
           embedded: (prev?.embedded ?? 0) + batch.embedded,
           remaining: batch.remaining,

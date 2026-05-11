@@ -398,20 +398,26 @@ async def admin_embeddings_test(admin: AdminUser):
 async def admin_embeddings_backfill(
     admin: AdminUser,
     db: DbSession,
-    limit: int = 200,
+    limit: int = 50,
 ):
-    """Embed jobs that don't have a semantic vector yet. Used to bring
-    the historical catalog up to date after the embedding migration —
-    new jobs ingested after that point get embedded inline during
-    discovery, so this only matters for pre-existing rows.
-
-    Batches of up to 128 jobs per Voyage call. The caller chains calls
-    via has_more until the catalogue is fully embedded.
-    """
+    """Embed jobs that don't have a semantic vector yet. Caller chains
+    calls of size `limit` until has_more=false. Default 50 keeps each
+    invocation well under Vercel's 60s function timeout — 200 was timing
+    out (one Voyage round-trip + 200 row updates + count query > 60 s
+    on cold start)."""
     from app.workers.discovery_tasks import _embed_unembedded_jobs
-    embedded = await _embed_unembedded_jobs(limit=min(max(int(limit), 1), 500))
 
-    # Quick check: how many rows still need embedding after this pass?
+    bounded = min(max(int(limit), 1), 100)
+    try:
+        embedded = await _embed_unembedded_jobs(limit=bounded)
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Embeddings backfill failed (limit=%d)", bounded)
+        raise HTTPException(
+            status_code=502,
+            detail=f"Backfill failed: {type(e).__name__}: {e}",
+        )
+
+    # Count remaining unembedded rows so the caller knows when to stop.
     from sqlalchemy import select, func
     from app.models.job import JobEntity
     remaining_q = (

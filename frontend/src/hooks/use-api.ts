@@ -111,7 +111,11 @@ export interface EmbeddingsBackfillBatch {
 export function useEmbeddingsBackfill() {
   const qc = useQueryClient();
   return useMutation<EmbeddingsBackfillBatch, Error, { limit?: number }>({
-    mutationFn: ({ limit = 200 } = {}) =>
+    // 50 per batch — keeps each Vercel function invocation well under
+    // the 60s timeout (50 jobs ≈ 1 Voyage call ≈ 3-5s total). The
+    // frontend chains batches until done, so total catalogue is still
+    // processed; we just do it in smaller chunks.
+    mutationFn: ({ limit = 50 } = {}) =>
       api.post(`/api/v1/auth/admin/embeddings/backfill?limit=${limit}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
