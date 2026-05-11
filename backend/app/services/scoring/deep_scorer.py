@@ -134,6 +134,23 @@ async def run_deep_score(
         logger.error("Deep score returned text instead of structured output: %s", deep_score["text"][:200])
         raise RuntimeError("LLM did not return structured deep score output")
 
+    # Derive recommendation from overall_fit_score so the badge always
+    # aligns with the number. Claude returns both fields but they drift —
+    # users saw 75-scoring jobs labelled 'strong_apply' while 82-scoring
+    # ones were just 'apply', which made the UI feel arbitrary. We trust
+    # the score (numeric, comparable) over the verbal label (independent
+    # LLM judgement).
+    score = deep_score.get("overall_fit_score")
+    if isinstance(score, (int, float)):
+        if score >= 80:
+            deep_score["recommendation"] = "strong_apply"
+        elif score >= 65:
+            deep_score["recommendation"] = "apply"
+        elif score >= 45:
+            deep_score["recommendation"] = "maybe"
+        else:
+            deep_score["recommendation"] = "skip"
+
     # Add metadata
     deep_score["scored_at"] = datetime.now(timezone.utc).isoformat()
     # Metadata only — actual model is selected by llm_client via MODELS map.

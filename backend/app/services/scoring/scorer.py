@@ -112,6 +112,11 @@ def compute_job_score(
             profile_skills=[s.get("skill_name", "") for s in profile.get("skills", [])],
             profile_work_history=profile.get("work_history", []),
         )
+        # visa_score + salary_score are still computed (stored on the
+        # JobScore row for reference) but excluded from overall_fit —
+        # they were weak signals adding noise rather than precision.
+        # Max possible per-path total: title 20 + skill 25 + seniority 15
+        # + industry 10 + geo 10 + remote 10 = 90, clamped to 100.
         pm_total = (
             pm_scores["title_score"]
             + pm_scores["skill_score"]
@@ -119,8 +124,6 @@ def compute_job_score(
             + pm_scores["industry_score"]
             + geo["geo_score"]
             + geo["remote_score"]
-            + geo["visa_score"]
-            + salary_score
         )
 
     if "ai" in intents:
@@ -144,8 +147,6 @@ def compute_job_score(
             + ai_scores["industry_score"]
             + geo["geo_score"]
             + geo["remote_score"]
-            + geo["visa_score"]
-            + salary_score
         )
 
     # Pick the higher-scoring path among those that actually ran.

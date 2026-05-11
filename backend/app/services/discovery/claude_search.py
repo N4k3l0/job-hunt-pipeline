@@ -28,7 +28,9 @@ _RECORD_JOBS_TOOL = {
     "name": "record_jobs",
     "description": (
         "Record a list of remote jobs that match the candidate's profile. "
-        "Only call this ONCE at the end with all matches consolidated."
+        "Each job MUST include enough detail for downstream scoring — a "
+        "1-sentence summary is not enough. Only call this ONCE at the end "
+        "with all matches consolidated."
     ),
     "input_schema": {
         "type": "object",
@@ -62,10 +64,47 @@ _RECORD_JOBS_TOOL = {
                         "salary_currency": {"type": "string"},
                         "description": {
                             "type": "string",
-                            "description": "1-3 sentence summary of the role + key requirements.",
+                            "description": (
+                                "Substantive role description — 600–1500 characters. "
+                                "Should include what the role does, the team, the "
+                                "stack/domain, and notable responsibilities. NOT a "
+                                "1-sentence summary. Pulled from the actual posting "
+                                "content, not invented."
+                            ),
+                        },
+                        "skills": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Specific skills / tools / technologies the posting "
+                                "explicitly mentions. Examples: Python, n8n, LangChain, "
+                                "Figma, Jira, Salesforce, Postgres. 5–15 entries."
+                            ),
+                        },
+                        "requirements": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Hard requirements pulled from the JD ('5+ years PM "
+                                "experience', 'BS in CS', 'must be US-based', etc.). "
+                                "3–10 entries."
+                            ),
+                        },
+                        "keywords": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Domain / function / industry keywords. Examples: "
+                                "fintech, B2B SaaS, agentic AI, growth, infra. "
+                                "3–10 entries."
+                            ),
+                        },
+                        "seniority": {
+                            "type": "string",
+                            "enum": ["intern", "junior", "mid", "senior", "lead", "principal", "executive", "unknown"],
                         },
                     },
-                    "required": ["title", "company", "url"],
+                    "required": ["title", "company", "url", "description", "skills"],
                 },
             },
         },
@@ -88,6 +127,16 @@ _SYSTEM_PROMPT = (
     "- Aim for 15–25 high-quality matches. Quality > quantity.\n"
     "- NEVER return more than 30 results.\n"
     "- Don't invent salary ranges. If you can't see them on the page, omit them.\n\n"
+    "CRITICAL — DATA QUALITY:\n"
+    "Each job's `description` must be 600–1500 characters. A 1-line summary "
+    "makes the downstream scoring useless because the matcher looks for "
+    "skill mentions in the description body. Pull the actual responsibilities "
+    "/ team / stack from the posting — don't paraphrase it down to a tagline.\n"
+    "Populate `skills` (5–15 specific tools), `requirements` (3–10 hard asks), "
+    "`keywords` (3–10 domain/industry terms), and `seniority` from the actual "
+    "JD content. These feed the scorer directly — empty arrays = bad scores.\n"
+    "If you can't open / read a posting in detail (just have the listing card "
+    "from a search result), SKIP it rather than return a thin entry.\n\n"
     "Call record_jobs ONCE with all the matches at the end."
 )
 
@@ -181,8 +230,17 @@ def _is_valid(j: dict) -> bool:
 
 def _normalize(j: dict) -> dict[str, Any]:
     """Shape into the dict format _ingest_raw_jobs expects. Mirrors what
-    the existing aggregator services (Adzuna, RemoteOK, etc.) produce."""
+    the existing aggregator services (Adzuna, RemoteOK, etc.) produce —
+    plus the LLM-extracted skills / requirements / keywords / seniority
+    which the normalizer plumbs into the JobEntity row so the scorer
+    can match against them."""
     url = str(j.get("url") or "").strip()
+
+    def _clean_list(raw: Any) -> list[str]:
+        if not isinstance(raw, list):
+            return []
+        return [str(item).strip() for item in raw if item and str(item).strip()][:25]
+
     return {
         "external_id": url,  # URL is unique enough for the source-level dedup
         "source_name": "web_search",
@@ -200,4 +258,12 @@ def _normalize(j: dict) -> dict[str, Any]:
         "raw_description": str(j.get("description") or "").strip(),
         "posted_at": None,
         "tags": [],
+        # The fields below populate JobEntity via the normalizer's plumbing.
+        # Without them, skill-overlap scoring runs against an empty haystack
+        # and every web-search result lands with a sub-50 score regardless
+        # of how good the match actually is.
+        "required_skills": _clean_list(j.get("skills")),
+        "requirements": _clean_list(j.get("requirements")),
+        "keywords": _clean_list(j.get("keywords")),
+        "seniority": (str(j.get("seniority") or "").strip().lower() or None),
     }
