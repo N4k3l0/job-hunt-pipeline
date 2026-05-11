@@ -16,6 +16,7 @@ import {
   Sparkles, FileSignature, Quote,
 } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
+import { OperationProgress } from "@/components/operation-progress";
 import {
   useProfile, useCreateProfile, useUpdateProfile,
   useResumes, useUploadResume, useDeleteResume,
@@ -953,6 +954,24 @@ export default function ProfilePage() {
                     <CheckCircle2 className="h-4 w-4" /> Inbox refreshed
                   </span>
                 )}
+              </div>
+
+              {/* Progress card — the rescore is deterministic compute
+                  (~3–8 s for 1.7 k jobs) but a single spinner reads as
+                  'broken or slow'. Live stage panel makes the wait feel
+                  intentional. */}
+              <div className="mt-4">
+                <OperationProgress
+                  active={rescoreInbox.isPending}
+                  title="Re-scoring your inbox"
+                  description="Wiping existing scores and recomputing every job against your current profile. Pure compute, no LLM calls — usually finishes in a few seconds."
+                  stages={[
+                    { label: "Loading your latest profile", durationMs: 800, tip: "Reading target roles, skills, work history, and preferences." },
+                    { label: "Wiping old job scores", durationMs: 600, tip: "Clearing yesterday's numbers so the rerank is honest." },
+                    { label: "Scoring every job in the catalogue", durationMs: 4500, tip: "Title + skill + seniority + industry + geo + remote on each row." },
+                    { label: "Sorting + saving", durationMs: 1100, tip: "Updating the inbox sort order so the best matches surface first." },
+                  ]}
+                />
               </div>
             </CardContent>
           </Card>
