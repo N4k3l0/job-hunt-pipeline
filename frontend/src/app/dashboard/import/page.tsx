@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { OperationProgress } from "@/components/operation-progress";
 import {
   Link as LinkIcon,
   MessageSquare,
@@ -224,6 +225,17 @@ export default function ImportPage() {
                   </Button>
                 </div>
               </div>
+              <OperationProgress
+                active={importUrl.isPending}
+                title="Importing this job"
+                description="Firecrawl scrapes the page, Claude parses it into structured fields, we resolve the direct apply link, then score it against your profile."
+                stages={[
+                  { label: "Fetching the page", durationMs: 5000, tip: "Firecrawl renders the URL — handles JS-heavy ATS pages that plain HTTP can't read." },
+                  { label: "Parsing with Claude", durationMs: 8000, tip: "Pulling out title, company, requirements, skills, salary, remote type." },
+                  { label: "Resolving the apply link", durationMs: 7000, tip: "Going through aggregator redirects to find the direct posting URL." },
+                  { label: "Scoring + adding to inbox", durationMs: 3000, tip: "Computing your fit so the inbox sort is meaningful right away." },
+                ]}
+              />
               {importUrl.isSuccess && (
                 <div className="flex items-center gap-2 text-sm text-emerald-400">
                   <CheckCircle2 className="h-4 w-4" />
@@ -281,6 +293,16 @@ export default function ImportPage() {
                   {importText.isPending ? "Processing..." : importText.isSuccess ? "Queued!" : "Import"}
                 </Button>
               </div>
+              <OperationProgress
+                active={importText.isPending}
+                title="Importing this job"
+                description="Claude parses the text into structured fields. If you didn't paste an apply URL, we also resolve one for you so the Apply button works instantly later."
+                stages={[
+                  { label: "Reading the text with Claude", durationMs: 6000, tip: "Pulling out title, company, requirements, skills, salary, remote type." },
+                  { label: "Resolving an apply link", durationMs: 5000, tip: "Looking up the company on Greenhouse / Lever / Ashby, plus a Claude web_search if needed." },
+                  { label: "Scoring + adding to inbox", durationMs: 3000, tip: "Computing your fit so the inbox sort is meaningful right away." },
+                ]}
+              />
               {importText.isSuccess && (
                 <div className="flex items-center gap-2 text-sm text-emerald-400">
                   <CheckCircle2 className="h-4 w-4" />

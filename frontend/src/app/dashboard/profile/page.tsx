@@ -604,10 +604,24 @@ export default function ProfilePage() {
                   </Button>
                 </div>
 
+                <div className="mt-3">
+                  <OperationProgress
+                    active={uploadResume.isPending}
+                    title="Parsing your resume"
+                    description="Claude reads the file, extracts your structured profile (work history, skills, education, bullets), then scores every job in your inbox against the fresh profile."
+                    stages={[
+                      { label: "Uploading the file", durationMs: 1500, tip: "Pushing the PDF / DOCX to storage." },
+                      { label: "Reading with Claude", durationMs: 9000, tip: "Pulling out work history, skills, education, and achievement bullets — never inventing anything." },
+                      { label: "Building your structured profile", durationMs: 3000, tip: "Saving each section to its own table so the tailor service can pull from them later." },
+                      { label: "Scoring your inbox", durationMs: 3500, tip: "Re-scoring every job against the new profile so the inbox sort reflects your latest skills." },
+                    ]}
+                  />
+                </div>
+
                 {uploadResume.isSuccess && (
                   <p className="text-sm text-emerald-400 mt-3 flex items-center justify-center gap-1.5">
                     <CheckCircle2 className="h-4 w-4" />
-                    Resume uploaded! Parsing in background...
+                    Resume uploaded + parsed. Your inbox has been rescored.
                   </p>
                 )}
                 {uploadResume.isError && (
