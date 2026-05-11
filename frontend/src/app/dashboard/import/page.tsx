@@ -212,7 +212,7 @@ export default function ImportPage() {
                     className="flex-1"
                     onKeyDown={(e) => e.key === "Enter" && handleUrlImport()}
                   />
-                  <Button onClick={handleUrlImport} disabled={importUrl.isPending || !url.trim()}>
+                  <Button onClick={() => handleUrlImport()} disabled={importUrl.isPending || !url.trim()}>
                     {importUrl.isPending ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : importUrl.isSuccess ? (
