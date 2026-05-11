@@ -123,11 +123,17 @@ async def _batch_score_async(user_id: str, rescore_all: bool = False):
             return
 
         if rescore_all:
-            # Delete all existing scores for this user and re-score
+            # Delete existing scores for this user and re-score. We used
+            # to commit the delete separately, which was a footgun — if
+            # the subsequent INSERTs failed (e.g. missing column after a
+            # not-yet-run migration) the user ended up with ZERO scores
+            # and an empty inbox. Now the delete is in the same
+            # transaction as the inserts: either everything lands or
+            # nothing does and the user keeps their old scores.
             from sqlalchemy import delete
             await db.execute(delete(JobScore).where(JobScore.user_id == user_id))
-            await db.commit()
-            logger.info("Cleared old scores for user %s for re-scoring", user_id)
+            await db.flush()  # send to DB without committing
+            logger.info("Staged old-score wipe for user %s; will commit with inserts", user_id)
 
         # Find unscored jobs (jobs without a score for this user). The
         # cron pass caps at 300 to stay inside its budget; a user-triggered
