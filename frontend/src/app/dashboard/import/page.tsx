@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Card,
   CardContent,
@@ -19,6 +20,9 @@ import {
   Loader2,
   CheckCircle2,
   ArrowRight,
+  Bookmark,
+  Copy,
+  Check,
 } from "lucide-react";
 import { useImportJobUrl, useImportJobText } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/toast";
@@ -27,9 +31,37 @@ export default function ImportPage() {
   const [url, setUrl] = useState("");
   const [text, setText] = useState("");
   const toast = useToast();
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
   const importUrl = useImportJobUrl();
   const importText = useImportJobText();
+
+  // Bookmarklet auto-import: when the user clicks the bookmarklet from
+  // LinkedIn / Indeed / a company careers page, it opens this route
+  // with the URL as a query param. We pre-fill, auto-submit, redirect
+  // to the inbox on success. One click from anywhere on the web → job
+  // in inbox. Ref-gate so it only ever runs once per tab.
+  const autoRan = useRef(false);
+  useEffect(() => {
+    if (autoRan.current) return;
+    const qsUrl = searchParams.get("url");
+    if (!qsUrl) return;
+    autoRan.current = true;
+    setUrl(qsUrl);
+    importUrl.mutate(qsUrl, {
+      onSuccess: () => {
+        toast.success("Job imported", {
+          description: "Opening your inbox…",
+        });
+        // Tiny delay so the toast has a chance to render before navigation.
+        setTimeout(() => router.replace("/dashboard/jobs"), 600);
+      },
+      onError: (err: any) =>
+        toast.error("Import failed", { description: err?.message }),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   async function handleUrlImport() {
     if (!url.trim()) return;
@@ -180,6 +212,113 @@ export default function ImportPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Bookmarklet — installs once, then any LinkedIn / Indeed /
+          company careers page is one-click importable from the
+          browser bar. Built with origin from window so it works in
+          local dev AND prod without manual edits. */}
+      <BookmarkletCard />
     </div>
+  );
+}
+
+
+function BookmarkletCard() {
+  // Build the bookmarklet at runtime so it points at whatever origin
+  // the user is on (localhost in dev, the Vercel URL in prod). The
+  // `auto=1` flag tells the import page to fire immediately instead
+  // of just pre-filling the input.
+  const [origin, setOrigin] = useState("");
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (typeof window !== "undefined") setOrigin(window.location.origin);
+  }, []);
+
+  const bookmarkletHref = origin
+    ? `javascript:(function(){var u=encodeURIComponent(location.href);window.open('${origin}/dashboard/import?url='+u+'&auto=1','_blank');})();`
+    : "javascript:void(0);";
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(bookmarkletHref).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    });
+  };
+
+  return (
+    <Card className="border-amber-500/15">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Bookmark className="h-5 w-5 text-amber-400" />
+          One-click import from anywhere
+        </CardTitle>
+        <CardDescription>
+          Drag the button below into your browser&apos;s bookmarks bar (or{" "}
+          right-click → Add to bookmarks). Then on any LinkedIn / Indeed /
+          company careers page, click the bookmark and that job lands in
+          your inbox — no copy-paste, no tab switching.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-wrap items-center gap-3">
+          {/* The actual draggable element. Browsers let users drag <a>
+              tags with href onto the bookmarks bar; the title becomes
+              the bookmark name. Click does nothing useful (it'd open the
+              import page) — drag is the intended interaction. */}
+          <a
+            href={bookmarkletHref}
+            onClick={(e) => e.preventDefault()}
+            draggable
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-300 text-sm font-medium hover:bg-amber-500/15 cursor-grab active:cursor-grabbing transition-colors"
+            title="Drag me to your bookmarks bar"
+          >
+            <Bookmark className="h-4 w-4" />
+            Save to JobHunt
+          </a>
+          <Button variant="ghost" size="sm" onClick={handleCopy} disabled={!origin}>
+            {copied ? (
+              <>
+                <Check className="h-3.5 w-3.5 text-emerald-400" />
+                Copied
+              </>
+            ) : (
+              <>
+                <Copy className="h-3.5 w-3.5" />
+                Or copy URL
+              </>
+            )}
+          </Button>
+          <span className="text-xs text-muted-foreground">
+            (paste into a new bookmark&apos;s URL field if drag doesn&apos;t work)
+          </span>
+        </div>
+
+        <details className="text-xs text-muted-foreground">
+          <summary className="cursor-pointer hover:text-foreground">
+            How it works
+          </summary>
+          <ul className="mt-2 space-y-1.5 pl-4 list-disc">
+            <li>
+              Bookmarklet reads the URL of whatever tab you&apos;re on, opens
+              a new tab on this dashboard with that URL pre-loaded.
+            </li>
+            <li>
+              The new tab auto-imports (parses with Claude, runs the
+              apply-link resolver, scores against your profile) and
+              redirects to your inbox when done. Takes ~15–25 s.
+            </li>
+            <li>
+              You need to be logged into this dashboard for it to work —
+              your session cookies are what authenticate the import.
+            </li>
+            <li>
+              Works on LinkedIn / Indeed / Greenhouse / Lever / Ashby and
+              any company careers page. If a page anti-bots the
+              underlying scrape, we&apos;ll show you which step failed.
+            </li>
+          </ul>
+        </details>
+      </CardContent>
+    </Card>
   );
 }
