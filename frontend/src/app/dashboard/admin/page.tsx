@@ -667,11 +667,14 @@ function EmbeddingsBackfillCard() {
   const [running, setRunning] = useState(false);
   const [done, setDone] = useState(false);
 
+  const [runError, setRunError] = useState<string | null>(null);
+
   const runBackfill = async () => {
     setRunning(true);
     setDone(false);
+    setRunError(null);
     setTotals({ embedded: 0, remaining: 0 });
-    let safetyCap = 30; // 30 batches × 200 = 6 k jobs/run, more than enough
+    let safetyCap = 30; // 30 batches × 200 = 6 k jobs/run
     while (safetyCap-- > 0) {
       try {
         const batch = await backfill.mutateAsync({ limit: 200 });
@@ -680,7 +683,10 @@ function EmbeddingsBackfillCard() {
           remaining: batch.remaining,
         }));
         if (!batch.has_more || batch.embedded === 0) break;
-      } catch {
+      } catch (err: any) {
+        // Don't swallow — show the real failure so we can debug
+        // VOYAGE_API_KEY / pgvector / network issues.
+        setRunError(err?.message || String(err) || "Unknown error");
         break;
       }
     }
@@ -725,15 +731,87 @@ function EmbeddingsBackfillCard() {
             </div>
           )}
         </div>
-        {totals && done && (
+        {runError && (
+          <div className="rounded-md border border-destructive/30 bg-destructive/[0.06] p-3 text-xs">
+            <p className="font-semibold text-destructive mb-1 flex items-center gap-1.5">
+              <AlertCircle className="h-3.5 w-3.5" /> Backfill failed
+            </p>
+            <pre className="whitespace-pre-wrap break-words text-destructive/80 font-mono">
+              {runError}
+            </pre>
+            <p className="text-muted-foreground mt-2 leading-relaxed">
+              Usually one of: VOYAGE_API_KEY not set / wrong / expired,
+              network timeout to Voyage, or pgvector package not installed
+              on the Vercel build. Click <span className="text-foreground">Test Voyage</span> below to ping the embedding API directly and confirm.
+            </p>
+          </div>
+        )}
+        {!runError && totals && done && (
           <p className="text-xs text-muted-foreground">
-            {totals.remaining === 0
+            {totals.remaining === 0 && totals.embedded > 0
               ? "All jobs in the catalogue now have semantic vectors. The new scorer is fully active."
-              : `Embedded ${totals.embedded} jobs · ${totals.remaining} still need vectors (likely API rate limit — click Run again).`}
+              : totals.embedded > 0
+                ? `Embedded ${totals.embedded} jobs · ${totals.remaining} still need vectors (likely API rate limit — click Run again).`
+                : "Backfill returned without embedding any jobs. Check Test Voyage below."}
           </p>
         )}
+
+        <VoyageTestButton />
       </CardContent>
     </Card>
+  );
+}
+
+
+function VoyageTestButton() {
+  const [pinging, setPinging] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; detail: string } | null>(null);
+
+  const ping = async () => {
+    setPinging(true);
+    setResult(null);
+    try {
+      const r = await api.post<{ ok: boolean; dim?: number; sample?: number[]; error?: string }>(
+        "/api/v1/auth/admin/embeddings/test"
+      );
+      if (r.ok) {
+        setResult({
+          ok: true,
+          detail: `Voyage responded — vector dim ${r.dim}, first 3 floats: ${(r.sample ?? []).slice(0, 3).map(n => n.toFixed(3)).join(", ")}`,
+        });
+      } else {
+        setResult({ ok: false, detail: r.error || "Unknown failure" });
+      }
+    } catch (e: any) {
+      setResult({ ok: false, detail: e?.message || String(e) });
+    } finally {
+      setPinging(false);
+    }
+  };
+
+  return (
+    <div className="pt-3 border-t border-white/[0.04] space-y-2">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <p className="text-xs text-muted-foreground">
+          Embeds one test string. Confirms VOYAGE_API_KEY + network reach in &lt;5 s.
+        </p>
+        <Button variant="ghost" size="sm" onClick={ping} disabled={pinging}>
+          {pinging ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+          Test Voyage
+        </Button>
+      </div>
+      {result && (
+        <div
+          className={
+            result.ok
+              ? "rounded-md border border-emerald-500/30 bg-emerald-500/[0.06] p-2.5 text-xs text-emerald-300"
+              : "rounded-md border border-destructive/30 bg-destructive/[0.06] p-2.5 text-xs text-destructive font-mono whitespace-pre-wrap break-words"
+          }
+        >
+          {result.detail}
+        </div>
+      )}
+    </div>
   );
 }
 

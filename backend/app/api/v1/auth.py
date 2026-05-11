@@ -378,6 +378,22 @@ async def admin_stale_jobs_cleanup_by_source(
     return {"expired": result.rowcount, "source": source, "days": days}
 
 
+@router.post("/admin/embeddings/test")
+async def admin_embeddings_test(admin: AdminUser):
+    """Embeds a single short string and returns the result so an
+    operator can confirm VOYAGE_API_KEY is set + the network reaches
+    api.voyageai.com. Surfaces the real error instead of the silent
+    'backfill returned 0' state."""
+    from app.services.scoring.embedder import embed_one
+    try:
+        vec = await embed_one("test connectivity to voyage", input_type="document")
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    if vec is None:
+        return {"ok": False, "error": "VOYAGE_API_KEY not configured (env var missing or empty)"}
+    return {"ok": True, "dim": len(vec), "sample": vec[:5]}
+
+
 @router.post("/admin/embeddings/backfill")
 async def admin_embeddings_backfill(
     admin: AdminUser,
