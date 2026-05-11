@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import {
   Card,
   CardContent,
@@ -32,7 +32,6 @@ export default function ImportPage() {
   const [text, setText] = useState("");
   const toast = useToast();
   const router = useRouter();
-  const searchParams = useSearchParams();
 
   const importUrl = useImportJobUrl();
   const importText = useImportJobText();
@@ -42,10 +41,16 @@ export default function ImportPage() {
   // with the URL as a query param. We pre-fill, auto-submit, redirect
   // to the inbox on success. One click from anywhere on the web → job
   // in inbox. Ref-gate so it only ever runs once per tab.
+  //
+  // We read window.location.search directly instead of useSearchParams()
+  // to avoid Next.js 16's static-export Suspense boundary requirement —
+  // useSearchParams forces every parent up to a Suspense boundary,
+  // which we don't want to add for one client-side query-string read.
   const autoRan = useRef(false);
   useEffect(() => {
     if (autoRan.current) return;
-    const qsUrl = searchParams.get("url");
+    if (typeof window === "undefined") return;
+    const qsUrl = new URLSearchParams(window.location.search).get("url");
     if (!qsUrl) return;
     autoRan.current = true;
     setUrl(qsUrl);
@@ -61,7 +66,7 @@ export default function ImportPage() {
         toast.error("Import failed", { description: err?.message }),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+  }, []);
 
   async function handleUrlImport() {
     if (!url.trim()) return;
