@@ -28,9 +28,10 @@ _RECORD_JOBS_TOOL = {
     "name": "record_jobs",
     "description": (
         "Record a list of remote jobs that match the candidate's profile. "
-        "Each job MUST include enough detail for downstream scoring — a "
-        "1-sentence summary is not enough. Only call this ONCE at the end "
-        "with all matches consolidated."
+        "Capture as much detail as the listing actually provides — title, "
+        "company, and URL are mandatory; everything else is strongly "
+        "encouraged but optional. Call this ONCE at the end with all "
+        "matches consolidated."
     ),
     "input_schema": {
         "type": "object",
@@ -65,38 +66,38 @@ _RECORD_JOBS_TOOL = {
                         "description": {
                             "type": "string",
                             "description": (
-                                "Substantive role description — 600–1500 characters. "
-                                "Should include what the role does, the team, the "
-                                "stack/domain, and notable responsibilities. NOT a "
-                                "1-sentence summary. Pulled from the actual posting "
-                                "content, not invented."
+                                "Role description — pull as much actual posting "
+                                "content as you can see (responsibilities, team, "
+                                "stack, domain). Longer is better for scoring; "
+                                "even 1-2 sentences is fine if that's all the "
+                                "listing card shows. Never invent content."
                             ),
                         },
                         "skills": {
                             "type": "array",
                             "items": {"type": "string"},
                             "description": (
-                                "Specific skills / tools / technologies the posting "
-                                "explicitly mentions. Examples: Python, n8n, LangChain, "
-                                "Figma, Jira, Salesforce, Postgres. 5–15 entries."
+                                "Specific skills / tools the posting explicitly "
+                                "mentions (Python, n8n, LangChain, Figma, Jira, "
+                                "etc.). Include any you see; empty array is fine "
+                                "if the listing doesn't mention specifics."
                             ),
                         },
                         "requirements": {
                             "type": "array",
                             "items": {"type": "string"},
                             "description": (
-                                "Hard requirements pulled from the JD ('5+ years PM "
-                                "experience', 'BS in CS', 'must be US-based', etc.). "
-                                "3–10 entries."
+                                "Hard requirements ('5+ years PM experience', "
+                                "'BS in CS', 'must be US-based'). Optional — "
+                                "empty array if not stated."
                             ),
                         },
                         "keywords": {
                             "type": "array",
                             "items": {"type": "string"},
                             "description": (
-                                "Domain / function / industry keywords. Examples: "
-                                "fintech, B2B SaaS, agentic AI, growth, infra. "
-                                "3–10 entries."
+                                "Domain / function / industry keywords (fintech, "
+                                "B2B SaaS, agentic AI, growth, infra). Optional."
                             ),
                         },
                         "seniority": {
@@ -104,7 +105,7 @@ _RECORD_JOBS_TOOL = {
                             "enum": ["intern", "junior", "mid", "senior", "lead", "principal", "executive", "unknown"],
                         },
                     },
-                    "required": ["title", "company", "url", "description", "skills"],
+                    "required": ["title", "company", "url"],
                 },
             },
         },
@@ -124,19 +125,20 @@ _SYSTEM_PROMPT = (
     "- Match the candidate's target roles tightly. A PM should not get "
     "  AI Engineer listings; an AI Engineer should not get PM listings.\n"
     "- Each URL must point to a SPECIFIC posting, not a careers landing page.\n"
-    "- Aim for 15–25 high-quality matches. Quality > quantity.\n"
-    "- NEVER return more than 30 results.\n"
-    "- Don't invent salary ranges. If you can't see them on the page, omit them.\n\n"
-    "CRITICAL — DATA QUALITY:\n"
-    "Each job's `description` must be 600–1500 characters. A 1-line summary "
-    "makes the downstream scoring useless because the matcher looks for "
-    "skill mentions in the description body. Pull the actual responsibilities "
-    "/ team / stack from the posting — don't paraphrase it down to a tagline.\n"
-    "Populate `skills` (5–15 specific tools), `requirements` (3–10 hard asks), "
-    "`keywords` (3–10 domain/industry terms), and `seniority` from the actual "
-    "JD content. These feed the scorer directly — empty arrays = bad scores.\n"
-    "If you can't open / read a posting in detail (just have the listing card "
-    "from a search result), SKIP it rather than return a thin entry.\n\n"
+    "- Aim for 15–25 matches. Don't return more than 30.\n"
+    "- Don't invent salary ranges. Omit if not visible.\n\n"
+    "DATA QUALITY (capture what you can see — never invent):\n"
+    "- `description`: pull as much real posting content as you can — "
+    "  responsibilities, team, stack, domain. Longer helps scoring, but a "
+    "  short snippet from the listing card is still useful. Empty is "
+    "  acceptable if the listing card has nothing.\n"
+    "- `skills`: specific tools / technologies the posting mentions. "
+    "  Empty array if nothing specific is stated.\n"
+    "- `requirements` and `keywords`: optional, populate when stated.\n"
+    "- `seniority`: optional, only when clearly indicated.\n\n"
+    "Title + company + URL are the only mandatory fields. Better to return "
+    "20 partially-detailed matches than 0 'perfect' ones — the downstream "
+    "scorer can rank from title alone if needed.\n\n"
     "Call record_jobs ONCE with all the matches at the end."
 )
 
