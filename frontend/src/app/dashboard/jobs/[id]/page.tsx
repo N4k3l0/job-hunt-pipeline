@@ -17,6 +17,7 @@ import { useJob, useShortlistJob, useGenerateTailored, useDeepScore } from "@/ho
 import { useToast } from "@/components/ui/toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
+import { OperationProgress } from "@/components/operation-progress";
 
 function ScoreRing({ score, size = 56 }: { score: number; size?: number }) {
   const strokeWidth = 4;
@@ -747,6 +748,15 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              <OperationProgress
+                active={deepScore.isPending}
+                stages={[
+                  { label: "Loading your profile", durationMs: 800, tip: "Pulling work history, skills, education." },
+                  { label: "Reading the job description", durationMs: 1200, tip: "Parsing requirements + nice-to-haves." },
+                  { label: "Cross-referencing your background", durationMs: 3500, tip: "Where you match, where you stretch." },
+                  { label: "Drafting the recommendation", durationMs: 3000, tip: "Apply / Maybe / Skip — with reasoning." },
+                ]}
+              />
               {score?.deep_score ? (
                 <>
                   {/* Score is already shown as the ring in the page header — show

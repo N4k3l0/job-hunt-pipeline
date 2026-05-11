@@ -16,6 +16,7 @@ import {
   RefreshCw, Sparkles, Wand2, Search, Linkedin, AtSign, Quote,
 } from "lucide-react";
 import { TailoredBulletsPanel } from "@/components/tailored-bullets-panel";
+import { OperationProgress } from "@/components/operation-progress";
 import {
   useReviewQueue, useApproveTailored, useUpdateStatus, useGenerateTailored,
   useUpdateTailored, useRegenerateSection,
@@ -256,11 +257,17 @@ function ContactPanel({
         </div>
       )}
 
-      {noContactYet && find.isPending && (
-        <p className="mt-3 text-xs text-muted-foreground">
-          Web-searching company leadership pages and LinkedIn… ~10–20s.
-        </p>
-      )}
+      <div className="mt-3">
+        <OperationProgress
+          active={find.isPending}
+          stages={[
+            { label: "Searching company leadership pages", durationMs: 3500, tip: "Looking at the company's About / Team / careers pages." },
+            { label: "Cross-referencing LinkedIn", durationMs: 6000, tip: "Finding the hiring manager or department head for this role." },
+            { label: "Verifying the match", durationMs: 4000, tip: "Confirming role, citing sources, scoring confidence." },
+            { label: "Best-guess email pattern", durationMs: 2500, tip: "Building first.last@company patterns where we can." },
+          ]}
+        />
+      </div>
     </div>
   );
 }

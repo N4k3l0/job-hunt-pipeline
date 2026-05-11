@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Loader2, Sparkles, Wand2, Star, Copy, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTailorBullets, type TailoredBullet } from "@/hooks/use-api";
+import { OperationProgress } from "@/components/operation-progress";
 
 /**
  * Tailored-bullets viewer for the Review Queue's "Bullets" tab.
@@ -76,14 +77,15 @@ export function TailoredBulletsPanel({ jobId }: { jobId: string }) {
         </div>
       )}
 
-      {tailor.isPending && !tailor.data && (
-        <div className="text-center py-8 space-y-2 rounded-lg border border-white/[0.06] bg-white/[0.01]">
-          <Loader2 className="h-6 w-6 animate-spin mx-auto text-amber-400" />
-          <p className="text-sm text-muted-foreground">
-            Reading your bullets, comparing them to this JD, rewriting for fit…
-          </p>
-        </div>
-      )}
+      <OperationProgress
+        active={tailor.isPending}
+        stages={[
+          { label: "Loading your bullet bank", durationMs: 1000, tip: "Pulling the achievement bullets the resume parser extracted." },
+          { label: "Reading job requirements", durationMs: 2000, tip: "Comparing each bullet against the JD's skills, keywords, and asks." },
+          { label: "Ranking by relevance", durationMs: 4000, tip: "5 stars = direct hit on a requirement; 1 star = stretch." },
+          { label: "Rewriting in your voice", durationMs: 4000, tip: "Using your writing samples to mimic tone — never inventing facts." },
+        ]}
+      />
 
       {bullets.length > 0 && (
         <div className="space-y-3">

@@ -32,6 +32,7 @@ import {
 import { useJobs, useFindMoreJobs, useProfile } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/toast";
 import { EmptyState } from "@/components/ui/empty-state";
+import { OperationProgress } from "@/components/operation-progress";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 
@@ -302,6 +303,22 @@ export default function JobsInboxPage() {
           </Button>
         </div>
       </div>
+
+      {/* Live progress for the web-search path — replaces the spinner-only
+          state on the button with named stages, a smooth progress bar,
+          and the elapsed counter. Vanishes when the mutation finishes. */}
+      <OperationProgress
+        active={findMore.isPending}
+        title="Searching the open web for new jobs"
+        description="Claude is reading your profile, querying job boards + careers pages, and verifying each match before ingest."
+        stages={[
+          { label: "Loading your profile", durationMs: 1500, tip: "Reading your target roles, skills, and remote preference." },
+          { label: "Searching company careers + ATSes", durationMs: 12000, tip: "Hitting Greenhouse, Lever, Ashby, and niche boards in parallel." },
+          { label: "Verifying each posting is open", durationMs: 15000, tip: "Skipping closed listings and aggregator-only hits. Quality > quantity." },
+          { label: "Ranking matches by fit", durationMs: 10000, tip: "Aiming for 15–25 high-quality matches, deduplicated against your existing inbox." },
+          { label: "Scoring + saving to your inbox", durationMs: 5000, tip: "Each new job scored against your profile so the inbox sort makes sense immediately." },
+        ]}
+      />
 
       {/* Filters — stacks on mobile, inline on tablet+ */}
       <div className="rounded-lg bg-white/[0.02] border border-white/[0.04] p-2 space-y-2 sm:space-y-0 sm:flex sm:items-center sm:gap-1.5">
