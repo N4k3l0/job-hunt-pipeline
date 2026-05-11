@@ -314,6 +314,24 @@ export function useTailorBullets(jobId: string | undefined) {
   });
 }
 
+export interface WebSearchResult {
+  found: number;
+  ingested: number;
+  duplicates: number;
+  scored: number;
+}
+
+export function useFindMoreJobs() {
+  const qc = useQueryClient();
+  return useMutation<WebSearchResult>({
+    mutationFn: () => api.post("/api/v1/jobs/search-web"),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      qc.invalidateQueries({ queryKey: ["analytics"] });
+    },
+  });
+}
+
 export function useFindJobContact(jobId: string | undefined) {
   const qc = useQueryClient();
   return useMutation({

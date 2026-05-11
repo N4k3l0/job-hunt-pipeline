@@ -26,8 +26,9 @@ import {
   Loader2,
   Inbox,
   Database,
+  Sparkles,
 } from "lucide-react";
-import { useJobs } from "@/hooks/use-api";
+import { useJobs, useFindMoreJobs } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/toast";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useQueryClient } from "@tanstack/react-query";
@@ -130,6 +131,7 @@ export default function JobsInboxPage() {
 
   const toast = useToast();
   const qc = useQueryClient();
+  const findMore = useFindMoreJobs();
 
   /**
    * Apply an optimistic status change to the cached job list, then commit (or
@@ -197,7 +199,7 @@ export default function JobsInboxPage() {
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div className="flex items-end justify-between">
+      <div className="flex items-end justify-between gap-3 flex-wrap">
         <div>
           <h1 className="font-display text-3xl font-semibold tracking-tight">Inbox</h1>
           <p className="text-sm text-muted-foreground mt-1 font-mono tabular-nums">
@@ -205,15 +207,55 @@ export default function JobsInboxPage() {
             {activeFilters > 0 && ` · ${filtered.length} matching`}
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          render={<Link href="/dashboard/import" />}
-          nativeButton={false}
-        >
-          <Plus className="h-3.5 w-3.5" />
-          Import
-        </Button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              findMore.mutate(undefined, {
+                onSuccess: (data) => {
+                  if (data.ingested === 0 && data.found > 0) {
+                    toast.info("No new jobs found", {
+                      description: `Claude returned ${data.found} matches but they all already exist in the inbox.`,
+                    });
+                  } else if (data.ingested > 0) {
+                    toast.success(`Added ${data.ingested} new job${data.ingested === 1 ? "" : "s"}`, {
+                      description: `${data.found} matches found · ${data.duplicates} dedup'd`,
+                    });
+                  } else {
+                    toast.info("No matches found", {
+                      description: "Try widening your target roles or preferred regions.",
+                    });
+                  }
+                },
+                onError: (err: any) => toast.error("Web search failed", { description: err?.message }),
+              });
+            }}
+            disabled={findMore.isPending}
+            title="Asks Claude to search the open web for remote jobs that match your profile, then ingests new matches into your inbox. Takes 30–60 seconds."
+          >
+            {findMore.isPending ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Searching the web…
+              </>
+            ) : (
+              <>
+                <Sparkles className="h-3.5 w-3.5" />
+                Find more jobs
+              </>
+            )}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            render={<Link href="/dashboard/import" />}
+            nativeButton={false}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Import
+          </Button>
+        </div>
       </div>
 
       {/* Filters — stacks on mobile, inline on tablet+ */}

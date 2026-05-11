@@ -377,6 +377,82 @@ async def deep_score_job(
         )
 
 
+@router.post("/search-web")
+async def search_web_for_jobs(user_id: CurrentUserId, db: DbSession):
+    """Run Claude with the web_search server tool to find remote jobs
+    tailored to THIS user's profile and ingest them into the inbox.
+
+    Per-user, on-demand. Costs ~$0.30 per call (5 web_search calls +
+    LLM tokens) so it's never on a cron — only when the user clicks
+    'Find more jobs'. Complements the existing daily cron pipeline
+    (free, broad) with paid + tailored fresh listings.
+    """
+    from app.models.candidate import CandidateProfile, CandidateSkill
+    from app.services.discovery.claude_search import search_jobs_for_user
+    from app.workers.discovery_tasks import _ingest_raw_jobs
+    from app.workers.scoring_tasks import _batch_score_async
+
+    profile_result = await db.execute(
+        select(CandidateProfile).where(CandidateProfile.user_id == user_id)
+    )
+    profile = profile_result.scalar_one_or_none()
+    if not profile or not (profile.target_roles or []):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Set up your target roles first — Profile → Preferences. "
+                "Without target roles we can't run a meaningful web search."
+            ),
+        )
+
+    skills_result = await db.execute(
+        select(CandidateSkill.skill_name).where(
+            CandidateSkill.profile_id == profile.id,
+            CandidateSkill.category.in_(("technical", "tool")),
+        )
+    )
+    skills = [row[0] for row in skills_result.all() if row[0]]
+
+    try:
+        results = await search_jobs_for_user(
+            target_roles=list(profile.target_roles or []),
+            preferred_countries=list(profile.preferred_countries or []),
+            skills=skills,
+            remote_preference=profile.remote_preference,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Claude web_search failed for user %s", user_id)
+        raise HTTPException(
+            status_code=502,
+            detail=f"Web search failed: {type(e).__name__}: {e}",
+        )
+
+    if not results:
+        return {"found": 0, "ingested": 0, "duplicates": 0, "scored": 0}
+
+    # _ingest_raw_jobs uses its own worker session (separate from this
+    # request's db) so commits land before we score.
+    stored, skipped = await _ingest_raw_jobs(results)
+
+    # Score the freshly-ingested jobs for this user so they show in the
+    # inbox immediately. rescore_all=False caps at 300 newest unscored,
+    # which comfortably covers anything we just added.
+    scored_count = 0
+    if stored > 0:
+        try:
+            await _batch_score_async(str(user_id), rescore_all=False)
+            scored_count = stored  # approximate — actual could be slightly different
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Scoring after web_search failed: %s", e)
+
+    return {
+        "found": len(results),
+        "ingested": stored,
+        "duplicates": skipped,
+        "scored": scored_count,
+    }
+
+
 @router.post("/discover")
 async def trigger_discovery(user_id: CurrentUserId):
     """Run all free/no-key discovery sources synchronously inside this request.

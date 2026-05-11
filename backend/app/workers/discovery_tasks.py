@@ -30,7 +30,7 @@ def _run_async(coro):
         loop.close()
 
 
-async def _ingest_raw_jobs(jobs: list[dict]):
+async def _ingest_raw_jobs(jobs: list[dict]) -> tuple[int, int]:
     """Process a batch of raw job dicts through the pipeline.
 
     Pipeline: bulk pre-filter → per-job dedup → normalize → store.
@@ -38,7 +38,7 @@ async def _ingest_raw_jobs(jobs: list[dict]):
     all sources finish so this function stays cheap and bounded.
     """
     if not jobs:
-        return
+        return 0, 0
 
     # Bulk pre-filter: load every existing canonical_hash + job_url in
     # one query, then short-circuit duplicates in memory before the
@@ -198,6 +198,7 @@ async def _ingest_raw_jobs(jobs: list[dict]):
 
         await db.commit()
         logger.info("Ingestion complete: %d stored, %d duplicates skipped", stored, skipped)
+        return stored, skipped
 
 
 async def quick_score_all_users(per_user_timeout: int = 12) -> dict[str, str]:
