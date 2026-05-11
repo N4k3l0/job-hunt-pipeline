@@ -36,7 +36,7 @@ export default function ImportPage() {
     importUrl.mutate(url.trim(), {
       onSuccess: () => {
         setUrl("");
-        toast.success("Import queued", { description: "It'll appear in your inbox once parsed." });
+        toast.success("Job imported", { description: "It's in your inbox — go check." });
       },
       onError: (err: any) => toast.error("Import failed", { description: err?.message }),
     });
@@ -49,7 +49,7 @@ export default function ImportPage() {
       {
         onSuccess: () => {
           setText("");
-          toast.success("Parsing queued", { description: "Job will land in your inbox shortly." });
+          toast.success("Job imported", { description: "It's in your inbox — go check." });
         },
         onError: (err: any) => toast.error("Parse failed", { description: err?.message }),
       },
@@ -113,7 +113,7 @@ export default function ImportPage() {
               {importUrl.isSuccess && (
                 <div className="flex items-center gap-2 text-sm text-emerald-400">
                   <CheckCircle2 className="h-4 w-4" />
-                  Job queued for processing. It will appear in your inbox shortly.
+                  Job imported and added to your inbox.
                 </div>
               )}
               {importUrl.isError && (
@@ -170,7 +170,7 @@ export default function ImportPage() {
               {importText.isSuccess && (
                 <div className="flex items-center gap-2 text-sm text-emerald-400">
                   <CheckCircle2 className="h-4 w-4" />
-                  Job queued for parsing. It will appear in your inbox once processed.
+                  Job imported and added to your inbox.
                 </div>
               )}
               {importText.isError && (

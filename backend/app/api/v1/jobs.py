@@ -488,18 +488,51 @@ async def trigger_discovery(user_id: CurrentUserId):
 
 @router.post("/import/url")
 async def import_job_url(request: JobImportURL, user_id: CurrentUserId, db: DbSession):
-    """Import a job by URL (Firecrawl + Claude parsing)."""
-    from app.workers.parsing_tasks import parse_job_from_url
-    parse_job_from_url.delay(request.url)
-    return {"status": "queued", "url": request.url}
+    """Import a job by URL (Firecrawl + Claude parsing). Runs inline —
+    we used to enqueue via Celery .delay(), but production has no
+    worker so that was a silent no-op and the job never appeared.
+    Total time ~15–25s (Firecrawl scrape + Claude parse + scoring),
+    well inside Vercel's 60s budget."""
+    from app.workers.parsing_tasks import _parse_job_from_url_async
+    from app.workers.scoring_tasks import _batch_score_async
+    try:
+        await _parse_job_from_url_async(request.url)
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Job URL import failed for %s", request.url)
+        raise HTTPException(
+            status_code=502,
+            detail=f"Couldn't import job: {type(e).__name__}: {e}",
+        )
+    # Score the newly-ingested job for this user so it shows up in
+    # the inbox immediately (the min_score=50 default would otherwise
+    # hide it because unscored jobs have NULL overall_fit).
+    try:
+        await _batch_score_async(str(user_id), rescore_all=False)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Scoring after URL import failed: %s", e)
+    return {"status": "imported", "url": request.url}
 
 
 @router.post("/import/text")
 async def import_job_text(request: JobImportText, user_id: CurrentUserId, db: DbSession):
-    """Import a job by pasting text (Claude parsing)."""
-    from app.workers.parsing_tasks import parse_job_from_text
-    parse_job_from_text.delay(request.text, request.source)
-    return {"status": "queued", "source": request.source}
+    """Import a job by pasting text (Claude parsing). Runs inline —
+    see import/url above for context. Total time ~5–10s (just Claude
+    parse + scoring; no Firecrawl scrape since the user gave us the text)."""
+    from app.workers.parsing_tasks import _parse_job_from_text_async
+    from app.workers.scoring_tasks import _batch_score_async
+    try:
+        await _parse_job_from_text_async(request.text, request.source)
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Job text import failed")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Couldn't import job: {type(e).__name__}: {e}",
+        )
+    try:
+        await _batch_score_async(str(user_id), rescore_all=False)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Scoring after text import failed: %s", e)
+    return {"status": "imported", "source": request.source}
 
 
 @router.post("/{job_id}/shortlist")
