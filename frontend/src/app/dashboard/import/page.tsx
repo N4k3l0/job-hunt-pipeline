@@ -68,15 +68,49 @@ export default function ImportPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function handleUrlImport() {
-    if (!url.trim()) return;
-    importUrl.mutate(url.trim(), {
+  async function handleUrlImport(urlOverride?: string) {
+    const target = (urlOverride ?? url).trim();
+    if (!target) return;
+    importUrl.mutate(target, {
       onSuccess: () => {
         setUrl("");
         toast.success("Job imported", { description: "It's in your inbox — go check." });
       },
       onError: (err: any) => toast.error("Import failed", { description: err?.message }),
     });
+  }
+
+  /**
+   * One-click import from whatever URL is in the clipboard. Eliminates
+   * the "paste + click Import" two-step the user just did, and dodges
+   * the entire bookmarklet install dance (which most browsers make
+   * user-hostile via javascript:-URL hardening).
+   *
+   * Clipboard API needs a user gesture — the button click counts —
+   * so we read inside the click handler, not on mount.
+   */
+  async function handlePasteAndImport() {
+    try {
+      const clip = (await navigator.clipboard.readText()).trim();
+      if (!clip) {
+        toast.error("Clipboard is empty", {
+          description: "Copy a job URL first, then click again.",
+        });
+        return;
+      }
+      if (!/^https?:\/\//i.test(clip)) {
+        toast.error("Clipboard doesn't look like a URL", {
+          description: "Make sure you copied the full link (it should start with http).",
+        });
+        return;
+      }
+      setUrl(clip);
+      handleUrlImport(clip);
+    } catch (e: any) {
+      toast.error("Couldn't read clipboard", {
+        description: "Browser blocked it. Paste manually into the field instead.",
+      });
+    }
   }
 
   async function handleTextImport() {
@@ -119,11 +153,54 @@ export default function ImportPage() {
             <CardHeader>
               <CardTitle>Import from URL</CardTitle>
               <CardDescription>
-                Paste a job posting URL from any site. We'll extract the details
-                automatically using Firecrawl + AI.
+                Copy any job URL → click the amber button below. That&apos;s it.
+                We parse + score + drop it in your inbox in ~15–25 seconds.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {/* One-click flow: read whatever URL is in clipboard and
+                  fire the import. Skips the paste-then-click two-step
+                  AND skips the bookmarklet install entirely. */}
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/[0.06] p-4 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-amber-200">
+                    Paste & import
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1 max-w-md leading-relaxed">
+                    Easiest path. Copy a job URL on LinkedIn / Indeed /
+                    anywhere, then click. No typing, no bookmarklet.
+                  </p>
+                </div>
+                <Button
+                  onClick={handlePasteAndImport}
+                  disabled={importUrl.isPending}
+                  className="bg-amber-500 hover:bg-amber-400 text-black font-semibold"
+                >
+                  {importUrl.isPending ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Importing…
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-4 w-4" />
+                      Paste & import
+                    </>
+                  )}
+                </Button>
+              </div>
+
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-white/[0.06]"></div>
+                </div>
+                <div className="relative flex justify-center text-xs">
+                  <span className="bg-background px-2 text-muted-foreground/60">
+                    or paste manually
+                  </span>
+                </div>
+              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="job-url">Job URL</Label>
                 <div className="flex gap-2">
@@ -250,21 +327,29 @@ function BookmarkletCard() {
   };
 
   return (
-    <Card className="border-amber-500/15">
+    <Card className="border-white/[0.06]">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Bookmark className="h-5 w-5 text-amber-400" />
-          One-click import from anywhere
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Bookmark className="h-4 w-4 text-muted-foreground" />
+          <span>Optional: browser bookmark shortcut</span>
+          <Badge variant="outline" className="ml-1 text-[10px] uppercase tracking-wider">
+            Advanced
+          </Badge>
         </CardTitle>
         <CardDescription>
-          Install once, then click the bookmark while on any LinkedIn /
-          Indeed / company careers page — that job lands in your inbox,
-          no copy-paste. Most modern browsers block drag-to-bookmark for
-          JavaScript shortcuts (security hardening), so the reliable
-          install path is the manual one below.
+          For power users: skip the &quot;come back to this page&quot; step
+          entirely. Install once, then click a bookmark on any job page
+          to import it without switching tabs. Setup is a few clicks
+          (browsers make bookmarklet install user-hostile lately) —
+          fine to skip and just use Paste & import above.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-5">
+      <CardContent>
+        <details className="space-y-5">
+          <summary className="cursor-pointer text-sm text-foreground hover:text-amber-300">
+            Show install steps
+          </summary>
+          <div className="mt-4 space-y-5">
         {/* Step 1: copy the bookmarklet URL */}
         <div className="space-y-2">
           <p className="text-sm font-medium flex items-center gap-2">
@@ -391,6 +476,8 @@ function BookmarkletCard() {
               apply-link resolve + scoring), and redirects you to your inbox.
             </li>
           </ul>
+        </details>
+          </div>
         </details>
       </CardContent>
     </Card>
