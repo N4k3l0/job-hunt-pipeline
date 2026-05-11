@@ -27,8 +27,9 @@ import {
   Inbox,
   Database,
   Sparkles,
+  Linkedin,
 } from "lucide-react";
-import { useJobs, useFindMoreJobs } from "@/hooks/use-api";
+import { useJobs, useFindMoreJobs, useProfile } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/toast";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useQueryClient } from "@tanstack/react-query";
@@ -132,6 +133,32 @@ export default function JobsInboxPage() {
   const toast = useToast();
   const qc = useQueryClient();
   const findMore = useFindMoreJobs();
+  const { data: profile } = useProfile();
+
+  /**
+   * Build a LinkedIn job-search URL pre-filled with the user's target
+   * roles + remote preference. Lets them jump to LinkedIn's own listings
+   * (which our pipeline can't fully ingest because of LinkedIn's anti-bot)
+   * without having to re-type their search criteria every time.
+   *
+   * Country isn't included — LinkedIn uses opaque geoIds (not ISO codes)
+   * for location filtering, and we don't ship a mapping table. The
+   * keyword + remote-type filter is enough for a useful jumping-off point.
+   */
+  const linkedInSearchUrl = (() => {
+    const roles = (profile?.target_roles || []).slice(0, 3);
+    if (roles.length === 0) return null;
+    const params = new URLSearchParams();
+    // LinkedIn treats multiple roles in keywords as OR-ish — good enough.
+    params.set("keywords", roles.join(" OR "));
+    // f_WT: 2 = remote, 3 = hybrid, 1 = on-site
+    if (profile?.remote_preference === "full_remote") params.set("f_WT", "2");
+    else if (profile?.remote_preference === "hybrid") params.set("f_WT", "3");
+    else if (profile?.remote_preference === "onsite") params.set("f_WT", "1");
+    // Past week — fresher results lead to higher response rates
+    params.set("f_TPR", "r604800");
+    return `https://www.linkedin.com/jobs/search/?${params.toString()}`;
+  })();
 
   /**
    * Apply an optimistic status change to the cached job list, then commit (or
@@ -246,6 +273,24 @@ export default function JobsInboxPage() {
               </>
             )}
           </Button>
+          {linkedInSearchUrl && (
+            <Button
+              variant="outline"
+              size="sm"
+              render={
+                <a
+                  href={linkedInSearchUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                />
+              }
+              nativeButton={false}
+              title="Opens LinkedIn's job search with your target roles + remote preference pre-applied, filtered to the past week."
+            >
+              <Linkedin className="h-3.5 w-3.5" />
+              Browse on LinkedIn
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"

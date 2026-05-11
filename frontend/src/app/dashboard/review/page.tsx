@@ -66,11 +66,49 @@ function confidenceTone(c: string | null | undefined) {
   return "text-muted-foreground border-white/[0.08]";
 }
 
-function ContactPanel({ jobId }: { jobId: string }) {
+function ContactPanel({
+  jobId,
+  outreachMessage,
+}: {
+  jobId: string;
+  outreachMessage?: string | null;
+}) {
   const { data, isLoading } = useJobContact(jobId);
   const find = useFindJobContact(jobId);
   const contact = find.data?.contact ?? data?.contact ?? null;
   const noContactYet = !isLoading && !contact;
+  const toast = useToast();
+  const [linkedInSent, setLinkedInSent] = useState(false);
+
+  // One-click bridge from "we generated an outreach draft" to "the
+  // user is in LinkedIn ready to paste it." LinkedIn doesn't reliably
+  // accept a pre-filled body in their compose-with-message URL (they
+  // strip it for spam protection), so the safe path is: open the
+  // contact's profile + drop the message in the clipboard. User
+  // clicks Message on the profile, paste, send.
+  const handleSendViaLinkedIn = async () => {
+    if (!contact?.linkedin_url) return;
+    const message = (outreachMessage || "").trim();
+    if (message) {
+      try {
+        await navigator.clipboard.writeText(message);
+      } catch {
+        toast.error("Couldn't copy message", {
+          description: "Open the LinkedIn tab and copy from the Outreach box manually.",
+        });
+        return;
+      }
+    }
+    window.open(contact.linkedin_url, "_blank", "noopener,noreferrer");
+    setLinkedInSent(true);
+    setTimeout(() => setLinkedInSent(false), 2500);
+    toast.success(
+      message ? "Message copied — paste it on their profile" : "Opened on LinkedIn",
+      message
+        ? { description: "Click the Message button at the top of their LinkedIn profile, then paste." }
+        : undefined,
+    );
+  };
 
   return (
     <div className="rounded-xl border border-white/[0.06] bg-white/[0.015] p-4 mb-4">
@@ -140,16 +178,41 @@ function ContactPanel({ jobId }: { jobId: string }) {
       {contact && (
         <div className="mt-3 space-y-2 text-sm">
           {contact.linkedin_url && (
-            <a
-              href={contact.linkedin_url}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-2 text-blue-400 hover:text-blue-300"
-            >
-              <Linkedin className="h-3.5 w-3.5" />
-              {contact.linkedin_url.replace(/^https?:\/\//, "")}
-              <ExternalLink className="h-3 w-3 opacity-60" />
-            </a>
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <a
+                href={contact.linkedin_url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-2 text-blue-400 hover:text-blue-300 min-w-0"
+              >
+                <Linkedin className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">{contact.linkedin_url.replace(/^https?:\/\//, "")}</span>
+                <ExternalLink className="h-3 w-3 opacity-60 shrink-0" />
+              </a>
+              <Button
+                size="sm"
+                onClick={handleSendViaLinkedIn}
+                disabled={!contact.linkedin_url}
+                title={
+                  outreachMessage
+                    ? "Copies the outreach message to clipboard and opens their LinkedIn profile in a new tab."
+                    : "Opens their LinkedIn profile in a new tab. Write or generate an outreach message first to also copy it to clipboard."
+                }
+                className="bg-[#0a66c2] hover:bg-[#0858a8] text-white"
+              >
+                {linkedInSent ? (
+                  <>
+                    <Check className="h-3.5 w-3.5" />
+                    Opened
+                  </>
+                ) : (
+                  <>
+                    <Linkedin className="h-3.5 w-3.5" />
+                    Send via LinkedIn
+                  </>
+                )}
+              </Button>
+            </div>
           )}
           {contact.email_guess && (
             <div className="flex items-center gap-2 text-muted-foreground">
@@ -270,7 +333,10 @@ function EditableMaterials({
               {f.usage}
             </p>
             {f.tab === "outreach" && review.job_id && (
-              <ContactPanel jobId={review.job_id} />
+              <ContactPanel
+                jobId={review.job_id}
+                outreachMessage={value("recruiter_message", review.recruiter_message)}
+              />
             )}
             <Card>
               <CardContent className="pt-4 space-y-2">
