@@ -37,16 +37,10 @@ def create_app() -> FastAPI:
     async def health_check():
         return {"status": "healthy", "version": "0.1.0"}
 
-    @app.post("/trigger-discovery")
-    async def trigger_discovery():
-        from app.workers.discovery_tasks import (
-            run_adzuna_discovery, run_remoteok_discovery,
-            run_arbeitnow_discovery,
-        )
-        run_adzuna_discovery.delay()
-        run_remoteok_discovery.delay()
-        run_arbeitnow_discovery.delay()
-        return {"status": "queued", "sources": ["adzuna", "remoteok", "arbeitnow"]}
+    # /trigger-discovery removed — it was an unauthenticated public
+    # endpoint that called .delay() on Celery tasks (silent no-op in
+    # production). Admins can use /api/v1/auth/admin/run-discovery
+    # (authenticated, runs inline) or wait for the daily cron.
 
     @app.get("/health/db")
     async def db_health():

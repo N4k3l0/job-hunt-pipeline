@@ -180,10 +180,10 @@ async def _parse_resume_async(resume_id: str, user_id: str):
         await db.commit()
         logger.info("Successfully parsed resume %s for user %s", resume_id, user_id)
 
-        # Auto-rescore ALL jobs for this user with updated profile
-        from app.workers.scoring_tasks import batch_score_for_user
-        batch_score_for_user.delay(user_id, rescore_all=True)
-        logger.info("Triggered full re-scoring for user %s after resume parse", user_id)
+        # Note: rescore is handled by the caller (candidates.upload_resume)
+        # which awaits _batch_score_async directly. Used to .delay() here
+        # but that's a silent no-op in production — removed to avoid
+        # giving the impression that this function triggers scoring.
 
 
 @celery_app.task(name="app.workers.parsing_tasks.parse_job_from_url")

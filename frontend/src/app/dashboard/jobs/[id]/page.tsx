@@ -520,8 +520,11 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
       toast.success("Marked as applied", {
         description: "Now tracked in Applications & Analytics.",
       });
+      // useJob caches under ["jobs", id] (plural) — mark-applied was
+      // invalidating the singular key, so the detail UI never reflected
+      // the new tracking status until a hard refresh.
       qc.invalidateQueries({ queryKey: ["jobs"] });
-      qc.invalidateQueries({ queryKey: ["job", id] });
+      qc.invalidateQueries({ queryKey: ["jobs", id] });
       qc.invalidateQueries({ queryKey: ["applications"] });
       qc.invalidateQueries({ queryKey: ["analytics"] });
     } catch (e: any) {
@@ -538,7 +541,7 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
       await api.post(`/api/v1/jobs/${id}/unmark-applied`);
       toast.success("Rolled back", { description: "Application tracking removed." });
       qc.invalidateQueries({ queryKey: ["jobs"] });
-      qc.invalidateQueries({ queryKey: ["job", id] });
+      qc.invalidateQueries({ queryKey: ["jobs", id] });
       qc.invalidateQueries({ queryKey: ["applications"] });
       qc.invalidateQueries({ queryKey: ["analytics"] });
     } catch (e: any) {

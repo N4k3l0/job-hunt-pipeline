@@ -55,7 +55,20 @@ async def apify_webhook(request: Request):
     elif "google" in actor_id_lower:
         actor_type = "google"
 
-    from app.workers.discovery_tasks import process_apify_results
-    process_apify_results.delay(actor_run_id, actor_type)
+    # Run inline. Production has no Celery worker, so .delay() was a
+    # silent no-op — Apify webhook deliveries were getting ack'd but
+    # the actor results never ingested.
+    from app.workers.discovery_tasks import _process_apify_async
+    try:
+        await _process_apify_async(actor_run_id, actor_type)
+    except Exception as e:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).exception(
+            "Apify webhook processing failed for run %s", actor_run_id
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=f"Apify processing failed: {type(e).__name__}: {e}",
+        )
 
-    return {"status": "queued", "actor_run_id": actor_run_id, "actor_type": actor_type}
+    return {"status": "processed", "actor_run_id": actor_run_id, "actor_type": actor_type}
