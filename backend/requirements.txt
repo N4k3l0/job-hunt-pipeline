@@ -26,10 +26,11 @@ httpx>=0.28.0
 anthropic>=0.40.0
 
 # Embeddings — semantic scoring replaces the rule-based title+skill+industry
-# buckets in the inbox scorer. Voyage AI is Anthropic's recommended pairing.
-# pgvector gives SQLAlchemy the column type to read/write the vectors stored
-# in Postgres (Supabase has the extension built in).
-voyageai>=0.3.0
+# buckets in the inbox scorer. We hit Voyage's REST API directly with
+# httpx (already in deps) instead of the voyageai SDK, which pulls in
+# tokenizers (Rust build) and doesn't deploy cleanly on Vercel Python.
+# pgvector gives SQLAlchemy the column type to read/write the vectors
+# stored in Postgres (Supabase has the extension built in).
 pgvector>=0.3.0
 
 # PDF generation — REMOVED for Vercel deploy. WeasyPrint requires cairo/pango

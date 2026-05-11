@@ -16,6 +16,8 @@ from __future__ import annotations
 import logging
 from typing import Iterable, Sequence
 
+import httpx
+
 from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -32,14 +34,7 @@ EMBEDDING_DIM = 512
 # Voyage's API accepts batches of up to 128 strings.
 MAX_BATCH = 128
 
-
-def _client():
-    """Lazy-import + lazy-construct so a missing key doesn't crash boot —
-    callers handle the empty case gracefully."""
-    if not settings.voyage_api_key:
-        return None
-    import voyageai
-    return voyageai.AsyncClient(api_key=settings.voyage_api_key)
+_VOYAGE_URL = "https://api.voyageai.com/v1/embeddings"
 
 
 async def embed_texts(
@@ -49,39 +44,66 @@ async def embed_texts(
 ) -> list[list[float]] | None:
     """Embed a list of strings, batched up to Voyage's 128/call limit.
 
+    Hits Voyage's REST API directly with httpx — we deliberately don't
+    use the voyageai SDK because it pulls in tokenizers (Rust build) and
+    doesn't deploy cleanly on Vercel's Python runtime.
+
     Returns None if Voyage isn't configured — callers should treat that
-    as 'fall back to rule-based scoring' and not crash. Empty strings get
-    embedded as the zero vector (we substitute a single space so the API
-    doesn't reject them; downstream we'll detect and treat as no-match).
+    as 'fall back to rule-based scoring' and not crash. Empty strings
+    get substituted with a single space so the API doesn't reject them
+    and the batch indices stay aligned with the caller.
 
     `input_type` should be 'document' when embedding job postings and
     'query' when embedding the candidate profile. Voyage uses different
     representations for retrieval vs. document.
     """
-    client = _client()
-    if client is None:
+    if not settings.voyage_api_key:
         logger.warning("VOYAGE_API_KEY unset — skipping embedding (returning None)")
         return None
     if not texts:
         return []
 
-    # Voyage rejects empty strings. Substitute a single space for any
+    # Voyage rejects empty strings — substitute a single space for any
     # empty input so the batch indices stay aligned with the caller.
     safe = [t if (t and t.strip()) else " " for t in texts]
 
     all_vectors: list[list[float]] = []
-    for start in range(0, len(safe), MAX_BATCH):
-        chunk = safe[start:start + MAX_BATCH]
-        try:
-            result = await client.embed(
-                chunk,
-                model=EMBEDDING_MODEL,
-                input_type=input_type,
-            )
-        except Exception as e:  # noqa: BLE001
-            logger.exception("Voyage embed failed for batch starting at %d", start)
-            raise RuntimeError(f"Voyage embed failed: {type(e).__name__}: {e}") from e
-        all_vectors.extend(result.embeddings)
+    headers = {
+        "Authorization": f"Bearer {settings.voyage_api_key}",
+        "Content-Type": "application/json",
+    }
+
+    async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+        for start in range(0, len(safe), MAX_BATCH):
+            chunk = safe[start:start + MAX_BATCH]
+            payload = {
+                "input": chunk,
+                "model": EMBEDDING_MODEL,
+                "input_type": input_type,
+            }
+            try:
+                r = await client.post(_VOYAGE_URL, headers=headers, json=payload)
+                r.raise_for_status()
+                data = r.json()
+            except httpx.HTTPStatusError as e:
+                body = e.response.text[:300] if e.response is not None else ""
+                logger.exception(
+                    "Voyage embed HTTP %s for batch %d: %s",
+                    e.response.status_code if e.response is not None else "?",
+                    start, body,
+                )
+                raise RuntimeError(
+                    f"Voyage embed failed: HTTP {e.response.status_code if e.response is not None else '?'}: {body}"
+                ) from e
+            except Exception as e:  # noqa: BLE001
+                logger.exception("Voyage embed failed for batch %d", start)
+                raise RuntimeError(f"Voyage embed failed: {type(e).__name__}: {e}") from e
+
+            # Voyage response shape: { "data": [{"embedding": [...]}, ...], ... }
+            for item in data.get("data", []):
+                vec = item.get("embedding")
+                if isinstance(vec, list):
+                    all_vectors.append(vec)
 
     return all_vectors
 
