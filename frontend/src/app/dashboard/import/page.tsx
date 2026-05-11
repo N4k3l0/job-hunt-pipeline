@@ -231,8 +231,7 @@ export default function ImportPage() {
 function BookmarkletCard() {
   // Build the bookmarklet at runtime so it points at whatever origin
   // the user is on (localhost in dev, the Vercel URL in prod). The
-  // `auto=1` flag tells the import page to fire immediately instead
-  // of just pre-filling the input.
+  // `auto=1` flag tells the import page to fire immediately.
   const [origin, setOrigin] = useState("");
   const [copied, setCopied] = useState(false);
   useEffect(() => {
@@ -246,7 +245,7 @@ function BookmarkletCard() {
   const handleCopy = () => {
     navigator.clipboard.writeText(bookmarkletHref).then(() => {
       setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
+      setTimeout(() => setCopied(false), 2500);
     });
   };
 
@@ -258,68 +257,122 @@ function BookmarkletCard() {
           One-click import from anywhere
         </CardTitle>
         <CardDescription>
-          Drag the button below into your browser&apos;s bookmarks bar (or{" "}
-          right-click → Add to bookmarks). Then on any LinkedIn / Indeed /
-          company careers page, click the bookmark and that job lands in
-          your inbox — no copy-paste, no tab switching.
+          Install once, then click the bookmark while on any LinkedIn /
+          Indeed / company careers page — that job lands in your inbox,
+          no copy-paste. Most modern browsers block drag-to-bookmark for
+          JavaScript shortcuts (security hardening), so the reliable
+          install path is the manual one below.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex flex-wrap items-center gap-3">
-          {/* The actual draggable element. Browsers let users drag <a>
-              tags with href onto the bookmarks bar; the title becomes
-              the bookmark name. Click does nothing useful (it'd open the
-              import page) — drag is the intended interaction. */}
-          <a
-            href={bookmarkletHref}
-            onClick={(e) => e.preventDefault()}
-            draggable
-            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-300 text-sm font-medium hover:bg-amber-500/15 cursor-grab active:cursor-grabbing transition-colors"
-            title="Drag me to your bookmarks bar"
-          >
-            <Bookmark className="h-4 w-4" />
-            Save to JobHunt
-          </a>
-          <Button variant="ghost" size="sm" onClick={handleCopy} disabled={!origin}>
-            {copied ? (
-              <>
-                <Check className="h-3.5 w-3.5 text-emerald-400" />
-                Copied
-              </>
-            ) : (
-              <>
-                <Copy className="h-3.5 w-3.5" />
-                Or copy URL
-              </>
-            )}
-          </Button>
-          <span className="text-xs text-muted-foreground">
-            (paste into a new bookmark&apos;s URL field if drag doesn&apos;t work)
-          </span>
+      <CardContent className="space-y-5">
+        {/* Step 1: copy the bookmarklet URL */}
+        <div className="space-y-2">
+          <p className="text-sm font-medium flex items-center gap-2">
+            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-500/15 text-amber-400 text-xs font-bold">1</span>
+            Copy this URL
+          </p>
+          <div className="flex flex-wrap items-center gap-2 pl-7">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleCopy}
+              disabled={!origin}
+              className="bg-amber-500/10 border-amber-500/40 text-amber-300 hover:bg-amber-500/15"
+            >
+              {copied ? (
+                <>
+                  <Check className="h-3.5 w-3.5 text-emerald-400" />
+                  Copied — now paste it in step 3
+                </>
+              ) : (
+                <>
+                  <Copy className="h-3.5 w-3.5" />
+                  Copy bookmarklet URL
+                </>
+              )}
+            </Button>
+          </div>
         </div>
 
-        <details className="text-xs text-muted-foreground">
+        {/* Step 2: bookmark THIS page */}
+        <div className="space-y-2">
+          <p className="text-sm font-medium flex items-center gap-2">
+            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-500/15 text-amber-400 text-xs font-bold">2</span>
+            Bookmark this page
+          </p>
+          <p className="text-sm text-muted-foreground pl-7 leading-relaxed">
+            Press <kbd className="px-1.5 py-0.5 rounded border border-white/10 bg-white/[0.04] text-xs">⌘ D</kbd> (Mac)
+            or <kbd className="px-1.5 py-0.5 rounded border border-white/10 bg-white/[0.04] text-xs">Ctrl D</kbd> (Windows / Linux)
+            to bookmark this page. A &quot;Bookmark added&quot; dialog appears — keep it open.
+          </p>
+        </div>
+
+        {/* Step 3: edit the bookmark */}
+        <div className="space-y-2">
+          <p className="text-sm font-medium flex items-center gap-2">
+            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-500/15 text-amber-400 text-xs font-bold">3</span>
+            Edit the bookmark
+          </p>
+          <div className="pl-7 space-y-2 text-sm text-muted-foreground leading-relaxed">
+            <p>In the dialog (or right after, via the bookmarks manager):</p>
+            <ul className="space-y-1 pl-5 list-disc">
+              <li>
+                <span className="text-foreground">Name</span>: change to{" "}
+                <code className="px-1.5 py-0.5 rounded bg-white/[0.04] text-xs text-foreground">Save to JobHunt</code>
+              </li>
+              <li>
+                <span className="text-foreground">URL</span>: replace the existing URL
+                with the one you copied in step 1{" "}
+                (<kbd className="px-1.5 py-0.5 rounded border border-white/10 bg-white/[0.04] text-xs">⌘ V</kbd>
+                {" "}/{" "}
+                <kbd className="px-1.5 py-0.5 rounded border border-white/10 bg-white/[0.04] text-xs">Ctrl V</kbd>)
+              </li>
+              <li>Save / Done</li>
+            </ul>
+          </div>
+        </div>
+
+        {/* Step 4: use it */}
+        <div className="space-y-2">
+          <p className="text-sm font-medium flex items-center gap-2">
+            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-400 text-xs font-bold">4</span>
+            Use it
+          </p>
+          <p className="text-sm text-muted-foreground pl-7 leading-relaxed">
+            Browse any LinkedIn / Indeed / company careers page → click{" "}
+            <span className="text-foreground font-medium">Save to JobHunt</span> in your
+            bookmarks bar → the job opens in a new tab and lands in your inbox
+            within ~15–25 seconds.
+          </p>
+        </div>
+
+        <details className="text-xs text-muted-foreground border-t border-white/[0.04] pt-3">
           <summary className="cursor-pointer hover:text-foreground">
-            How it works
+            Troubleshooting
           </summary>
           <ul className="mt-2 space-y-1.5 pl-4 list-disc">
             <li>
-              Bookmarklet reads the URL of whatever tab you&apos;re on, opens
-              a new tab on this dashboard with that URL pre-loaded.
+              <span className="text-foreground">Bookmark menu missing the URL field?</span>{" "}
+              Open the full bookmarks manager (<kbd className="px-1 py-0.5 rounded border border-white/10 bg-white/[0.04] text-[10px]">⌘⇧B</kbd> / <kbd className="px-1 py-0.5 rounded border border-white/10 bg-white/[0.04] text-[10px]">Ctrl⇧O</kbd>),
+              find the new bookmark, right-click → Edit, and replace the URL there.
             </li>
             <li>
-              The new tab auto-imports (parses with Claude, runs the
-              apply-link resolver, scores against your profile) and
-              redirects to your inbox when done. Takes ~15–25 s.
+              <span className="text-foreground">Clicking the bookmark doesn&apos;t open this app?</span>{" "}
+              Your browser stripped <code>javascript:</code> from the saved URL on paste.
+              Re-copy, re-paste, and check the URL field still starts with{" "}
+              <code className="text-foreground">javascript:</code> before saving.
             </li>
             <li>
-              You need to be logged into this dashboard for it to work —
-              your session cookies are what authenticate the import.
+              <span className="text-foreground">Imported job didn&apos;t land in the inbox?</span>{" "}
+              You need to be logged into this dashboard in the same browser — the
+              session cookies are how we authenticate the import. Log in, then
+              click the bookmarklet again.
             </li>
             <li>
-              Works on LinkedIn / Indeed / Greenhouse / Lever / Ashby and
-              any company careers page. If a page anti-bots the
-              underlying scrape, we&apos;ll show you which step failed.
+              <span className="text-foreground">What happens after I click it?</span>{" "}
+              The bookmarklet reads the URL of the current tab, opens a new tab
+              here pre-loaded with that URL, auto-fires the import (Claude parse +
+              apply-link resolve + scoring), and redirects you to your inbox.
             </li>
           </ul>
         </details>
