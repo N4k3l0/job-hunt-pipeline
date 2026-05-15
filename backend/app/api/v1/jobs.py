@@ -75,6 +75,7 @@ async def list_jobs(
             CandidateProfile.target_roles,
             CandidateProfile.blocked_sources,
             CandidateProfile.remote_preference,
+            CandidateProfile.preferred_countries,
         ).where(CandidateProfile.user_id == user_id)
     )
     profile_row = profile_result.first()
@@ -82,6 +83,7 @@ async def list_jobs(
     target_roles = profile_row[1] if profile_row else None
     blocked_sources = profile_row[2] if profile_row else None
     profile_remote_pref = profile_row[3] if profile_row else None
+    profile_pref_countries = profile_row[4] if profile_row else None
 
     # Skills also feed the title filter, so a 'Python Developer' role
     # surfaces for someone whose target_roles say AI Engineer but whose
@@ -109,6 +111,10 @@ async def list_jobs(
         skills=user_skills if not role_type else None,
         blocked_sources=blocked_sources,
         remote_preference=effective_remote_pref,
+        # Skip the country filter when the user has explicitly asked for a
+        # single country via ?country= — that param already constrains the
+        # query and would otherwise be ANDed with the broader preference list.
+        preferred_countries=(None if country else profile_pref_countries),
     )
 
     # Apply filters
@@ -172,6 +178,10 @@ async def list_jobs(
         skills=user_skills if not role_type else None,
         blocked_sources=blocked_sources,
         remote_preference=effective_remote_pref,
+        # Skip the country filter when the user has explicitly asked for a
+        # single country via ?country= — that param already constrains the
+        # query and would otherwise be ANDed with the broader preference list.
+        preferred_countries=(None if country else profile_pref_countries),
     )
     if country:
         count_base = count_base.where(Job.country == country.upper())

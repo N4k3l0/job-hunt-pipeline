@@ -27,6 +27,7 @@ async def get_overview(user_id: CurrentUserId, db: DbSession):
             CandidateProfile.target_roles,
             CandidateProfile.blocked_sources,
             CandidateProfile.remote_preference,
+            CandidateProfile.preferred_countries,
         ).where(CandidateProfile.user_id == user_id)
     )
     profile_row = profile_result.first()
@@ -34,6 +35,7 @@ async def get_overview(user_id: CurrentUserId, db: DbSession):
     target_roles = profile_row[1] if profile_row else None
     blocked_sources = profile_row[2] if profile_row else None
     remote_preference = profile_row[3] if profile_row else None
+    preferred_countries = profile_row[4] if profile_row else None
 
     # Skills feed the same title filter as the inbox so the dashboard's
     # 'Discovered' count matches what the user actually sees.
@@ -61,6 +63,7 @@ async def get_overview(user_id: CurrentUserId, db: DbSession):
         skills=user_skills,
         blocked_sources=blocked_sources,
         remote_preference=remote_preference,
+        preferred_countries=preferred_countries,
     )
     jobs_result = await db.execute(jobs_query)
     jobs_discovered = jobs_result.scalar() or 0

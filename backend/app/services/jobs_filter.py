@@ -187,6 +187,7 @@ def apply_user_filters(
     skills: list[str] | None = None,
     blocked_sources: list[str] | None = None,
     remote_preference: str | None = None,
+    preferred_countries: list[str] | None = None,
 ):
     """Apply the same filter chain the inbox uses to any Job-based query.
 
@@ -198,6 +199,14 @@ def apply_user_filters(
     user's skills/tools. So a 'Python Developer' lands in the inbox of an
     AI Engineer who has Python as a skill, even though 'Python' isn't a
     role keyword.
+
+    When `preferred_countries` is non-empty, jobs are kept only if they're
+    in one of those countries, fully remote (location-agnostic), or have
+    no country information at all (NULL — we don't know, give the benefit
+    of doubt rather than starve the inbox). Hybrid/onsite jobs in an
+    off-target country are dropped here rather than just penalised in
+    scoring, so a strong semantic match on a Bangalore role doesn't
+    clutter the inbox of someone targeting NL/DE/UK.
     """
     role_keywords = build_role_keywords(target_roles)
     skill_keywords = _skill_keywords(skills)
@@ -238,6 +247,21 @@ def apply_user_filters(
         query = query.where(
             JobSource.name.notin_(blocked_sources) | (JobSource.name.is_(None))
         )
+
+    if preferred_countries:
+        wanted = [c.upper() for c in preferred_countries if c]
+        if wanted:
+            # Keep: full_remote (location-agnostic) OR country in wanted set
+            # OR country IS NULL (unclassified — could be anywhere, including
+            # the user's preferred regions; dropping these silently torpedos
+            # supply since aggregators often omit country on remote postings).
+            query = query.where(
+                or_(
+                    Job.remote_type == "full_remote",
+                    func.upper(Job.country).in_(wanted),
+                    Job.country.is_(None),
+                )
+            )
     if remote_preference and remote_preference != "any":
         # Soft remote filter: when the user wants full_remote, also include
         # jobs we couldn't classify ('unknown'). Our classify_remote()
