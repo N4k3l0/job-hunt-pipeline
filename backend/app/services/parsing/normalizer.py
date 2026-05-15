@@ -80,6 +80,99 @@ COUNTRY_MAP = {
 }
 
 
+# Major cities mapped to ISO country codes. Used by the inbox filter to
+# catch restricted-remote postings whose location text spells out a city
+# but not a country — "Remote, Bangalore" should be treated as India,
+# "Berlin only" as Germany, etc. Kept separate from COUNTRY_MAP so
+# normalize_country() doesn't silently start converting city strings;
+# it stays focused on country-name → ISO duty.
+CITY_TO_COUNTRY = {
+    # Netherlands
+    "amsterdam": "NL", "rotterdam": "NL", "the hague": "NL", "den haag": "NL",
+    "utrecht": "NL", "eindhoven": "NL", "groningen": "NL", "delft": "NL",
+    "leiden": "NL", "haarlem": "NL", "schiphol": "NL", "hilversum": "NL",
+    "hoofddorp": "NL", "amstelveen": "NL",
+    # Germany
+    "berlin": "DE", "munich": "DE", "münchen": "DE", "hamburg": "DE",
+    "frankfurt": "DE", "cologne": "DE", "köln": "DE", "stuttgart": "DE",
+    "düsseldorf": "DE", "dusseldorf": "DE", "leipzig": "DE", "dresden": "DE",
+    "heidelberg": "DE", "karlsruhe": "DE", "nuremberg": "DE",
+    # United Kingdom
+    "london": "GB", "manchester": "GB", "edinburgh": "GB", "glasgow": "GB",
+    "birmingham": "GB", "liverpool": "GB", "leeds": "GB", "cambridge": "GB",
+    "oxford": "GB", "bristol": "GB", "belfast": "GB", "cardiff": "GB",
+    "newcastle": "GB",
+    # Ireland
+    "dublin": "IE", "cork": "IE", "galway": "IE", "limerick": "IE",
+    # France
+    "paris": "FR", "lyon": "FR", "marseille": "FR", "toulouse": "FR",
+    "bordeaux": "FR", "nantes": "FR",
+    # Spain / Portugal / Italy
+    "madrid": "ES", "barcelona": "ES", "valencia": "ES", "seville": "ES",
+    "lisbon": "PT", "porto": "PT",
+    "milan": "IT", "rome": "IT", "turin": "IT", "naples": "IT",
+    # Other Europe
+    "brussels": "BE", "antwerp": "BE", "ghent": "BE",
+    "vienna": "AT", "graz": "AT", "salzburg": "AT",
+    "zurich": "CH", "geneva": "CH", "basel": "CH", "bern": "CH",
+    "stockholm": "SE", "gothenburg": "SE", "malmö": "SE", "malmo": "SE",
+    "copenhagen": "DK", "aarhus": "DK",
+    "oslo": "NO", "bergen": "NO",
+    "helsinki": "FI",
+    "warsaw": "PL", "krakow": "PL", "kraków": "PL", "gdansk": "PL", "wrocław": "PL",
+    "prague": "CZ", "praha": "CZ",
+    # United States — most-named tech hubs in restricted-remote postings
+    "new york": "US", "nyc": "US", "san francisco": "US", "los angeles": "US",
+    "seattle": "US", "austin": "US", "boston": "US", "chicago": "US",
+    "denver": "US", "atlanta": "US", "miami": "US", "san diego": "US",
+    "portland": "US", "dallas": "US", "houston": "US", "phoenix": "US",
+    "minneapolis": "US", "philadelphia": "US", "washington dc": "US",
+    "san jose": "US", "salt lake city": "US",
+    # Canada
+    "toronto": "CA", "montreal": "CA", "vancouver": "CA", "ottawa": "CA",
+    "calgary": "CA",
+    # India — by far the most common "restricted remote" location
+    "bangalore": "IN", "bengaluru": "IN", "mumbai": "IN", "delhi": "IN",
+    "new delhi": "IN", "chennai": "IN", "hyderabad": "IN", "pune": "IN",
+    "kolkata": "IN", "gurgaon": "IN", "gurugram": "IN", "noida": "IN",
+    "ahmedabad": "IN",
+    # Latin America
+    "são paulo": "BR", "sao paulo": "BR", "rio de janeiro": "BR",
+    "brasilia": "BR", "brasília": "BR", "recife": "BR", "belo horizonte": "BR",
+    "porto alegre": "BR",
+    "mexico city": "MX", "ciudad de mexico": "MX", "cdmx": "MX",
+    "guadalajara": "MX", "monterrey": "MX",
+    "buenos aires": "AR", "cordoba": "AR", "córdoba": "AR", "rosario": "AR",
+    "bogotá": "CO", "bogota": "CO", "medellín": "CO", "medellin": "CO",
+    "cali": "CO", "barranquilla": "CO",
+    "santiago": "CL",
+    "lima": "PE",
+    # APAC
+    "manila": "PH", "cebu": "PH", "makati": "PH", "quezon city": "PH",
+    "jakarta": "ID", "bali": "ID", "surabaya": "ID", "bandung": "ID",
+    "kuala lumpur": "MY", "penang": "MY",
+    "bangkok": "TH", "chiang mai": "TH",
+    "ho chi minh": "VN", "hanoi": "VN", "saigon": "VN",
+    "tokyo": "JP", "osaka": "JP", "kyoto": "JP",
+    "seoul": "KR", "busan": "KR",
+    "beijing": "CN", "shanghai": "CN", "shenzhen": "CN", "guangzhou": "CN",
+    "hong kong": "HK", "taipei": "TW",
+    "karachi": "PK", "lahore": "PK", "islamabad": "PK",
+    "dhaka": "BD", "chittagong": "BD",
+    "sydney": "AU", "melbourne": "AU", "brisbane": "AU", "perth": "AU",
+    "auckland": "NZ", "wellington": "NZ",
+    # MENA / Africa
+    "dubai": "AE", "abu dhabi": "AE",
+    "riyadh": "SA", "jeddah": "SA",
+    "tel aviv": "IL",
+    "istanbul": "TR", "ankara": "TR",
+    "cairo": "EG", "alexandria": "EG",
+    "lagos": "NG", "abuja": "NG",
+    "nairobi": "KE",
+    "johannesburg": "ZA", "cape town": "ZA", "joburg": "ZA",
+}
+
+
 def normalize_company(name: str) -> str:
     """Normalize a company name for dedup comparison."""
     name = name.strip().lower()

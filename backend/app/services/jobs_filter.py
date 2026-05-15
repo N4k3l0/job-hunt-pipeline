@@ -265,48 +265,68 @@ def apply_user_filters(
 
             # Second-pass: catch restricted-remote postings whose country
             # is NULL but whose location text spells out specific countries
-            # (e.g. "Brazil, Colombia, Philippines"). Without this, a job
-            # advertised as remote-from-LatAm-only shows up for a candidate
-            # targeting NL/DE/UK because we set Job.country=NULL on remote
-            # postings.
+            # or cities (e.g. "Brazil, Colombia, Philippines" or "Remote,
+            # Bangalore"). Without this, jobs advertised as remote-only-from-
+            # India / -LatAm show up for a candidate targeting NL/DE/UK
+            # because we set Job.country=NULL on most remote postings.
             #
-            # Logic: build the set of country names NOT in the user's
-            # preferences, plus the set that ARE. Drop the job if its
-            # location text mentions a non-preferred country AND does not
-            # mention any preferred country. POSIX `~*` with `\y` word
-            # boundaries so "Indianapolis" doesn't match `\yindia\y`.
-            from app.services.parsing.normalizer import COUNTRY_MAP
+            # Logic: pull names from BOTH country and city maps. Build the
+            # set NOT in the user's preferences and the set that ARE.
+            # Drop the job if its location text mentions a non-preferred
+            # location AND does not mention any preferred one.
+            # Postgres POSIX `~*` with `\y` word boundaries so
+            # "Indianapolis" doesn't match `\yindia\y`.
+            from app.services.parsing.normalizer import (
+                COUNTRY_MAP, CITY_TO_COUNTRY,
+            )
             blocked_names: list[str] = []
             preferred_names: list[str] = []
-            for name, code in COUNTRY_MAP.items():
-                # Skip ambiguous two-letter aliases (uk, uae, u.s.) — they
-                # match too aggressively inside location strings.
-                if len(name) < 4:
+            seen: set[str] = set()
+            for name, code in list(COUNTRY_MAP.items()) + list(CITY_TO_COUNTRY.items()):
+                lname = name.lower()
+                if lname in seen:
+                    continue
+                seen.add(lname)
+                # Skip ambiguous short aliases (uk, uae, u.s.) — they
+                # match too aggressively as substrings.
+                if len(lname) < 4:
                     continue
                 if code.upper() in wanted:
-                    preferred_names.append(name)
+                    preferred_names.append(lname)
                 else:
-                    blocked_names.append(name)
+                    blocked_names.append(lname)
+
             if blocked_names:
                 # Postgres POSIX regex; escape special chars in names.
+                # Sort longest-first so "new york" matches before "new"
+                # would (alternation in POSIX is leftmost-then-longest,
+                # but explicit ordering is safest across engines).
                 import re as _re
+                blocked_names_sorted = sorted(blocked_names, key=len, reverse=True)
                 blocked_pattern = (
-                    r"\y(" + "|".join(_re.escape(n) for n in blocked_names) + r")\y"
+                    r"\y(" + "|".join(_re.escape(n) for n in blocked_names_sorted) + r")\y"
                 )
                 blocked_clause = Job.location.op("~*")(blocked_pattern)
                 if preferred_names:
+                    preferred_names_sorted = sorted(preferred_names, key=len, reverse=True)
                     preferred_pattern = (
-                        r"\y(" + "|".join(_re.escape(n) for n in preferred_names) + r")\y"
+                        r"\y(" + "|".join(_re.escape(n) for n in preferred_names_sorted) + r")\y"
                     )
                     preferred_clause = Job.location.op("~*")(preferred_pattern)
                     # Drop if: location mentions blocked AND not preferred.
+                    # NULL location passes through (already gated by the
+                    # outer country/remote OR-clause above).
                     query = query.where(
-                        not_(blocked_clause) | preferred_clause
+                        Job.location.is_(None)
+                        | not_(blocked_clause)
+                        | preferred_clause
                     )
                 else:
-                    # No preferred countries match COUNTRY_MAP (unlikely);
+                    # No preferred countries match the maps (unlikely);
                     # just drop any blocked-country mention.
-                    query = query.where(not_(blocked_clause))
+                    query = query.where(
+                        Job.location.is_(None) | not_(blocked_clause)
+                    )
     if remote_preference and remote_preference != "any":
         # Soft remote filter: when the user wants full_remote, also include
         # jobs we couldn't classify ('unknown'). Our classify_remote()
