@@ -325,6 +325,8 @@ export default function AdminPage() {
       {/* Stale Jobs Cleanup */}
       <EmbeddingsBackfillCard />
 
+      <CountryFilterDebugCard />
+
       <StaleJobsCard />
 
       {/* Users List */}
@@ -762,6 +764,175 @@ function EmbeddingsBackfillCard() {
         <VoyageTestButton />
       </CardContent>
     </Card>
+  );
+}
+
+
+interface CountryFilterDebugRow {
+  job_id: string;
+  title: string;
+  company: string;
+  country: string | null;
+  location: string | null;
+  remote_type: string | null;
+  source: string | null;
+  blocked_hits: string[];
+  preferred_hits: string[];
+  first_pass_keep: boolean;
+  second_pass_keep: boolean;
+  should_be_visible: boolean;
+}
+
+interface CountryFilterDebugResponse {
+  preferred_countries: string[];
+  preferred_countries_normalised: string[];
+  remote_preference: string | null;
+  target_roles: string[];
+  blocked_names_count: number;
+  preferred_names_count: number;
+  sample_size: number;
+  rows: CountryFilterDebugRow[];
+}
+
+function CountryFilterDebugCard() {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [data, setData] = useState<CountryFilterDebugResponse | null>(null);
+
+  const run = async () => {
+    setLoading(true);
+    setError(null);
+    setData(null);
+    try {
+      const r = await api.get<CountryFilterDebugResponse>(
+        "/api/v1/auth/admin/debug/country-filter?limit=30"
+      );
+      setData(r);
+    } catch (e: any) {
+      setError(e?.message || String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Only the rows the filter SHOULD drop are interesting — they reveal
+  // the leak. We surface those first.
+  const leaks = data?.rows.filter(r => !r.should_be_visible) ?? [];
+  const kept = data?.rows.filter(r => r.should_be_visible) ?? [];
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Sparkles className="h-5 w-5" />
+          Country filter — diagnostic
+        </CardTitle>
+        <CardDescription>
+          Dumps your preferred_countries + the last 30 visible jobs with per-row
+          filter trace. Use when the inbox keeps showing off-target jobs after
+          you saved preferences.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <Button onClick={run} disabled={loading} size="sm">
+          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+          Run diagnostic
+        </Button>
+
+        {error && (
+          <div className="rounded-md border border-destructive/30 bg-destructive/[0.06] p-2.5 text-xs text-destructive font-mono whitespace-pre-wrap break-words">
+            {error}
+          </div>
+        )}
+
+        {data && (
+          <div className="space-y-3 text-xs">
+            <div className="rounded-md border border-white/[0.06] bg-white/[0.02] p-3 space-y-1.5">
+              <div>
+                <span className="text-muted-foreground">preferred_countries:</span>{" "}
+                <span className="font-mono">
+                  {data.preferred_countries.length > 0
+                    ? JSON.stringify(data.preferred_countries)
+                    : <span className="text-destructive">(empty / null — filter does NOT run)</span>}
+                </span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">remote_preference:</span>{" "}
+                <span className="font-mono">{data.remote_preference || "(null)"}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">target_roles:</span>{" "}
+                <span className="font-mono">{JSON.stringify(data.target_roles)}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">filter knows:</span>{" "}
+                <span className="font-mono">
+                  {data.blocked_names_count} blocked, {data.preferred_names_count} preferred names/cities
+                </span>
+              </div>
+            </div>
+
+            {leaks.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-amber-300 font-semibold">
+                  {leaks.length} row(s) the filter would DROP but you might see — these are the leak:
+                </div>
+                {leaks.map(r => <DebugRow key={r.job_id} row={r} />)}
+              </div>
+            )}
+
+            {kept.length > 0 && (
+              <details>
+                <summary className="cursor-pointer text-muted-foreground">
+                  {kept.length} row(s) the filter keeps — should be in your inbox
+                </summary>
+                <div className="space-y-2 mt-2">
+                  {kept.map(r => <DebugRow key={r.job_id} row={r} />)}
+                </div>
+              </details>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function DebugRow({ row }: { row: CountryFilterDebugRow }) {
+  return (
+    <div className="rounded-md border border-white/[0.06] bg-white/[0.02] p-2.5 font-mono">
+      <div className="font-semibold text-foreground/90">
+        {row.title} — {row.company}
+      </div>
+      <div className="text-muted-foreground mt-1">
+        country={JSON.stringify(row.country)} {" · "}
+        location={JSON.stringify(row.location)} {" · "}
+        remote_type={JSON.stringify(row.remote_type)} {" · "}
+        source={row.source}
+      </div>
+      <div className="mt-1">
+        <span className="text-muted-foreground">blocked_hits:</span>{" "}
+        <span className={row.blocked_hits.length > 0 ? "text-amber-300" : ""}>
+          {JSON.stringify(row.blocked_hits)}
+        </span>
+        {"  "}
+        <span className="text-muted-foreground">preferred_hits:</span>{" "}
+        <span className={row.preferred_hits.length > 0 ? "text-emerald-300" : ""}>
+          {JSON.stringify(row.preferred_hits)}
+        </span>
+      </div>
+      <div className="mt-1">
+        first_pass_keep=<span className={row.first_pass_keep ? "text-emerald-300" : "text-destructive"}>
+          {String(row.first_pass_keep)}
+        </span>{"  "}
+        second_pass_keep=<span className={row.second_pass_keep ? "text-emerald-300" : "text-destructive"}>
+          {String(row.second_pass_keep)}
+        </span>{"  "}
+        should_be_visible=<span className={row.should_be_visible ? "text-emerald-300" : "text-amber-300"}>
+          {String(row.should_be_visible)}
+        </span>
+      </div>
+    </div>
   );
 }
 
