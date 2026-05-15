@@ -421,26 +421,37 @@ async def admin_embeddings_backfill(
 
     bounded = min(max(int(limit), 1), 50)
     started = time.monotonic()
-    BUDGET_S = 45.0  # leave 15s buffer under Vercel's 60s ceiling
+    BUDGET_S = 40.0  # leave 20s buffer under Vercel's 60s ceiling
+    PER_ITER_TIMEOUT_S = 25.0  # cap any one iteration
 
     total_embedded = 0
     last_error: str | None = None
+    iters = 0
     while time.monotonic() - started < BUDGET_S:
+        iters += 1
         try:
-            embedded = await _embed_unembedded_jobs(limit=bounded)
+            # asyncio.wait_for so a single hung Voyage call can't burn
+            # the whole budget — partial progress so far is already
+            # committed by _embed_unembedded_jobs per call.
+            embedded = await asyncio.wait_for(
+                _embed_unembedded_jobs(limit=bounded),
+                timeout=PER_ITER_TIMEOUT_S,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Backfill iter %d timed out after %ds", iters, PER_ITER_TIMEOUT_S)
+            last_error = f"iteration {iters} exceeded {PER_ITER_TIMEOUT_S}s"
+            break
         except Exception as e:  # noqa: BLE001
-            logger.exception("Embeddings backfill iter failed")
+            logger.exception("Embeddings backfill iter %d failed", iters)
             last_error = f"{type(e).__name__}: {e}"
             break
         if embedded == 0:
             break  # nothing left to embed
         total_embedded += embedded
-        # Brief pacing pause so the free-tier Voyage RPM (3/min) doesn't
-        # bite. Skip the pause if we did less than the requested limit
-        # (means we've drained the queue).
+        # Stop early if we did less than the requested limit (queue drained).
         if embedded < bounded:
             break
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.3)
 
     # Count remaining unembedded rows so the caller knows whether to
     # click again.
@@ -462,6 +473,7 @@ async def admin_embeddings_backfill(
         "remaining": remaining,
         "has_more": remaining > 0,
         "elapsed_s": round(elapsed, 1),
+        "iterations": iters,
         "last_error": last_error,
     }
 
