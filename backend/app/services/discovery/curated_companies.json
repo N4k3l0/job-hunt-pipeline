@@ -139,6 +139,11 @@
     {"name": "Lindy AI", "ats": "ashby", "slug": "lindy"},
     {"name": "Letta", "ats": "ashby", "slug": "letta"},
     {"name": "Imbue", "ats": "greenhouse", "slug": "imbue"},
-    {"name": "Netlify", "ats": "greenhouse", "slug": "netlify"}
+    {"name": "Netlify", "ats": "greenhouse", "slug": "netlify"},
+    {"name": "Catawiki", "ats": "greenhouse", "slug": "catawiki"},
+    {"name": "Bynder", "ats": "ashby", "slug": "bynder"},
+    {"name": "Aleph Alpha", "ats": "ashby", "slug": "alephalpha"},
+    {"name": "DeepMind", "ats": "greenhouse", "slug": "deepmind"},
+    {"name": "Optiver", "ats": "greenhouse", "slug": "optiverus"}
   ]
 }
