@@ -402,36 +402,67 @@ async def admin_embeddings_backfill(
     db: DbSession,
     limit: int = 20,
 ):
-    """Embed jobs that don't have a semantic vector yet. Caller chains
-    calls of size `limit` until has_more=false. Default 20 keeps each
-    invocation well under Vercel's 60s function timeout — 50 was timing
-    out on the user's account when many jobs landed with long
-    raw_content (4000-char heuristic fallback), even though job_corpus
-    caps description at 2000 chars per row, the Supabase pooler latency
-    over 50 UPDATEs adds up."""
+    """Embed jobs that don't have a semantic vector yet.
+
+    Internally loops up to a 45s wall-clock budget so a single button-
+    click can clear hundreds of rows without the frontend having to
+    chain. Each iteration embeds `limit` jobs in one batched Voyage
+    call + one batched UPDATE, so the per-iteration cost is mostly
+    Voyage latency (~3-5s) rather than DB round-trips.
+
+    Previous design did one batch per HTTP call and asked the frontend
+    to chain — that paid Vercel cold-start (~3-5s) + connection setup
+    (~500ms) on every call. By batch 3 the third invocation hit a
+    transient slow Voyage response and busted the 60s ceiling.
+    """
+    import asyncio
+    import time
     from app.workers.discovery_tasks import _embed_unembedded_jobs
 
     bounded = min(max(int(limit), 1), 50)
-    try:
-        embedded = await _embed_unembedded_jobs(limit=bounded)
-    except Exception as e:  # noqa: BLE001
-        logger.exception("Embeddings backfill failed (limit=%d)", bounded)
-        raise HTTPException(
-            status_code=502,
-            detail=f"Backfill failed: {type(e).__name__}: {e}",
-        )
+    started = time.monotonic()
+    BUDGET_S = 45.0  # leave 15s buffer under Vercel's 60s ceiling
 
-    # Count remaining unembedded rows so the caller knows when to stop.
+    total_embedded = 0
+    last_error: str | None = None
+    while time.monotonic() - started < BUDGET_S:
+        try:
+            embedded = await _embed_unembedded_jobs(limit=bounded)
+        except Exception as e:  # noqa: BLE001
+            logger.exception("Embeddings backfill iter failed")
+            last_error = f"{type(e).__name__}: {e}"
+            break
+        if embedded == 0:
+            break  # nothing left to embed
+        total_embedded += embedded
+        # Brief pacing pause so the free-tier Voyage RPM (3/min) doesn't
+        # bite. Skip the pause if we did less than the requested limit
+        # (means we've drained the queue).
+        if embedded < bounded:
+            break
+        await asyncio.sleep(0.5)
+
+    # Count remaining unembedded rows so the caller knows whether to
+    # click again.
     from sqlalchemy import select, func
     from app.models.job import JobEntity
     remaining_q = (
         select(func.count(JobEntity.id)).where(JobEntity.embedding.is_(None))
     )
     remaining = (await db.execute(remaining_q)).scalar() or 0
+    elapsed = time.monotonic() - started
+
+    if last_error and total_embedded == 0:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Backfill failed: {last_error}",
+        )
     return {
-        "embedded": embedded,
+        "embedded": total_embedded,
         "remaining": remaining,
         "has_more": remaining > 0,
+        "elapsed_s": round(elapsed, 1),
+        "last_error": last_error,
     }
 
 

@@ -259,17 +259,34 @@ async def _embed_unembedded_jobs(limit: int = 50) -> int:
         if vectors is None:
             return 0  # Voyage unconfigured.
 
-        # Write back via parameterised UPDATE. pgvector accepts a Python
-        # list serialised as '[v1,v2,...]' for the vector type, so we
-        # build the string explicitly to keep the cast out of SQLAlchemy.
-        for row, vector in zip(rows, vectors):
+        # Single batched UPDATE using a VALUES-derived table — previous
+        # code did N sequential round-trips over the Supabase pooler,
+        # which dominated wall time (~150ms each × 20 rows = 3s, plus
+        # cold-start latency on the 3rd batch caused Vercel timeouts).
+        # One round-trip with N rows finishes in ~300ms regardless of N.
+        # We build the SQL with the literal vec strings inline (already
+        # validated as pure-float text) and parameterise only the ids.
+        params: dict[str, str] = {}
+        values_parts: list[str] = []
+        for i, (row, vector) in enumerate(zip(rows, vectors)):
             vec_str = "[" + ",".join(f"{v:.6f}" for v in vector) + "]"
-            await db.execute(
-                text("UPDATE job_entities SET embedding = :vec WHERE id = :id"),
-                {"vec": vec_str, "id": str(row.entity_id)},
-            )
+            id_key = f"id_{i}"
+            params[id_key] = str(row.entity_id)
+            # vec_str is fully-controlled (float formatter output), safe
+            # to inline. ids are still bound parameters.
+            values_parts.append(f"(:{id_key}::uuid, '{vec_str}'::vector)")
+        values_clause = ", ".join(values_parts)
+        await db.execute(
+            text(f"""
+                UPDATE job_entities je
+                   SET embedding = v.vec
+                  FROM (VALUES {values_clause}) AS v(id, vec)
+                 WHERE je.id = v.id
+            """),
+            params,
+        )
         await db.commit()
-        logger.info("Embedded %d jobs (raw SQL)", len(rows))
+        logger.info("Embedded %d jobs (batched UPDATE)", len(rows))
         return len(rows)
 
 
