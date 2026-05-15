@@ -676,13 +676,14 @@ function EmbeddingsBackfillCard() {
     setDone(false);
     setRunError(null);
     setTotals({ embedded: 0, remaining: 0 });
-    // 60 batches × 50 = 3 k jobs/run — comfortably covers the 1.7 k
-    // catalogue + headroom. Smaller batches needed because 200/batch
-    // was timing out the Vercel function (60 s ceiling on Hobby).
-    let safetyCap = 60;
+    // 200 batches × 10 = 2 k jobs/run — covers the catalogue with
+    // headroom. Was 50/batch but kept timing out the Vercel function
+    // (60s Hobby ceiling) on cold start + Supabase pooler latency +
+    // Voyage round-trip. 10 keeps each call under ~15s even cold.
+    let safetyCap = 200;
     while (safetyCap-- > 0) {
       try {
-        const batch = await backfill.mutateAsync({ limit: 50 });
+        const batch = await backfill.mutateAsync({ limit: 10 });
         setTotals((prev) => ({
           embedded: (prev?.embedded ?? 0) + batch.embedded,
           remaining: batch.remaining,
@@ -744,11 +745,24 @@ function EmbeddingsBackfillCard() {
             <pre className="whitespace-pre-wrap break-words text-destructive/80 font-mono">
               {runError}
             </pre>
-            <p className="text-muted-foreground mt-2 leading-relaxed">
-              Usually one of: VOYAGE_API_KEY not set / wrong / expired,
-              network timeout to Voyage, or pgvector package not installed
-              on the Vercel build. Click <span className="text-foreground">Test Voyage</span> below to ping the embedding API directly and confirm.
-            </p>
+            {/* "Failed to fetch" is the browser's generic message when
+                the response never arrives — almost always a Vercel 60s
+                function timeout, not a Voyage / pgvector issue. */}
+            {/Failed to fetch|NetworkError|timeout/i.test(runError) ? (
+              <p className="text-muted-foreground mt-2 leading-relaxed">
+                <span className="text-amber-300">Likely a Vercel function timeout</span> — the
+                batch is running too long. Voyage and pgvector are probably fine
+                (Test Voyage already confirmed). The button has been reduced
+                to batches of 10; clicking <span className="text-foreground">Run again</span> should now
+                succeed and chain through the catalogue.
+              </p>
+            ) : (
+              <p className="text-muted-foreground mt-2 leading-relaxed">
+                Usually one of: VOYAGE_API_KEY not set / wrong / expired,
+                network timeout to Voyage, or pgvector package not installed
+                on the Vercel build. Click <span className="text-foreground">Test Voyage</span> below to ping the embedding API directly and confirm.
+              </p>
+            )}
           </div>
         )}
         {!runError && totals && done && (
