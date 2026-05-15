@@ -541,6 +541,54 @@ async def admin_debug_country_filter(
             "should_be_visible": should_be_visible,
         })
 
+    # ── Now run the ACTUAL SQL filter and compare. If Python says a row
+    # should be dropped but the SQL filter still returns it, the bug is
+    # in the SQL translation (regex / clause).
+    from app.services.jobs_filter import apply_user_filters
+    sql_query = (
+        select(Job.id)
+        .outerjoin(JobSource, JobSource.id == Job.source_id)
+        .where(Job.status.notin_(["duplicate", "raw", "expired", "dismissed"]))
+    )
+    sql_query = apply_user_filters(
+        sql_query,
+        target_roles=target_roles,
+        skills=None,
+        blocked_sources=None,
+        remote_preference=remote_pref,
+        preferred_countries=pref_countries,
+    )
+    sql_keep_ids = {
+        str(r[0]) for r in (await db.execute(sql_query)).all()
+    }
+
+    # Walk our diagnostic rows and tag SQL agreement.
+    sql_disagreements: list[dict] = []
+    for r in rows:
+        sql_keeps_it = r["job_id"] in sql_keep_ids
+        r["sql_keeps"] = sql_keeps_it
+        # Bug surface: Python says drop, SQL says keep.
+        if (not r["should_be_visible"]) and sql_keeps_it:
+            sql_disagreements.append({
+                "job_id": r["job_id"],
+                "title": r["title"],
+                "location": r["location"],
+                "blocked_hits": r["blocked_hits"],
+            })
+
+    # Try to compile the actual filter SQL to a literal string for
+    # inspection — surfaces what Postgres actually receives.
+    try:
+        from sqlalchemy.dialects import postgresql
+        compiled_sql = str(
+            sql_query.compile(
+                dialect=postgresql.dialect(),
+                compile_kwargs={"literal_binds": True},
+            )
+        )
+    except Exception as e:  # noqa: BLE001
+        compiled_sql = f"(compile failed: {e})"
+
     return {
         "preferred_countries": pref_countries,
         "preferred_countries_normalised": sorted(wanted),
@@ -550,6 +598,8 @@ async def admin_debug_country_filter(
         "preferred_names_count": len(preferred),
         "sample_size": len(rows),
         "rows": rows,
+        "sql_disagreements": sql_disagreements,
+        "compiled_sql": compiled_sql,
     }
 
 
