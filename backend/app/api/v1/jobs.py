@@ -144,7 +144,20 @@ async def list_jobs(
         )
         has_scores = ((await db.execute(has_scores_q)).scalar() or 0) > 0
         if has_scores:
-            query = query.where(JobScore.overall_fit >= min_score)
+            # Keep: scored ≥ min_score OR unscored manual import.
+            # User-pasted URLs from /import are explicit asks — they
+            # should always surface even if scoring hasn't caught up yet
+            # (or failed due to Voyage credit issues). Other unscored
+            # rows still get hidden so cron-discovered noise stays out.
+            query = query.where(
+                or_(
+                    JobScore.overall_fit >= min_score,
+                    and_(
+                        JobScore.overall_fit.is_(None),
+                        JobSource.name == "manual",
+                    ),
+                )
+            )
     if role_type:
         if role_type == "pm":
             keywords = [
@@ -198,7 +211,15 @@ async def list_jobs(
     if source:
         count_base = count_base.where(JobSource.name == source)
     if min_score is not None and has_scores:
-        count_base = count_base.where(JobScore.overall_fit >= min_score)
+        count_base = count_base.where(
+            or_(
+                JobScore.overall_fit >= min_score,
+                and_(
+                    JobScore.overall_fit.is_(None),
+                    JobSource.name == "manual",
+                ),
+            )
+        )
     if role_type:
         count_base = count_base.where(or_(*[func.lower(Job.title).like(kw) for kw in keywords]))
     if status:

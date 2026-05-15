@@ -164,6 +164,15 @@ def compute_job_score(
         path_scores = ai_scores  # type: ignore[assignment]
         rule_overall = ai_total
 
+    # Rule-based composition tops out at 75 (title 20 + skill 25 +
+    # seniority 15 + industry 10 + remote 5). The semantic path tops at
+    # 100. Scale rule-based up by 100/75 = 1.333 so the two modes
+    # produce comparable scores — otherwise jobs that miss the semantic
+    # path (no embedding yet) get an artificial 25-pt ceiling and look
+    # worse than they are, hiding below the inbox min_score threshold.
+    if rule_overall > 0:
+        rule_overall = rule_overall * (100.0 / 75.0)
+
     # ── Semantic component ────────────────────────────────────────────
     # Cosine similarity between the profile embedding and the job
     # embedding, scaled to a 0-65 contribution. Falls back to the

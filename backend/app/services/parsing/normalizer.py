@@ -415,7 +415,17 @@ async def normalize_and_store_job(
         salary_min=parsed_data.get("salary_min"),
         salary_max=parsed_data.get("salary_max"),
         salary_currency=parsed_data.get("salary_currency"),
-        raw_description=parsed_data.get("description_summary"),
+        # Voyage embedder reads raw_description to build the job corpus.
+        # If the LLM parse didn't produce a summary (heuristic fallback,
+        # short LLM response, etc.), fall back to the raw scraped content
+        # so the embedder always has something useful to work with.
+        # Without this fallback, heuristic-parsed jobs stored raw_description=NULL,
+        # never got embedded, fell back to rule-based scoring with empty
+        # entity arrays, scored near zero, and got hidden by min_score=50.
+        raw_description=(
+            parsed_data.get("description_summary")
+            or (raw_content[:4000] if raw_content else None)
+        ),
         raw_content=raw_content,
         employment_type=parsed_data.get("employment_type"),
         seniority=parsed_data.get("seniority"),
