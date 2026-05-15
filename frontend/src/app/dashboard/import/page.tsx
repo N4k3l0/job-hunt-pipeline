@@ -24,8 +24,13 @@ import {
   Bookmark,
   Copy,
   Check,
+  Mail,
 } from "lucide-react";
-import { useImportJobUrl, useImportJobText } from "@/hooks/use-api";
+import {
+  useImportJobUrl,
+  useImportJobText,
+  useImportBulkUrls,
+} from "@/hooks/use-api";
 import { useToast } from "@/components/ui/toast";
 
 export default function ImportPage() {
@@ -146,6 +151,10 @@ export default function ImportPage() {
           <TabsTrigger value="text">
             <MessageSquare className="h-4 w-4 mr-1.5" />
             By Text
+          </TabsTrigger>
+          <TabsTrigger value="email">
+            <Mail className="h-4 w-4 mr-1.5" />
+            From email
           </TabsTrigger>
         </TabsList>
 
@@ -314,6 +323,10 @@ export default function ImportPage() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="email" className="mt-4">
+          <EmailBulkImportPanel />
         </TabsContent>
       </Tabs>
 
@@ -501,6 +514,148 @@ function BookmarkletCard() {
         </details>
           </div>
         </details>
+      </CardContent>
+    </Card>
+  );
+}
+
+
+/**
+ * Bulk-import job URLs from a pasted email body (or any text).
+ *
+ * Designed for LinkedIn job-alert digests — those typically contain
+ * 10–30 URLs and are a pain to import one at a time. User receives
+ * the email normally, copies the body, pastes here, clicks import.
+ * Backend extracts every job-posting URL (regex against known hosts),
+ * processes 8 per call, and tells the frontend whether there are more
+ * to chain.
+ *
+ * No Postmark / DNS / inbound-email infrastructure needed — way
+ * simpler than building real email forwarding for v1.
+ */
+function EmailBulkImportPanel() {
+  const importBulk = useImportBulkUrls();
+  const [emailText, setEmailText] = useState("");
+  const [running, setRunning] = useState(false);
+  const [done, setDone] = useState(false);
+  const [stats, setStats] = useState<{
+    found: number; imported: number; failed: number;
+  } | null>(null);
+  const [results, setResults] = useState<{ url: string; status: "ok" | "failed"; error?: string }[]>([]);
+
+  const handleRun = async () => {
+    if (!emailText.trim()) return;
+    setRunning(true);
+    setDone(false);
+    setStats({ found: 0, imported: 0, failed: 0 });
+    setResults([]);
+
+    let remaining = emailText.trim();
+    let safetyCap = 10; // 10 batches × 8 = 80 URLs/run, more than enough for any digest
+    while (safetyCap-- > 0) {
+      try {
+        const batch = await importBulk.mutateAsync({ text: remaining });
+        setStats((prev) => ({
+          found: Math.max(prev?.found ?? 0, batch.found),
+          imported: (prev?.imported ?? 0) + batch.imported,
+          failed: (prev?.failed ?? 0) + batch.failed,
+        }));
+        setResults((prev) => [...prev, ...batch.results]);
+        if (!batch.has_more || batch.processed === 0) break;
+        // Next batch sees only the still-unprocessed URLs
+        remaining = batch.remaining_urls.join("\n");
+      } catch {
+        break;
+      }
+    }
+    setRunning(false);
+    setDone(true);
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Import from email body</CardTitle>
+        <CardDescription>
+          Paste a LinkedIn job-alert email (or any text with job URLs).
+          We pull every posting link out, ingest each, and drop them in
+          your inbox. Recognises LinkedIn, Greenhouse, Lever, Ashby,
+          Workable, Indeed, Wellfound, SmartRecruiters, Workday, and
+          common ATSes.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="email-body">Email body</Label>
+          <textarea
+            id="email-body"
+            value={emailText}
+            onChange={(e) => setEmailText(e.target.value)}
+            placeholder={
+              "Paste the whole email body here.\n\nLinkedIn's daily job alert\nworks great — just Cmd+A,\nCmd+C in the email, then\npaste in this box."
+            }
+            spellCheck
+            className="block w-full min-h-[260px] resize-y rounded-lg bg-white/[0.02] border border-white/[0.04] focus:border-amber-500/30 focus:outline-none p-3 text-sm leading-relaxed font-sans whitespace-pre-line transition-colors"
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <Button onClick={handleRun} disabled={running || !emailText.trim()}>
+            {running ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Extracting + importing…
+              </>
+            ) : (
+              <>
+                <ArrowRight className="h-4 w-4" />
+                {done ? "Run again" : "Extract & import"}
+              </>
+            )}
+          </Button>
+          {stats && (running || done) && (
+            <Badge variant="outline" className="font-mono text-xs">
+              Found {stats.found} · Imported {stats.imported}
+              {stats.failed > 0 ? ` · Failed ${stats.failed}` : ""}
+            </Badge>
+          )}
+        </div>
+
+        {results.length > 0 && (
+          <details className="text-xs text-muted-foreground" open>
+            <summary className="cursor-pointer hover:text-foreground">
+              Per-URL outcomes ({results.length})
+            </summary>
+            <ul className="mt-2 space-y-1.5 max-h-[260px] overflow-y-auto">
+              {results.map((r, i) => (
+                <li key={i} className="flex items-start gap-2 leading-relaxed">
+                  {r.status === "ok" ? (
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                  ) : (
+                    <span className="h-3.5 w-3.5 rounded-full bg-destructive/30 shrink-0 mt-0.5" />
+                  )}
+                  <span className="flex-1 min-w-0 break-words font-mono">
+                    {r.url.length > 90 ? r.url.slice(0, 87) + "…" : r.url}
+                    {r.error && (
+                      <span className="block text-destructive/80 mt-0.5">
+                        {r.error}
+                      </span>
+                    )}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+
+        <div className="rounded-lg border border-white/[0.04] bg-white/[0.01] p-3 text-xs text-muted-foreground space-y-1.5">
+          <p className="text-foreground font-medium">Setup: LinkedIn job alerts</p>
+          <p>
+            On LinkedIn: go to a search you care about → Set alert → choose Daily. LinkedIn
+            emails you every morning. Forward (or just copy/paste) the email
+            body here and we&apos;ll import every posting in it.
+          </p>
+        </div>
       </CardContent>
     </Card>
   );

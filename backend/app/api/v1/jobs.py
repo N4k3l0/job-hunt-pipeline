@@ -29,6 +29,11 @@ class JobImportText(BaseModel):
     source: str = "manual"
 
 
+class JobImportBulkURLs(BaseModel):
+    text: str  # raw email body or any text that contains job URLs
+    source: str = "linkedin_alert"
+
+
 @router.get("")
 async def list_jobs(
     user_id: CurrentUserId,
@@ -562,6 +567,117 @@ async def import_job_text(request: JobImportText, user_id: CurrentUserId, db: Db
     except Exception as e:  # noqa: BLE001
         logger.warning("Scoring after text import failed: %s", e)
     return {"status": "imported", "source": request.source}
+
+
+# Hosts we recognise as 'this is probably a job posting URL' when
+# extracting from a bulk paste. The bulk path is meant for things like
+# LinkedIn job-alert digest emails which embed 10–30 URLs per message.
+# Conservative — we want to skip footers, unsubscribe links, share
+# buttons, etc.
+_BULK_URL_HOSTS = (
+    "linkedin.com/jobs/view",
+    "linkedin.com/comm/jobs",  # mobile-app rewrites
+    "boards.greenhouse.io",
+    "job-boards.greenhouse.io",
+    "jobs.lever.co",
+    "jobs.ashbyhq.com",
+    "apply.workable.com",
+    "jobs.workable.com",
+    "jobs.smartrecruiters.com",
+    "myworkdayjobs.com",
+    "recruitee.com",
+    "teamtailor.com",
+    "bamboohr.com",
+    "personio.com",
+    "wellfound.com/jobs",
+    "indeed.com/viewjob",
+    "glassdoor.com/job-listing",
+)
+
+
+@router.post("/import/bulk-urls")
+async def import_bulk_urls(
+    request: JobImportBulkURLs,
+    user_id: CurrentUserId,
+    db: DbSession,
+):
+    """Extract every job-posting URL from a blob of pasted text
+    (typically a LinkedIn job-alert email body) and ingest each one
+    via the standard URL import path. Returns per-URL outcomes so the
+    UI can show which made it in vs which failed.
+
+    No external email infrastructure needed — user receives LinkedIn
+    alerts on their normal email, copies the body, pastes it here.
+    Way simpler than running Postmark / DNS / inbound webhooks.
+    """
+    import re
+    from app.workers.parsing_tasks import _parse_job_from_url_async
+    from app.workers.scoring_tasks import _batch_score_async
+
+    raw = request.text or ""
+    # Match any http(s) URL. Greedy enough to grab tracking-link suffixes
+    # too — LinkedIn wraps URLs in their /r/ redirector with the real
+    # URL as a query param, but Firecrawl follows redirects so even the
+    # wrapped form works downstream.
+    candidates = re.findall(r"https?://[^\s\"'<>)]+", raw)
+
+    # Dedupe + keep only known job-posting hosts.
+    seen: set[str] = set()
+    job_urls: list[str] = []
+    for u in candidates:
+        cleaned = u.rstrip(").,;:!?'\"")
+        lowered = cleaned.lower()
+        if cleaned in seen:
+            continue
+        if any(host in lowered for host in _BULK_URL_HOSTS):
+            seen.add(cleaned)
+            job_urls.append(cleaned)
+
+    if not job_urls:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "No job-posting URLs found in that text. The paste should contain "
+                "links from LinkedIn / Greenhouse / Lever / Ashby / Workable / "
+                "Indeed / Wellfound / etc."
+            ),
+        )
+
+    # Cap so a runaway paste can't burn through 60s of Firecrawl + Claude.
+    # 15 URLs × ~15s each = 225s — way over Vercel's 60s ceiling. So we
+    # process up to 8 per call and tell the caller to chain.
+    MAX_PER_CALL = 8
+    to_process = job_urls[:MAX_PER_CALL]
+    deferred = len(job_urls) - len(to_process)
+
+    results: list[dict] = []
+    for url in to_process:
+        try:
+            await _parse_job_from_url_async(url)
+            results.append({"url": url, "status": "ok"})
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Bulk import failed for %s: %s", url, e)
+            results.append({"url": url, "status": "failed", "error": str(e)[:200]})
+
+    # Score the newly-ingested jobs for this user.
+    try:
+        await _batch_score_async(str(user_id), rescore_all=False)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Scoring after bulk import failed: %s", e)
+
+    imported = sum(1 for r in results if r["status"] == "ok")
+    failed = len(results) - imported
+
+    return {
+        "found": len(job_urls),
+        "processed": len(to_process),
+        "imported": imported,
+        "failed": failed,
+        "deferred": deferred,
+        "results": results,
+        "has_more": deferred > 0,
+        "remaining_urls": job_urls[MAX_PER_CALL:] if deferred > 0 else [],
+    }
 
 
 @router.post("/{job_id}/shortlist")

@@ -126,18 +126,21 @@ async def cron_discover_remote(authorization: str | None = Header(None)):
     from app.workers.discovery_tasks import (
         _run_remoteok_async, _run_himalayas_async,
         _run_remotive_async, _run_weworkremotely_async,
-        _run_dailyremote_async, quick_score_all_users,
+        _run_dailyremote_async, _run_undutchables_async,
+        quick_score_all_users,
     )
 
     # DailyRemote routes through Firecrawl now — Cloudflare blocks direct
     # serverless fetches. Scope is intentionally small (2 categories × 8
     # detail pages = 18 Firecrawl credits/run = ~540/month).
+    # Undutchables adds NL-specialist recruiter supply — ~13 credits/run.
     results = await _run_all_concurrent([
         ("remoteok", _run_remoteok_async),
         ("himalayas", _run_himalayas_async),
         ("remotive", _run_remotive_async),
         ("weworkremotely", _run_weworkremotely_async),
         ("dailyremote", _run_dailyremote_async),
+        ("undutchables", _run_undutchables_async),
     ])
     scoring = await quick_score_all_users(per_user_timeout=10)
     return {"status": "complete", "results": results, "scoring": scoring}

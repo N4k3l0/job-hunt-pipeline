@@ -329,6 +329,29 @@ export interface TailoredBullet {
   why_it_matches: string;
 }
 
+export interface BulkUrlImportResult {
+  found: number;
+  processed: number;
+  imported: number;
+  failed: number;
+  deferred: number;
+  results: { url: string; status: "ok" | "failed"; error?: string }[];
+  has_more: boolean;
+  remaining_urls: string[];
+}
+
+export function useImportBulkUrls() {
+  const qc = useQueryClient();
+  return useMutation<BulkUrlImportResult, Error, { text: string; source?: string }>({
+    mutationFn: ({ text, source = "linkedin_alert" }) =>
+      api.post("/api/v1/jobs/import/bulk-urls", { text, source }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      qc.invalidateQueries({ queryKey: ["analytics"] });
+    },
+  });
+}
+
 export function useTailorBullets(jobId: string | undefined) {
   return useMutation<{ bullets: TailoredBullet[]; job_id: string }>({
     mutationFn: () => api.post(`/api/v1/jobs/${jobId}/tailor-bullets`),

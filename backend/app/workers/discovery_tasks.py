@@ -647,6 +647,43 @@ async def _run_crossover_async():
         logger.error("Crossover discovery failed: %s", e)
 
 
+# ── Undutchables (NL specialist recruiter; Firecrawl scrape) ─────────────────
+
+
+async def _run_undutchables_async():
+    """Scrape Undutchables — a Netherlands-focused recruiter that places
+    international (non-Dutch-speaking) candidates. Costs ~13 Firecrawl
+    credits per run (1 listing + 12 detail pages capped).
+    """
+    from app.services.discovery.undutchables_service import fetch_jobs
+    from app.services.parsing.normalizer import normalize_url
+
+    keywords = await _collect_all_keywords()
+
+    # Skip URLs already in our DB so we don't re-spend credits on the
+    # same posting every run. Same pattern as Crossover.
+    skip_urls: set[str] = set()
+    async with create_worker_session()() as db:
+        result = await db.execute(
+            select(Job.job_url).join(JobSource, Job.source_id == JobSource.id)
+            .where(JobSource.name == "undutchables", Job.job_url.is_not(None))
+        )
+        for row in result.all():
+            normalized = normalize_url(row[0])
+            if normalized:
+                skip_urls.add(normalized)
+
+    try:
+        jobs = await fetch_jobs(
+            keywords=set(keywords) if keywords else None,
+            skip_urls=skip_urls,
+        )
+        if jobs:
+            await _ingest_raw_jobs(jobs)
+    except Exception as e:
+        logger.error("Undutchables discovery failed: %s", e)
+
+
 # ── Curated companies (Greenhouse / Lever / Ashby direct) ───────────────────
 
 

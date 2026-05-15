@@ -246,7 +246,8 @@ async def admin_run_discovery(admin: AdminUser):
         _run_curated_async, _run_arbeitnow_async,
         _run_remoteok_async, _run_himalayas_async,
         _run_remotive_async, _run_weworkremotely_async,
-        _run_dailyremote_async, quick_score_all_users,
+        _run_dailyremote_async, _run_undutchables_async,
+        quick_score_all_users,
     )
 
     runners: list[tuple[str, callable]] = [
@@ -257,6 +258,7 @@ async def admin_run_discovery(admin: AdminUser):
         ("remotive", _run_remotive_async),
         ("weworkremotely", _run_weworkremotely_async),
         ("dailyremote", _run_dailyremote_async),
+        ("undutchables", _run_undutchables_async),
     ]
 
     async def _run_one(name: str, runner):
