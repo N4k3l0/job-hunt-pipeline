@@ -678,6 +678,21 @@ async def import_bulk_urls(
             logger.warning("Bulk import failed for %s: %s", url, e)
             results.append({"url": url, "status": "failed", "error": str(e)[:200]})
 
+    # Embed the just-imported jobs FIRST so the semantic scorer has
+    # something to work with. Without this, jobs land with NULL
+    # embedding, fall back to the rule-based path, score near zero
+    # (the heuristic parser can't fill skills/requirements/keywords),
+    # and get hidden by the default min_score=50 inbox filter.
+    # Embedding cost is ~$0.0002/job via Voyage — negligible.
+    try:
+        from app.workers.discovery_tasks import _embed_unembedded_jobs
+        # Cap at a reasonable batch — we only just inserted up to 8 rows
+        # but other historical unembedded rows might also exist; topping
+        # them up doesn't hurt.
+        await _embed_unembedded_jobs(limit=50)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Embedding after bulk import failed: %s", e)
+
     # Score the newly-ingested jobs for this user.
     try:
         await _batch_score_async(str(user_id), rescore_all=False)

@@ -154,6 +154,16 @@ def parse_job_heuristic(*, url: str | None, markdown: str) -> dict:
         title, company, location, remote_type, url,
     )
 
+    # CRITICAL: description_summary is what gets stored as Job.raw_description,
+    # which is what the Voyage embedder ingests for semantic scoring. Leaving
+    # it None means the job never gets an embedding and never gets a score
+    # above ~5pts (since the heuristic parser also can't fill skills /
+    # requirements / keywords). Use the cleaned markdown body as the
+    # description instead — it contains the real JD content, the embedder
+    # handles long inputs gracefully, and the semantic scorer can produce
+    # a useful match score from that alone.
+    description = _trim_markdown_for_embedding(md)
+
     return {
         "title": title,
         "company": company,
@@ -167,7 +177,7 @@ def parse_job_heuristic(*, url: str | None, markdown: str) -> dict:
         "employment_type": None,
         "seniority": None,
         "application_type": "url",
-        "description_summary": None,
+        "description_summary": description,
         "required_skills": [],
         "nice_to_have_skills": [],
         "requirements": [],
@@ -181,3 +191,16 @@ def parse_job_heuristic(*, url: str | None, markdown: str) -> dict:
         "contact_email": None,
         "deadline": None,
     }
+
+
+def _trim_markdown_for_embedding(md: str) -> str:
+    """Strip Firecrawl-rendered boilerplate (nav links, footer junk, image
+    refs) so the embedded text is mostly real JD content. Caps at 4000
+    chars — Voyage handles longer but the marginal info past that is
+    usually template/footer noise."""
+    if not md:
+        return ""
+    cleaned = re.sub(r"!\[.*?\]\(.*?\)", "", md)         # image refs
+    cleaned = re.sub(r"\[(.*?)\]\((.*?)\)", r"\1", cleaned)  # link → text
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)         # collapse blank lines
+    return cleaned.strip()[:4000]
