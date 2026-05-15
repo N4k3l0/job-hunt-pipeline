@@ -781,6 +781,7 @@ interface CountryFilterDebugRow {
   first_pass_keep: boolean;
   second_pass_keep: boolean;
   should_be_visible: boolean;
+  sql_keeps?: boolean;
 }
 
 interface CountryFilterDebugResponse {
@@ -792,6 +793,8 @@ interface CountryFilterDebugResponse {
   preferred_names_count: number;
   sample_size: number;
   rows: CountryFilterDebugRow[];
+  sql_disagreements?: { job_id: string; title: string; location: string | null; blocked_hits: string[] }[];
+  compiled_sql?: string;
 }
 
 function CountryFilterDebugCard() {
@@ -872,13 +875,46 @@ function CountryFilterDebugCard() {
               </div>
             </div>
 
+            {data.sql_disagreements && data.sql_disagreements.length > 0 && (
+              <div className="rounded-md border border-destructive/40 bg-destructive/[0.06] p-3 space-y-1.5">
+                <div className="text-destructive font-semibold">
+                  ⚠ {data.sql_disagreements.length} SQL disagreement(s) — Python says drop, SQL keeps:
+                </div>
+                {data.sql_disagreements.map(d => (
+                  <div key={d.job_id} className="text-destructive/90 text-xs font-mono">
+                    {d.title} — location={JSON.stringify(d.location)} blocked_hits={JSON.stringify(d.blocked_hits)}
+                  </div>
+                ))}
+                <div className="text-destructive/80 text-xs pt-1">
+                  → Filter regex is not translating to Postgres correctly. Check compiled_sql below.
+                </div>
+              </div>
+            )}
+
+            {data.sql_disagreements && data.sql_disagreements.length === 0 && leaks.length > 0 && (
+              <div className="rounded-md border border-emerald-500/30 bg-emerald-500/[0.06] p-3 text-emerald-300 text-xs">
+                ✓ SQL filter agrees with Python — all {leaks.length} flagged row(s) are dropped at the DB. If you still see them in the inbox, force-refresh (cmd+shift+R) to bust the TanStack Query cache.
+              </div>
+            )}
+
             {leaks.length > 0 && (
               <div className="space-y-2">
                 <div className="text-amber-300 font-semibold">
-                  {leaks.length} row(s) the filter would DROP but you might see — these are the leak:
+                  {leaks.length} row(s) the filter would DROP — leak details:
                 </div>
                 {leaks.map(r => <DebugRow key={r.job_id} row={r} />)}
               </div>
+            )}
+
+            {data.compiled_sql && (
+              <details>
+                <summary className="cursor-pointer text-muted-foreground text-xs">
+                  Show compiled SQL (what Postgres receives)
+                </summary>
+                <pre className="mt-2 text-[10px] font-mono whitespace-pre-wrap break-all bg-black/40 p-2 rounded border border-white/[0.06] max-h-64 overflow-auto">
+                  {data.compiled_sql}
+                </pre>
+              </details>
             )}
 
             {kept.length > 0 && (
@@ -931,6 +967,11 @@ function DebugRow({ row }: { row: CountryFilterDebugRow }) {
         should_be_visible=<span className={row.should_be_visible ? "text-emerald-300" : "text-amber-300"}>
           {String(row.should_be_visible)}
         </span>
+        {row.sql_keeps !== undefined && (
+          <>{"  "}sql_keeps=<span className={row.sql_keeps === row.should_be_visible ? "text-emerald-300" : "text-destructive font-bold"}>
+            {String(row.sql_keeps)}
+          </span></>
+        )}
       </div>
     </div>
   );
