@@ -31,34 +31,52 @@ TITLE_ABBREVS = {
     "dev": "developer",
 }
 
-# Country name to ISO code mapping
+# Country name to ISO code mapping. Used both at ingest (to populate
+# Job.country from aggregator strings) and at filter time (to detect
+# restricted-remote postings whose country field is NULL but whose
+# location text mentions specific countries — e.g. "Remote (Brazil,
+# Colombia, Philippines)" which should NOT show up for a candidate
+# targeting NL/DE/UK).
 COUNTRY_MAP = {
-    "united states": "US",
-    "usa": "US",
-    "united kingdom": "GB",
-    "uk": "GB",
-    "canada": "CA",
-    "germany": "DE",
-    "deutschland": "DE",
+    # Europe (most user preferences live here)
+    "united kingdom": "GB", "uk": "GB", "great britain": "GB", "england": "GB",
+    "scotland": "GB", "wales": "GB", "northern ireland": "GB",
+    "germany": "DE", "deutschland": "DE",
     "france": "FR",
-    "netherlands": "NL",
-    "holland": "NL",
+    "netherlands": "NL", "holland": "NL",
     "austria": "AT",
     "switzerland": "CH",
-    "ireland": "IE",
-    "sweden": "SE",
-    "denmark": "DK",
-    "norway": "NO",
-    "finland": "FI",
-    "spain": "ES",
-    "italy": "IT",
-    "portugal": "PT",
-    "belgium": "BE",
-    "poland": "PL",
-    "australia": "AU",
-    "singapore": "SG",
-    "india": "IN",
-    "israel": "IL",
+    "ireland": "IE", "republic of ireland": "IE",
+    "sweden": "SE", "denmark": "DK", "norway": "NO", "finland": "FI",
+    "iceland": "IS",
+    "spain": "ES", "italy": "IT", "portugal": "PT",
+    "belgium": "BE", "luxembourg": "LU",
+    "poland": "PL", "czech republic": "CZ", "czechia": "CZ",
+    "slovakia": "SK", "hungary": "HU", "romania": "RO", "bulgaria": "BG",
+    "greece": "GR", "croatia": "HR", "slovenia": "SI", "estonia": "EE",
+    "latvia": "LV", "lithuania": "LT", "serbia": "RS", "ukraine": "UA",
+    "turkey": "TR", "russia": "RU",
+    # North America
+    "united states": "US", "usa": "US", "u.s.": "US", "u.s.a.": "US",
+    "canada": "CA",
+    # Latin America (common in "remote restricted" postings)
+    "mexico": "MX", "brazil": "BR", "brasil": "BR",
+    "argentina": "AR", "colombia": "CO", "chile": "CL", "peru": "PE",
+    "uruguay": "UY", "ecuador": "EC", "venezuela": "VE", "bolivia": "BO",
+    "costa rica": "CR", "panama": "PA", "guatemala": "GT",
+    "dominican republic": "DO", "honduras": "HN", "nicaragua": "NI",
+    # Asia / APAC
+    "australia": "AU", "new zealand": "NZ",
+    "singapore": "SG", "india": "IN", "israel": "IL",
+    "philippines": "PH", "indonesia": "ID", "malaysia": "MY",
+    "thailand": "TH", "vietnam": "VN", "viet nam": "VN",
+    "japan": "JP", "south korea": "KR", "korea": "KR",
+    "china": "CN", "hong kong": "HK", "taiwan": "TW",
+    "pakistan": "PK", "bangladesh": "BD", "sri lanka": "LK",
+    "united arab emirates": "AE", "uae": "AE", "saudi arabia": "SA",
+    # Africa
+    "south africa": "ZA", "nigeria": "NG", "kenya": "KE", "ghana": "GH",
+    "egypt": "EG", "morocco": "MA", "tunisia": "TN",
 }
 
 
