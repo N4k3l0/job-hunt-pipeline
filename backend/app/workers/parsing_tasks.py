@@ -223,12 +223,40 @@ def parse_job_from_url(url: str):
 async def _parse_job_from_url_async(url: str):
     from app.services.discovery.firecrawl_service import scrape_url
     from app.services.parsing.normalizer import normalize_and_store_job
+    from app.services.parsing.heuristic_parser import parse_job_heuristic
 
-    # Scrape the page
+    # Scrape the page (Firecrawl, no Anthropic)
     page_content = await scrape_url(url)
 
-    # Parse with LLM
-    parsed = await parse_job_text(page_content)
+    # Parse — try LLM first (rich entity extraction), fall back to a
+    # heuristic parser when Anthropic returns a credit / rate-limit /
+    # auth error. The fallback lets URL imports keep working when the
+    # admin's API balance hits zero; the job lands in the inbox with
+    # title + company + location populated and skills/keywords empty.
+    # When the LLM path comes back online, future imports automatically
+    # get the richer entity extraction.
+    try:
+        parsed = await parse_job_text(page_content)
+    except Exception as e:  # noqa: BLE001
+        msg = str(e).lower()
+        if any(token in msg for token in (
+            "credit balance is too low",
+            "credit_balance",
+            "insufficient_quota",
+            "rate_limit",
+            "rate limit",
+            "401",
+            "403",
+            "invalid_api_key",
+            "billing",
+        )):
+            logger.warning(
+                "LLM parse failed for %s (%s) — falling back to heuristic parser",
+                url, e,
+            )
+            parsed = parse_job_heuristic(url=url, markdown=page_content)
+        else:
+            raise
 
     # Normalize and store
     async with create_worker_session()() as db:
