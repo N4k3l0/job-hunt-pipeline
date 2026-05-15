@@ -400,16 +400,18 @@ async def admin_embeddings_test(admin: AdminUser):
 async def admin_embeddings_backfill(
     admin: AdminUser,
     db: DbSession,
-    limit: int = 50,
+    limit: int = 20,
 ):
     """Embed jobs that don't have a semantic vector yet. Caller chains
-    calls of size `limit` until has_more=false. Default 50 keeps each
-    invocation well under Vercel's 60s function timeout — 200 was timing
-    out (one Voyage round-trip + 200 row updates + count query > 60 s
-    on cold start)."""
+    calls of size `limit` until has_more=false. Default 20 keeps each
+    invocation well under Vercel's 60s function timeout — 50 was timing
+    out on the user's account when many jobs landed with long
+    raw_content (4000-char heuristic fallback), even though job_corpus
+    caps description at 2000 chars per row, the Supabase pooler latency
+    over 50 UPDATEs adds up."""
     from app.workers.discovery_tasks import _embed_unembedded_jobs
 
-    bounded = min(max(int(limit), 1), 100)
+    bounded = min(max(int(limit), 1), 50)
     try:
         embedded = await _embed_unembedded_jobs(limit=bounded)
     except Exception as e:  # noqa: BLE001
@@ -431,6 +433,33 @@ async def admin_embeddings_backfill(
         "remaining": remaining,
         "has_more": remaining > 0,
     }
+
+
+@router.post("/admin/fix/raw-description")
+async def admin_fix_raw_description(
+    admin: AdminUser,
+    db: DbSession,
+):
+    """One-shot: copy raw_content → raw_description for any job where
+    raw_description is empty. Fixes jobs that landed via the heuristic
+    parser before the normalizer fallback was shipped — their
+    raw_description was NULL, the Voyage embedder couldn't ingest them,
+    they sat unscored and invisible in the inbox.
+
+    Safe to re-run: only flips rows where raw_description IS NULL.
+    """
+    from sqlalchemy import text
+    result = await db.execute(text("""
+        UPDATE jobs
+           SET raw_description = LEFT(raw_content, 4000)
+         WHERE raw_description IS NULL
+           AND raw_content IS NOT NULL
+           AND length(raw_content) > 50
+        RETURNING id
+    """))
+    rows = result.fetchall()
+    await db.commit()
+    return {"backfilled": len(rows)}
 
 
 @router.get("/admin/debug/country-filter")

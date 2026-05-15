@@ -762,8 +762,63 @@ function EmbeddingsBackfillCard() {
         )}
 
         <VoyageTestButton />
+        <RawDescriptionFixButton />
       </CardContent>
     </Card>
+  );
+}
+
+
+function RawDescriptionFixButton() {
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; detail: string } | null>(null);
+
+  const run = async () => {
+    setRunning(true);
+    setResult(null);
+    try {
+      const r = await api.post<{ backfilled: number }>(
+        "/api/v1/auth/admin/fix/raw-description"
+      );
+      setResult({
+        ok: true,
+        detail:
+          r.backfilled > 0
+            ? `Fixed ${r.backfilled} job(s) — their raw_description was NULL. They can now be embedded.`
+            : "No rows needed fixing. All jobs already have raw_description populated.",
+      });
+    } catch (e: any) {
+      setResult({ ok: false, detail: e?.message || String(e) });
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  return (
+    <div className="pt-3 border-t border-white/[0.04] space-y-2">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <p className="text-xs text-muted-foreground">
+          Copy raw_content → raw_description for jobs the heuristic parser
+          stored before the fallback fix. Run this before backfilling
+          embeddings.
+        </p>
+        <Button variant="ghost" size="sm" onClick={run} disabled={running}>
+          {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+          Fix orphan descriptions
+        </Button>
+      </div>
+      {result && (
+        <div
+          className={
+            result.ok
+              ? "rounded-md border border-emerald-500/30 bg-emerald-500/[0.06] p-2.5 text-xs text-emerald-300"
+              : "rounded-md border border-destructive/30 bg-destructive/[0.06] p-2.5 text-xs text-destructive font-mono whitespace-pre-wrap break-words"
+          }
+        >
+          {result.detail}
+        </div>
+      )}
+    </div>
   );
 }
 
