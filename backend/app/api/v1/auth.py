@@ -433,6 +433,126 @@ async def admin_embeddings_backfill(
     }
 
 
+@router.get("/admin/debug/country-filter")
+async def admin_debug_country_filter(
+    admin: AdminUser,
+    db: DbSession,
+    limit: int = 20,
+):
+    """Diagnose why off-target-country jobs are landing in the inbox.
+
+    Dumps:
+      - admin's preferred_countries (does it match what you saved?)
+      - the 20 most recent visible jobs in their inbox WITH the filter
+        components: country, location, remote_type, and whether each
+        location string mentions a blocked or preferred country/city.
+
+    If preferred_countries is empty / null, the country filter doesn't
+    run. If preferred_countries is set but a LatAm job still shows up,
+    the row dump shows exactly which clause is letting it through.
+    """
+    from app.models.candidate import CandidateProfile
+    from app.models.job import Job, JobSource
+    from sqlalchemy import select
+    from app.services.parsing.normalizer import COUNTRY_MAP, CITY_TO_COUNTRY
+
+    # Admin's own preferences
+    prof = (await db.execute(
+        select(
+            CandidateProfile.preferred_countries,
+            CandidateProfile.remote_preference,
+            CandidateProfile.target_roles,
+        ).where(CandidateProfile.user_id == admin.id)
+    )).first()
+    pref_countries = list(prof[0] or []) if prof else []
+    remote_pref = prof[1] if prof else None
+    target_roles = list(prof[2] or []) if prof else []
+
+    wanted = {c.upper() for c in pref_countries if c}
+
+    # Sample the most-recent visible jobs (regardless of filter — we want
+    # to see what's there before the filter, so we can spot which rows
+    # are squeaking through it).
+    sample_rows = (await db.execute(
+        select(
+            Job.id, Job.title, Job.company, Job.country,
+            Job.location, Job.remote_type, JobSource.name,
+        )
+        .outerjoin(JobSource, JobSource.id == Job.source_id)
+        .where(Job.status.notin_(["duplicate", "raw", "expired", "dismissed"]))
+        .order_by(Job.discovered_at.desc())
+        .limit(min(max(int(limit), 1), 100))
+    )).all()
+
+    # Build the same blocked / preferred name lists the filter uses.
+    blocked: set[str] = set()
+    preferred: set[str] = set()
+    for name, code in list(COUNTRY_MAP.items()) + list(CITY_TO_COUNTRY.items()):
+        n = name.lower()
+        if len(n) < 4:
+            continue
+        if code.upper() in wanted:
+            preferred.add(n)
+        else:
+            blocked.add(n)
+
+    import re as _re
+
+    def _mentions(text: str | None, names: set[str]) -> list[str]:
+        if not text:
+            return []
+        t = text.lower()
+        hits: list[str] = []
+        for n in names:
+            if _re.search(r"\b" + _re.escape(n) + r"\b", t):
+                hits.append(n)
+        return hits
+
+    rows = []
+    for jid, title, company, country, location, remote_type, source in sample_rows:
+        blocked_hits = _mentions(location, blocked)
+        preferred_hits = _mentions(location, preferred)
+        # Replay the filter logic:
+        #   first pass keeps if: remote_type=full_remote OR country in wanted OR country IS NULL
+        #   second pass drops if: location mentions blocked AND not preferred (and location is not NULL)
+        first_pass_keep = (
+            remote_type == "full_remote"
+            or (country and country.upper() in wanted)
+            or country is None
+        )
+        if location is None:
+            second_pass_keep = True
+        else:
+            second_pass_keep = (not blocked_hits) or bool(preferred_hits)
+        should_be_visible = first_pass_keep and second_pass_keep
+
+        rows.append({
+            "job_id": str(jid),
+            "title": title,
+            "company": company,
+            "country": country,
+            "location": location,
+            "remote_type": remote_type,
+            "source": source,
+            "blocked_hits": blocked_hits,
+            "preferred_hits": preferred_hits,
+            "first_pass_keep": first_pass_keep,
+            "second_pass_keep": second_pass_keep,
+            "should_be_visible": should_be_visible,
+        })
+
+    return {
+        "preferred_countries": pref_countries,
+        "preferred_countries_normalised": sorted(wanted),
+        "remote_preference": remote_pref,
+        "target_roles": target_roles,
+        "blocked_names_count": len(blocked),
+        "preferred_names_count": len(preferred),
+        "sample_size": len(rows),
+        "rows": rows,
+    }
+
+
 @router.post("/admin/stale-jobs/verify")
 async def admin_stale_jobs_verify(
     admin: AdminUser,
