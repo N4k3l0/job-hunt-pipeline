@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 import httpx
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Query, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy import select, func, and_
 from sqlalchemy.orm import selectinload
@@ -36,6 +36,7 @@ class JobImportBulkURLs(BaseModel):
 
 @router.get("")
 async def list_jobs(
+    response: Response,
     user_id: CurrentUserId,
     db: DbSession,
     page: int = Query(1, ge=1),
@@ -264,6 +265,12 @@ async def list_jobs(
             } if score else None,
         }
         jobs_out.append(job_dict)
+
+    # Inbox is user-specific and filter-state-sensitive — never cache.
+    # Without this we saw country-filter changes take minutes to show up
+    # because an intermediate cache (browser or Vercel edge) was serving
+    # the previous response.
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
 
     return {
         "jobs": jobs_out,

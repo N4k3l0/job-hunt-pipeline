@@ -31,6 +31,12 @@ async function apiRequest<T>(
   const url = `${API_BASE}${path}`;
 
   const response = await fetch(url, {
+    // Force a fresh fetch every time. Without this, stale browser /
+    // intermediate caches were keeping LatAm postings visible in the
+    // inbox for ~minutes after the server-side country filter dropped
+    // them. TanStack Query handles its own in-memory cache; we don't
+    // want a SECOND layer (HTTP) hiding state changes.
+    cache: "no-store",
     ...options,
     headers: {
       "Content-Type": "application/json",
