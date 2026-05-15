@@ -112,17 +112,22 @@ def compute_job_score(
             profile_skills=[s.get("skill_name", "") for s in profile.get("skills", [])],
             profile_work_history=profile.get("work_history", []),
         )
-        # visa_score + salary_score are still computed (stored on the
-        # JobScore row for reference) but excluded from overall_fit —
-        # they were weak signals adding noise rather than precision.
-        # Max possible per-path total: title 20 + skill 25 + seniority 15
-        # + industry 10 + geo 10 + remote 10 = 90, clamped to 100.
+        # geo_score is computed (and stored on the JobScore row for
+        # reference) but EXCLUDED from overall_fit — country is now a
+        # hard filter at query time (apply_user_filters), so every job
+        # that gets here is already in a preferred country or remote.
+        # Including geo in the score would just be a constant 12-15 pt
+        # bump for every visible job, adding no ranking signal.
+        # visa_score + salary_score are likewise computed-but-excluded.
+        # Per-path max: title 20 + skill 25 + seniority 15 + industry 10
+        # + remote 5 = 75. Semantic mode (below) reaches 100 via the
+        # 80-pt cosine band, so a backfilled inbox naturally beats the
+        # rule-based fallback.
         pm_total = (
             pm_scores["title_score"]
             + pm_scores["skill_score"]
             + pm_scores["seniority_score"]
             + pm_scores["industry_score"]
-            + geo["geo_score"]
             + geo["remote_score"]
         )
 
@@ -140,12 +145,12 @@ def compute_job_score(
             profile_work_history=profile.get("work_history", []),
             job_description=job_data.get("raw_description", "") or "",
         )
+        # geo_score excluded — see pm path above.
         ai_total = (
             ai_scores["title_score"]
             + ai_scores["skill_score"]
             + ai_scores["seniority_score"]
             + ai_scores["industry_score"]
-            + geo["geo_score"]
             + geo["remote_score"]
         )
 
@@ -170,16 +175,18 @@ def compute_job_score(
     if profile_vec is not None and job_vec is not None:
         cos = cosine_similarity(profile_vec, job_vec)
         # Voyage cosine ranges typically 0.4–0.85 for real pairs. Stretch
-        # that into the 0-65 band so the spread between 'unrelated' and
+        # that into the 0-80 band so the spread between 'unrelated' and
         # 'strong match' translates to a meaningful score delta.
-        # Linear remap: 0.30 → 0, 0.85 → 65.
+        # Linear remap: 0.30 → 0, 0.85 → 80.
+        # (Was 0-65 when geo contributed 15; now that the country hard
+        # filter handles geography, those 15 pts go to semantic instead
+        # of being a constant 12-15 pt bump on every visible job.)
         stretched = max(0.0, min(1.0, (cos - 0.30) / 0.55))
-        semantic_component = stretched * 65.0
-        # Compose semantic (65) + geo (10) + remote (10) + seniority (15) = 100.
+        semantic_component = stretched * 80.0
+        # Compose semantic (80) + remote (5) + seniority (15) = 100.
         seniority = path_scores["seniority_score"] if path_scores else 0.0
         overall_fit = (
             semantic_component
-            + geo["geo_score"]
             + geo["remote_score"]
             + seniority
         )

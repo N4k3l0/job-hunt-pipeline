@@ -115,13 +115,20 @@ _RECORD_JOBS_TOOL = {
 
 
 _SYSTEM_PROMPT = (
-    "You find remote job postings matching a candidate's profile. "
+    "You find currently-open job postings matching a candidate's profile. "
     "Search the open web — company careers pages, ATS hosts (Greenhouse, "
     "Lever, Ashby, Workable), niche job boards, and recent posts on "
     "LinkedIn / Wellfound / RemoteOK. Prefer direct posting URLs over "
     "aggregator redirects.\n\n"
     "HARD RULES:\n"
     "- Only postings that are CURRENTLY OPEN. Skip closed / expired listings.\n"
+    "- Respect the candidate's stated remote_preference and location "
+    "  filters in the user message. If they accept 'any', return remote / "
+    "  hybrid / onsite freely. If they ask for 'full_remote', skip onsite "
+    "  postings.\n"
+    "- Only return jobs in the candidate's preferred countries (or remote "
+    "  jobs that explicitly allow those countries). Do NOT return jobs in "
+    "  countries the candidate didn't list.\n"
     "- Match the candidate's target roles tightly. A PM should not get "
     "  AI Engineer listings; an AI Engineer should not get PM listings.\n"
     "- Each URL must point to a SPECIFIC posting, not a careers landing page.\n"
@@ -164,21 +171,31 @@ async def search_jobs_for_user(
     import anthropic
     client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
+    # Country list is a HARD constraint — Claude should not return jobs
+    # outside it. Phrasing matters: 'preferred' was getting interpreted
+    # as 'nice to have' and the model would return US roles even for a
+    # NL/DE/UK-only user.
     countries_clause = (
-        f"\nPreferred locations: {', '.join(preferred_countries)}"
+        f"\nAllowed countries (HARD FILTER — only these, or fully remote): "
+        f"{', '.join(preferred_countries)}"
         if preferred_countries else ""
     )
-    remote_clause = (
-        f"\nRemote preference: {remote_preference}"
-        if remote_preference and remote_preference != "any" else ""
-    )
+    # Always state the remote preference, even when 'any', so the model
+    # knows it shouldn't restrict itself to remote-only.
+    if remote_preference == "any" or not remote_preference:
+        remote_clause = (
+            "\nRemote preference: any — remote, hybrid, AND onsite are all "
+            "acceptable. Do NOT restrict the search to remote-only."
+        )
+    else:
+        remote_clause = f"\nRemote preference: {remote_preference}"
     skills_clause = (
         f"\nKey skills: {', '.join(skills[:15])}"
         if skills else ""
     )
 
     user_prompt = (
-        "Find currently-open remote jobs for this candidate:\n\n"
+        "Find currently-open jobs for this candidate:\n\n"
         f"Target roles: {', '.join(target_roles)}"
         f"{countries_clause}{remote_clause}{skills_clause}\n\n"
         f"Run web_search 2–{max_searches} times with different angles "
