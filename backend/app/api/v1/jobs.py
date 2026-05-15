@@ -596,6 +596,8 @@ _BULK_URL_HOSTS = (
     "linkedin.com/comm/jobs",  # mobile-app rewrites
     "boards.greenhouse.io",
     "job-boards.greenhouse.io",
+    "job-boards.eu.greenhouse.io",  # EU tenants (Clarity AI, etc.)
+    "boards.eu.greenhouse.io",
     "jobs.lever.co",
     "jobs.ashbyhq.com",
     "apply.workable.com",
