@@ -612,27 +612,37 @@ async def import_job_text(request: JobImportText, user_id: CurrentUserId, db: Db
 # LinkedIn job-alert digest emails which embed 10–30 URLs per message.
 # Conservative — we want to skip footers, unsubscribe links, share
 # buttons, etc.
-_BULK_URL_HOSTS = (
-    "linkedin.com/jobs/view",
-    "linkedin.com/comm/jobs",  # mobile-app rewrites
-    "boards.greenhouse.io",
-    "job-boards.greenhouse.io",
-    "job-boards.eu.greenhouse.io",  # EU tenants (Clarity AI, etc.)
-    "boards.eu.greenhouse.io",
-    "jobs.lever.co",
-    "jobs.ashbyhq.com",
-    "apply.workable.com",
-    "jobs.workable.com",
-    "jobs.smartrecruiters.com",
-    "myworkdayjobs.com",
-    "recruitee.com",
-    "teamtailor.com",
-    "bamboohr.com",
-    "personio.com",
-    "wellfound.com/jobs",
-    "indeed.com/viewjob",
-    "glassdoor.com/job-listing",
+# Hosts we DEFINITELY don't want to send to the parser — obvious non-job
+# pages that show up in pasted text (social links, video embeds, search
+# result pages, etc.). Anything not on this list gets accepted: the
+# Firecrawl + LLM parser handles whatever's at the URL, and if it can't
+# extract a job posting the import just fails for that one URL.
+#
+# Switched from an allowlist (kept rejecting valid postings on long-tail
+# ATSes / company careers pages) to this blocklist so users can paste
+# from ANY job board and have it work.
+_BULK_URL_BLOCKED_HOSTS = (
+    "google.com/search", "google.com/url",
+    "bing.com/search",
+    "duckduckgo.com",
+    "twitter.com", "x.com",
+    "facebook.com",
+    "instagram.com",
+    "youtube.com", "youtu.be",
+    "tiktok.com",
+    "reddit.com",
+    "medium.com",
+    "wikipedia.org",
+    "github.com",  # users sometimes paste repo links; skip
+    "stackoverflow.com",
+    "amazon.com/dp", "amazon.com/gp",  # product pages
+    "unsubscribe", "/unsubscribe",
+    "calendar.", "calendly.com",
+    "zoom.us/j/",
 )
+
+# Kept for back-compat with any code reading the old name elsewhere.
+_BULK_URL_HOSTS = ()
 
 
 @router.post("/import/bulk-urls")
@@ -661,7 +671,9 @@ async def import_bulk_urls(
     # wrapped form works downstream.
     candidates = re.findall(r"https?://[^\s\"'<>)]+", raw)
 
-    # Dedupe + keep only known job-posting hosts.
+    # Dedupe + drop only the obvious-non-job blocklist hosts. Everything
+    # else is sent to the parser — the heuristic + LLM parsers handle
+    # any URL, and failures on a per-URL basis are surfaced in results.
     seen: set[str] = set()
     job_urls: list[str] = []
     for u in candidates:
@@ -669,17 +681,18 @@ async def import_bulk_urls(
         lowered = cleaned.lower()
         if cleaned in seen:
             continue
-        if any(host in lowered for host in _BULK_URL_HOSTS):
-            seen.add(cleaned)
-            job_urls.append(cleaned)
+        if any(blocked in lowered for blocked in _BULK_URL_BLOCKED_HOSTS):
+            continue
+        seen.add(cleaned)
+        job_urls.append(cleaned)
 
     if not job_urls:
         raise HTTPException(
             status_code=400,
             detail=(
-                "No job-posting URLs found in that text. The paste should contain "
-                "links from LinkedIn / Greenhouse / Lever / Ashby / Workable / "
-                "Indeed / Wellfound / etc."
+                "No URLs found in that text. Paste any text that contains "
+                "links to job postings — LinkedIn alert emails, a list of "
+                "URLs, a company careers page, anything."
             ),
         )
 

@@ -72,23 +72,27 @@ async def _run_all_concurrent(runners: list[tuple[str, callable]]) -> dict[str, 
 
 @router.get("/discover-fast")
 async def cron_discover_fast(authorization: str | None = Header(None)):
-    """Curated companies (highest-signal) + Arbeitnow, then a bounded
-    quick-score pass for every user.
-
-    Adzuna is temporarily disabled — their API has been returning 400s
-    even on `api.adzuna.com/` itself. The runner code is still intact in
-    `_run_adzuna_async`; flip it back on once Adzuna is back.
+    """Curated companies (highest-signal) + Arbeitnow + Adzuna + JSearch,
+    then a bounded quick-score pass for every user. All runners are
+    awaited concurrently — slow / failing sources can't starve fast ones,
+    and each runner wraps its own try/except so a 400 from Adzuna doesn't
+    kill the whole cron tick.
     """
     _verify_cron(authorization)
 
     from app.workers.discovery_tasks import (
-        _run_arbeitnow_async, _run_curated_async, quick_score_all_users,
+        _run_arbeitnow_async, _run_curated_async, _run_adzuna_async,
+        _run_jsearch_async, quick_score_all_users,
     )
 
+    # Adzuna re-enabled (was returning 400s earlier in 2026; per-runner
+    # try/except in _run_adzuna_async swallows failures so a recurrence
+    # doesn't break the cron). JSearch was never wired in — adding now.
     results = await _run_all_concurrent([
         ("curated", _run_curated_async),
         ("arbeitnow", _run_arbeitnow_async),
-        # ("adzuna", _run_adzuna_async),  # disabled: upstream returning 400s
+        ("adzuna", _run_adzuna_async),
+        ("jsearch", _run_jsearch_async),
     ])
     scoring = await quick_score_all_users(per_user_timeout=10)
 
@@ -127,13 +131,15 @@ async def cron_discover_remote(authorization: str | None = Header(None)):
         _run_remoteok_async, _run_himalayas_async,
         _run_remotive_async, _run_weworkremotely_async,
         _run_dailyremote_async, _run_undutchables_async,
-        quick_score_all_users,
+        _run_crossover_async, quick_score_all_users,
     )
 
     # DailyRemote routes through Firecrawl now — Cloudflare blocks direct
     # serverless fetches. Scope is intentionally small (2 categories × 8
     # detail pages = 18 Firecrawl credits/run = ~540/month).
     # Undutchables adds NL-specialist recruiter supply — ~13 credits/run.
+    # Crossover (was on the manual /discover-slow endpoint) folded in
+    # here — its catalogue is small but Nigeria-friendly, USD-paid.
     results = await _run_all_concurrent([
         ("remoteok", _run_remoteok_async),
         ("himalayas", _run_himalayas_async),
@@ -141,6 +147,7 @@ async def cron_discover_remote(authorization: str | None = Header(None)):
         ("weworkremotely", _run_weworkremotely_async),
         ("dailyremote", _run_dailyremote_async),
         ("undutchables", _run_undutchables_async),
+        ("crossover", _run_crossover_async),
     ])
     scoring = await quick_score_all_users(per_user_timeout=10)
     return {"status": "complete", "results": results, "scoring": scoring}

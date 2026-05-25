@@ -577,11 +577,12 @@ function EmailBulkImportPanel() {
       <CardHeader>
         <CardTitle>Import from email body</CardTitle>
         <CardDescription>
-          Paste a LinkedIn job-alert email (or any text with job URLs).
-          We pull every posting link out, ingest each, and drop them in
-          your inbox. Recognises LinkedIn, Greenhouse, Lever, Ashby,
-          Workable, Indeed, Wellfound, SmartRecruiters, Workday, and
-          common ATSes.
+          Paste a LinkedIn job-alert email — or honestly any text that
+          contains job URLs. We extract every link, ingest each, and
+          drop them in your inbox. Works with ANY job board or ATS
+          (LinkedIn, Greenhouse, Lever, Ashby, Workable, Workday,
+          SmartRecruiters, Wellfound, Indeed, Glassdoor, BambooHR,
+          Recruitee, Teamtailor, custom company careers pages — anything).
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
