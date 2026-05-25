@@ -548,6 +548,11 @@ async def admin_source_health(admin: AdminUser):
         return await fetch_jobs(keywords=None, max_detail_fetches=2)
     probes.append(("undutchables", _probe_undutchables, "firecrawl_api_key"))
 
+    async def _probe_workingnomads():
+        from app.services.discovery.workingnomads_service import fetch_jobs
+        return await fetch_jobs(keywords={"ai", "engineer"})
+    probes.append(("workingnomads", _probe_workingnomads, None))
+
     async def _probe_curated():
         from app.services.discovery.curated_service import fetch_jobs
         return await fetch_jobs(keywords=None)

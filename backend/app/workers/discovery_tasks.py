@@ -734,3 +734,21 @@ async def _run_dailyremote_async():
             await _ingest_raw_jobs(jobs)
     except Exception as e:
         logger.error("DailyRemote discovery failed: %s", e)
+
+
+# ── Working Nomads (public JSON feed, no auth) ────────────────────────────────
+
+
+async def _run_workingnomads_async():
+    """Working Nomads exposes a free JSON feed at /api/exposed_jobs/.
+    ~40-80 active rows per poll, ~65% Development category — strong
+    supply for AI Eng / ML / Automation users."""
+    from app.services.discovery.workingnomads_service import fetch_jobs
+
+    keywords = await _collect_all_keywords()
+    try:
+        jobs = await fetch_jobs(keywords=set(keywords) if keywords else None)
+        if jobs:
+            await _ingest_raw_jobs(jobs)
+    except Exception as e:
+        logger.error("Working Nomads discovery failed: %s", e)
