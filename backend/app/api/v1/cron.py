@@ -81,18 +81,22 @@ async def cron_discover_fast(authorization: str | None = Header(None)):
     _verify_cron(authorization)
 
     from app.workers.discovery_tasks import (
-        _run_arbeitnow_async, _run_curated_async, _run_adzuna_async,
+        _run_arbeitnow_async, _run_curated_async,
         _run_jsearch_async, quick_score_all_users,
     )
 
-    # Adzuna re-enabled (was returning 400s earlier in 2026; per-runner
-    # try/except in _run_adzuna_async swallows failures so a recurrence
-    # doesn't break the cron). JSearch was never wired in — adding now.
+    # Adzuna stays disabled — verified 2026-05: api.adzuna.com still
+    # returns HTTP 400 on every endpoint including /v1/api/version,
+    # which doesn't need auth. Their infrastructure is broken, not
+    # a credential issue on our side. Re-enable only after their
+    # status page confirms recovery.
+    # JSearch wired in — RapidAPI host responds 401 with proper error
+    # message (API alive), works if JSEARCH_RAPIDAPI_KEY env var is set.
     results = await _run_all_concurrent([
         ("curated", _run_curated_async),
         ("arbeitnow", _run_arbeitnow_async),
-        ("adzuna", _run_adzuna_async),
         ("jsearch", _run_jsearch_async),
+        # ("adzuna", _run_adzuna_async),  # disabled: still 400-storming as of 2026-05
     ])
     scoring = await quick_score_all_users(per_user_timeout=10)
 
@@ -131,15 +135,18 @@ async def cron_discover_remote(authorization: str | None = Header(None)):
         _run_remoteok_async, _run_himalayas_async,
         _run_remotive_async, _run_weworkremotely_async,
         _run_dailyremote_async, _run_undutchables_async,
-        _run_crossover_async, quick_score_all_users,
+        quick_score_all_users,
     )
 
     # DailyRemote routes through Firecrawl now — Cloudflare blocks direct
     # serverless fetches. Scope is intentionally small (2 categories × 8
     # detail pages = 18 Firecrawl credits/run = ~540/month).
     # Undutchables adds NL-specialist recruiter supply — ~13 credits/run.
-    # Crossover (was on the manual /discover-slow endpoint) folded in
-    # here — its catalogue is small but Nigeria-friendly, USD-paid.
+    # Crossover NOT in the daily cron: verified 2026-05 that crossover.com
+    # /jobs is now a JS-rendered SPA — raw HTML has zero job links.
+    # Firecrawl *might* render it correctly but unverified. Stays on the
+    # manual /discover-slow endpoint until someone confirms the scraper
+    # still extracts URLs from the rendered page.
     results = await _run_all_concurrent([
         ("remoteok", _run_remoteok_async),
         ("himalayas", _run_himalayas_async),
@@ -147,7 +154,6 @@ async def cron_discover_remote(authorization: str | None = Header(None)):
         ("weworkremotely", _run_weworkremotely_async),
         ("dailyremote", _run_dailyremote_async),
         ("undutchables", _run_undutchables_async),
-        ("crossover", _run_crossover_async),
     ])
     scoring = await quick_score_all_users(per_user_timeout=10)
     return {"status": "complete", "results": results, "scoring": scoring}

@@ -478,6 +478,112 @@ async def admin_embeddings_backfill(
     }
 
 
+@router.get("/admin/debug/source-health")
+async def admin_source_health(admin: AdminUser):
+    """Ping every external job source and report whether it's actually
+    producing jobs right now. Use this BEFORE wiring a source into a
+    cron — and any time someone reports the inbox feels empty.
+
+    Each source runs in isolation with its own try/except + 20s timeout
+    so a hanging one can't kill the others. Returns count_fetched per
+    source so you can spot 'API healthy but returning zero rows' vs
+    'API broken' vs 'env var missing'.
+    """
+    import asyncio
+    import time
+    from app.core.config import get_settings
+    cfg = get_settings()
+
+    # Tuples of (display_name, callable that returns a list of raw job dicts,
+    # required env var to flag if missing).
+    probes: list[tuple[str, callable, str | None]] = []
+
+    async def _probe_adzuna():
+        from app.services.discovery.adzuna_service import fetch_jobs
+        return await fetch_jobs(country_code="gb", keywords=["ai engineer"])
+    probes.append(("adzuna", _probe_adzuna, "adzuna_app_key"))
+
+    async def _probe_jsearch():
+        from app.services.discovery.jsearch_service import fetch_jobs
+        return await fetch_jobs(queries=["ai engineer"])
+    probes.append(("jsearch", _probe_jsearch, "jsearch_rapidapi_key"))
+
+    async def _probe_remoteok():
+        from app.services.discovery.remoteok_service import fetch_jobs
+        return await fetch_jobs(keywords={"ai", "engineer"})
+    probes.append(("remoteok", _probe_remoteok, None))
+
+    async def _probe_arbeitnow():
+        from app.services.discovery.arbeitnow_service import fetch_jobs
+        return await fetch_jobs(keywords={"ai", "engineer"})
+    probes.append(("arbeitnow", _probe_arbeitnow, None))
+
+    async def _probe_himalayas():
+        from app.services.discovery.himalayas_service import fetch_jobs
+        return await fetch_jobs(keywords={"ai", "engineer"})
+    probes.append(("himalayas", _probe_himalayas, None))
+
+    async def _probe_remotive():
+        from app.services.discovery.remotive_service import fetch_jobs
+        return await fetch_jobs(keywords={"ai", "engineer"})
+    probes.append(("remotive", _probe_remotive, None))
+
+    async def _probe_wwr():
+        from app.services.discovery.weworkremotely_service import fetch_jobs
+        return await fetch_jobs(keywords={"ai", "engineer"})
+    probes.append(("weworkremotely", _probe_wwr, None))
+
+    async def _probe_dailyremote():
+        from app.services.discovery.dailyremote_service import fetch_jobs
+        return await fetch_jobs(keywords={"ai", "engineer"})
+    probes.append(("dailyremote", _probe_dailyremote, "firecrawl_api_key"))
+
+    async def _probe_crossover():
+        from app.services.discovery.crossover_service import fetch_jobs
+        return await fetch_jobs(keywords={"ai", "engineer"}, max_detail_fetches=2)
+    probes.append(("crossover", _probe_crossover, "firecrawl_api_key"))
+
+    async def _probe_undutchables():
+        from app.services.discovery.undutchables_service import fetch_jobs
+        return await fetch_jobs(keywords=None, max_detail_fetches=2)
+    probes.append(("undutchables", _probe_undutchables, "firecrawl_api_key"))
+
+    async def _probe_curated():
+        from app.services.discovery.curated_service import fetch_jobs
+        return await fetch_jobs(keywords=None)
+    probes.append(("curated", _probe_curated, None))
+
+    async def run_one(name: str, fn, env_key: str | None) -> dict:
+        # Flag missing env vars before even hitting the network — saves
+        # 20s waiting for a sure failure.
+        if env_key and not getattr(cfg, env_key, None):
+            return {"source": name, "status": "skipped", "reason": f"env var {env_key} not set", "count": 0, "elapsed_s": 0.0}
+        started = time.monotonic()
+        try:
+            jobs = await asyncio.wait_for(fn(), timeout=20.0)
+            elapsed = time.monotonic() - started
+            return {
+                "source": name,
+                "status": "ok" if jobs else "empty",
+                "count": len(jobs) if jobs else 0,
+                "elapsed_s": round(elapsed, 1),
+                "sample_title": (jobs[0].get("title") if jobs else None),
+            }
+        except asyncio.TimeoutError:
+            return {"source": name, "status": "timeout", "count": 0, "elapsed_s": 20.0}
+        except Exception as e:  # noqa: BLE001
+            return {
+                "source": name,
+                "status": "error",
+                "count": 0,
+                "elapsed_s": round(time.monotonic() - started, 1),
+                "error": f"{type(e).__name__}: {str(e)[:200]}",
+            }
+
+    results = await asyncio.gather(*(run_one(n, f, k) for n, f, k in probes))
+    return {"sources": results}
+
+
 @router.post("/admin/fix/raw-description")
 async def admin_fix_raw_description(
     admin: AdminUser,
