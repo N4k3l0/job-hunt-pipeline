@@ -752,3 +752,64 @@ async def _run_workingnomads_async():
             await _ingest_raw_jobs(jobs)
     except Exception as e:
         logger.error("Working Nomads discovery failed: %s", e)
+
+
+# ── Arc.dev (JS SPA via Firecrawl, AI-focused categories) ─────────────────────
+
+
+async def _run_arcdev_async():
+    """Arc.dev curates dev/engineering remote jobs with deep category
+    targeting (/remote-jobs/ai, /agentic-frameworks, /automation, ...).
+    Costs ~30 Firecrawl credits/run — bounded by category × detail caps.
+    """
+    from app.services.discovery.arcdev_service import fetch_jobs
+    from app.services.parsing.normalizer import normalize_url
+
+    keywords = await _collect_all_keywords()
+    # Skip URLs already in our DB to save Firecrawl credits.
+    skip_urls: set[str] = set()
+    async with create_worker_session()() as db:
+        result = await db.execute(
+            select(Job.job_url).join(JobSource, Job.source_id == JobSource.id)
+            .where(JobSource.name == "arcdev", Job.job_url.is_not(None))
+        )
+        for row in result.all():
+            normalized = normalize_url(row[0])
+            if normalized:
+                skip_urls.add(normalized)
+    try:
+        jobs = await fetch_jobs(
+            keywords=set(keywords) if keywords else None,
+            skip_urls=skip_urls,
+        )
+        if jobs:
+            await _ingest_raw_jobs(jobs)
+    except Exception as e:
+        logger.error("Arc.dev discovery failed: %s", e)
+
+
+# ── Wellfound (formerly AngelList — startups via Firecrawl) ──────────────────
+
+
+async def _run_wellfound_async():
+    """Wellfound serves startup roles, often with direct apply. Plain
+    HTTP gets 403'd (anti-bot); Firecrawl handles. ~18 credits/run."""
+    from app.services.discovery.wellfound_service import fetch_jobs
+    from app.services.parsing.normalizer import normalize_url
+
+    skip_urls: set[str] = set()
+    async with create_worker_session()() as db:
+        result = await db.execute(
+            select(Job.job_url).join(JobSource, Job.source_id == JobSource.id)
+            .where(JobSource.name == "wellfound", Job.job_url.is_not(None))
+        )
+        for row in result.all():
+            normalized = normalize_url(row[0])
+            if normalized:
+                skip_urls.add(normalized)
+    try:
+        jobs = await fetch_jobs(skip_urls=skip_urls)
+        if jobs:
+            await _ingest_raw_jobs(jobs)
+    except Exception as e:
+        logger.error("Wellfound discovery failed: %s", e)
