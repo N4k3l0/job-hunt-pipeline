@@ -354,86 +354,104 @@ async def _process_apify_async(actor_run_id: str, actor_type: str):
 # signed up. Without these, an early-user-base skewed toward AI ends up
 # with zero PM strings in the keyword pool — which silently drops PM
 # postings at the curated / RemoteOK / Arbeitnow filters and leaves new
-# PM users with an empty inbox even though those companies are posting
-# the roles. CLAUDE.md says target roles are PM + AI Automation, so we
-# anchor both families here.
-CORE_DISCOVERY_KEYWORDS: set[str] = {
-    # PM family
-    "product manager",
-    "senior product manager",
-    "product owner",
-    "product lead",
-    "head of product",
-    "technical product manager",
-    "ai product manager",
-    "group product manager",
-    "principal product manager",
-    # AI / automation family
-    "ai engineer",
-    "ml engineer",
-    "machine learning engineer",
-    "automation engineer",
-    "ai automation",
-    "llm engineer",
-    "prompt engineer",
-}
+# Note: there is no longer a hardcoded CORE_DISCOVERY_KEYWORDS set.
+# The discovery pool is 100% user-driven. If no users want a role, we
+# don't waste API calls searching for it. The pool grows automatically
+# as new users join with new target_roles / skills.
 
 
 async def _collect_all_keywords() -> list[str]:
-    """Collect search keywords from all users' profiles, always merged
-    with CORE_DISCOVERY_KEYWORDS so both PM and AI families are covered
-    regardless of who is signed up.
+    """Union of every user's target_roles + custom search_keywords +
+    technical/tool skills. Deduplicated case-insensitively, sorted by
+    frequency (the keyword the most users want appears first).
 
-    Combines:
-      - custom `search_keywords` (free-text user input)
-      - `target_roles` (e.g. "AI Engineer")
-      - `candidate_skills` rows where category is `technical` or `tool`
-        (e.g. "Python", "LangChain", "Figma") — the strongest signal for
-        whether a posting is actually a fit for this user
-      - CORE_DISCOVERY_KEYWORDS — base PM + AI terms so neither family
-        gets shut out of the pipeline because no current user happens
-        to target it.
+    Used by sources that take a keyword filter and can handle a moderate
+    number of terms (RemoteOK / Arbeitnow / Himalayas / Remotive / WWR /
+    DailyRemote — these fetch a feed and filter locally, so extra terms
+    just relax the filter).
 
-    Skills are short, concrete, and the same words employers put in their
-    job descriptions, which makes them the most reliable expansion of the
-    search beyond the role title alone.
+    Returns an EMPTY list if no users / no profiles have any of those
+    fields populated. Callers should treat empty as "skip this source
+    entirely" rather than substituting a hardcoded fallback — searching
+    for nothing-in-particular pollutes the inbox for everyone.
     """
+    from collections import Counter
     from app.models.candidate import CandidateProfile, CandidateSkill
 
+    counter: Counter[str] = Counter()
     async with create_worker_session()() as db:
-        # Profiles: search_keywords + target_roles
+        # Roles + custom keywords from every profile.
         prof_result = await db.execute(
             select(CandidateProfile.search_keywords, CandidateProfile.target_roles)
         )
-        all_keywords: set[str] = set(CORE_DISCOVERY_KEYWORDS)
         for search_kw, target_roles in prof_result:
-            if search_kw:
-                for kw in search_kw:
-                    all_keywords.add(kw.strip().lower())
-            if target_roles:
-                for role in target_roles:
-                    all_keywords.add(role.strip().lower())
+            for kw in (search_kw or []):
+                cleaned = (kw or "").strip().lower()
+                if len(cleaned) >= 2:
+                    counter[cleaned] += 1
+            for role in (target_roles or []):
+                cleaned = (role or "").strip().lower()
+                if len(cleaned) >= 2:
+                    counter[cleaned] += 1
 
-        # Skills: pull technical + tool entries across every profile
+        # Technical + tool skills across every profile.
         skill_result = await db.execute(
             select(CandidateSkill.skill_name).where(
                 CandidateSkill.category.in_(("technical", "tool"))
             )
         )
         for (skill_name,) in skill_result:
-            if skill_name:
-                cleaned = skill_name.strip().lower()
-                # Single letters / pure punctuation slip in if a user types
-                # "C" or "+"; both would explode aggregator queries with noise.
-                if len(cleaned) >= 2:
-                    all_keywords.add(cleaned)
+            cleaned = (skill_name or "").strip().lower()
+            # Single letters / pure punctuation slip in if a user types
+            # "C" or "+"; both would explode aggregator queries with noise.
+            if len(cleaned) >= 2:
+                counter[cleaned] += 1
 
-    keywords = list(all_keywords)
+    keywords = [kw for kw, _ in counter.most_common()]
     logger.info(
-        "Collected %d unique search keywords (roles + skills + core) from all users: %s",
-        len(keywords), keywords,
+        "Discovery pool: %d unique keywords from user profiles (top 10: %s)",
+        len(keywords), keywords[:10],
     )
     return keywords
+
+
+async def _collect_user_roles(limit: int = 8) -> list[str]:
+    """Just target_roles + custom search_keywords (NO skills). Use for
+    sources with a tight query budget where role-precision matters more
+    than coverage breadth — Adzuna fans out per-country so each query
+    multiplies cost, JSearch's RapidAPI free tier is rate-limited, etc.
+
+    Returns the top `limit` keywords ordered by how many users want
+    each one — high-overlap roles first so the budget covers the most
+    users with the fewest calls.
+
+    Empty list when no users have roles set. Callers should skip rather
+    than substitute a default.
+    """
+    from collections import Counter
+    from app.models.candidate import CandidateProfile
+
+    counter: Counter[str] = Counter()
+    async with create_worker_session()() as db:
+        result = await db.execute(
+            select(CandidateProfile.search_keywords, CandidateProfile.target_roles)
+        )
+        for search_kw, target_roles in result:
+            for kw in (search_kw or []):
+                cleaned = (kw or "").strip().lower()
+                if len(cleaned) >= 2:
+                    counter[cleaned] += 1
+            for role in (target_roles or []):
+                cleaned = (role or "").strip().lower()
+                if len(cleaned) >= 2:
+                    counter[cleaned] += 1
+
+    top = [kw for kw, _ in counter.most_common(limit)]
+    logger.info(
+        "Top-%d user-driven role keywords: %s",
+        limit, top or "(none — no users have target_roles set)",
+    )
+    return top
 
 
 # ── Adzuna ───────────────────────────────────────────────────────────────────
@@ -451,26 +469,38 @@ async def _run_adzuna_async():
     instantly and start eating timeouts.
 
     Constraints we enforce here:
-      - Fixed set of 3 broad keywords (matches what aggregator full-text
-        search actually rewards). Per-user filtering happens at the
-        scoring/inbox layer, not by fanning out the discovery query.
+      - Top 4 most-overlapping user role keywords (no hardcoded set).
+        If 5 users want "Product Manager" and 1 wants "Marketing
+        Manager", we query both — but Product Manager runs first
+        because more users benefit. New roles enter automatically as
+        users join with new target_roles.
+      - Skips entirely when no users have roles set yet (don't waste
+        the API budget on generic searches that won't match anyone).
       - Concurrent country fan-out throttled with a semaphore to 3 at
-        a time → at most 9 in-flight Adzuna calls. Stays inside their
-        rate limit, total wall time roughly ceil(8/3) × per_country.
+        a time → at most 12 in-flight Adzuna calls (4 keywords × 3
+        countries). Stays inside their rate limit.
     """
     import asyncio
     from app.services.discovery.adzuna_service import fetch_jobs, ADZUNA_COUNTRIES
 
-    # Fixed keyword set — broad enough to surface roles for both AI and PM
-    # users. Skills/role-specific filtering is applied later in the pipeline,
-    # not at the Adzuna query layer.
-    ADZUNA_KEYWORDS = ["product manager", "ai engineer", "automation"]
+    # Search every distinct role across all users, up to 15. With 8
+    # countries × 15 keywords = 120 calls; semaphore(3) paces them to
+    # ~40 batches × ~500ms = ~20s wall time. Sorted by frequency so
+    # high-overlap roles fire first in case rate limit cuts off.
+    adzuna_keywords = await _collect_user_roles(limit=15)
+    if not adzuna_keywords:
+        logger.info(
+            "Adzuna: skipping — no users have target_roles set yet, "
+            "nothing to search for"
+        )
+        return
+
     sem = asyncio.Semaphore(3)
 
     async def run_country(iso: str, code: str) -> list[dict]:
         async with sem:
             try:
-                return await fetch_jobs(country_code=code, keywords=ADZUNA_KEYWORDS)
+                return await fetch_jobs(country_code=code, keywords=adzuna_keywords)
             except Exception as e:
                 logger.error("Adzuna discovery failed for %s: %s", iso, e)
                 return []
@@ -538,11 +568,20 @@ def run_jsearch_discovery():
 
 
 async def _run_jsearch_async():
+    """JSearch is RapidAPI-rate-limited (free tier ~150 req/month).
+    Use top 5 user roles only so the daily run stays inside budget
+    (5 queries × 30 days = 150/month — at the wire). Skip if no users
+    have roles set."""
     from app.services.discovery.jsearch_service import fetch_jobs
 
-    keywords = await _collect_all_keywords()
+    queries = await _collect_user_roles(limit=5)
+    if not queries:
+        logger.info(
+            "JSearch: skipping — no users have target_roles set yet"
+        )
+        return
     try:
-        jobs = await fetch_jobs(queries=keywords if keywords else None)
+        jobs = await fetch_jobs(queries=queries)
         if jobs:
             await _ingest_raw_jobs(jobs)
     except Exception as e:
