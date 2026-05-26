@@ -14,6 +14,7 @@ import {
   Briefcase, Star, Sparkles, Loader2, CheckCircle2, AlertCircle,
 } from "lucide-react";
 import { useJob, useShortlistJob, useGenerateTailored, useDeepScore } from "@/hooks/use-api";
+import { ScoreHero } from "@/components/ds/score";
 import { useToast } from "@/components/ui/toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
@@ -572,42 +573,46 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
   }
 
   return (
-    <div className="space-y-6 max-w-4xl">
-      {/* Back */}
-      <Button variant="ghost" size="sm" render={<Link href="/dashboard/jobs" />}>
-        <ArrowLeft className="h-4 w-4" /> Back to inbox
-      </Button>
+    <div className="ds-root ds-page-fade" style={{ background: "var(--ds-bg)" }}>
+      <div className="space-y-6" style={{ maxWidth: 1100, margin: "0 auto" }}>
+      {/* Back — uses ds-btn ghost */}
+      <Link href="/dashboard/jobs" className="ds-btn ghost" style={{ paddingLeft: 0, alignSelf: "flex-start", width: "fit-content" }}>
+        <ArrowLeft className="h-3.5 w-3.5" />
+        Back to inbox
+      </Link>
 
-      {/* Header — meta on top, actions below; both rows wrap cleanly on phone */}
+      {/* Editorial header: company over title, structured meta pills,
+          hero score on the right. Asymmetric per the design. */}
       <div className="space-y-4">
-        <div className="flex items-start gap-4 sm:gap-5">
-          {score && <ScoreRing score={overallFit} />}
+        <div className="flex items-start gap-4 sm:gap-6 flex-wrap">
           <div className="flex-1 min-w-0">
-            <h1 className="font-display text-2xl sm:text-3xl font-semibold tracking-tight leading-snug">{job.title}</h1>
-            <div className="flex items-center flex-wrap gap-x-4 gap-y-1 mt-1.5 text-sm text-muted-foreground">
-              <span className="flex items-center gap-1.5">
-                <Building2 className="h-4 w-4 opacity-50" />
-                {job.company}
-              </span>
+            <div className="ds-muted" style={{ fontSize: 14, fontWeight: 500, letterSpacing: "-0.005em" }}>
+              {job.company}
+            </div>
+            <h1 className="ds-h1" style={{ marginTop: 4, textWrap: "balance" }}>{job.title}</h1>
+            <div className="flex flex-wrap" style={{ gap: 8, marginTop: 12 }}>
               {job.location && (
-                <span className="flex items-center gap-1.5">
-                  <MapPin className="h-4 w-4 opacity-50" />
+                <span className="ds-pill">
+                  <MapPin className="h-3 w-3 opacity-70" />
                   {job.location}
                 </span>
               )}
               {job.remote_type === "full_remote" && (
-                <span className="flex items-center gap-1.5 text-emerald-400">
-                  <Globe className="h-4 w-4" />
+                <span className="ds-pill accent">
+                  <Globe className="h-3 w-3" />
                   Remote
                 </span>
               )}
               {job.salary_text && (
-                <span className="font-mono text-sm text-foreground/80">
-                  {job.salary_text}
+                <span className="ds-pill">
+                  <span className="ds-mono">{job.salary_text}</span>
                 </span>
               )}
             </div>
           </div>
+          {score && (
+            <ScoreHero score={overallFit} variant="ring" />
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button
@@ -920,6 +925,7 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
           </Card>
 
         </div>
+      </div>
       </div>
     </div>
   );

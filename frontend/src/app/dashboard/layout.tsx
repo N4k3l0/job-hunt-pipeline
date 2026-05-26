@@ -11,24 +11,28 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   return (
+    // .ds-root applies the v2 design tokens (LemFi-style premium fintech
+    // from the Claude Design handoff). Tokens are namespaced --ds-* so
+    // shadcn primitives nested below keep working.
     <SidebarProvider>
-      <QueueWatcher />
-      <RoleAutoSuggest />
-      <AppSidebar />
-      <main className="flex-1 overflow-auto">
-        <div className="flex items-center gap-2 border-b px-4 sm:px-6 py-3">
-          <SidebarTrigger />
-        </div>
-        <div className="p-4 sm:p-6">
-          {/* OnboardingGate is a no-op once the user has a name + at
-              least one resume; before that it replaces the requested
-              page with a 2-step setup wizard so new invitees can't
-              land on a useless empty inbox. */}
-          <OnboardingGate>
-            <PageTransition>{children}</PageTransition>
-          </OnboardingGate>
-        </div>
-      </main>
+      <div className="ds-root contents">
+        <QueueWatcher />
+        <RoleAutoSuggest />
+        <AppSidebar />
+        <main className="flex-1 overflow-auto" style={{ background: "var(--ds-bg)" }}>
+          <div className="flex items-center gap-2 border-b px-4 sm:px-6 py-3" style={{ borderColor: "var(--ds-line)" }}>
+            <SidebarTrigger />
+          </div>
+          <div className="p-4 sm:p-6">
+            {/* OnboardingGate is a no-op once the user has a name +
+                resume + countries; before that it replaces the requested
+                page with the 3-step setup wizard. */}
+            <OnboardingGate>
+              <PageTransition>{children}</PageTransition>
+            </OnboardingGate>
+          </div>
+        </main>
+      </div>
     </SidebarProvider>
   );
 }
