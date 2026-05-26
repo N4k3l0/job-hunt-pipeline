@@ -62,16 +62,25 @@ async def list_jobs(
     interviewing / offered / rejected / ghosted). The Applications
     page calls this with ?include_applied=true to see them.
     """
-    # Any job the user has moved into their application pipeline — regardless
-    # of status — should be hidden from the inbox. Previously this only
-    # filtered the 6 post-"applied" statuses, which let tailored-not-yet-
-    # applied rows (status="approved", created by /tailoring) leak through
-    # to the inbox even though they were already on the Applications page.
-    # If the user wants a tailored job back in the inbox, they delete the
-    # tracking row from /dashboard/applications.
+    # Hide jobs the user has actually moved past the inbox. We narrowly
+    # scope this to the post-"applied" statuses — anything from "sent" to
+    # "ghosted/rejected/offered". Tailored-but-not-yet-applied rows
+    # (status="approved", created by /tailoring) stay visible so the user
+    # can iterate on the draft from the inbox; the previous broader
+    # filter emptied the inbox for users who'd tailored most of their
+    # top matches.
+    APPLIED_STATUSES = (
+        "applied",
+        "follow_up_due",
+        "interviewing",
+        "offered",
+        "rejected",
+        "ghosted",
+    )
     pipeline_job_ids = (
         select(ApplicationTracking.job_id).where(
             ApplicationTracking.user_id == user_id,
+            ApplicationTracking.status.in_(APPLIED_STATUSES),
         )
     )
 
