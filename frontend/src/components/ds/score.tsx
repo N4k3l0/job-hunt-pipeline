@@ -118,6 +118,40 @@ export function Score({ score, variant }: { score: number | null; variant: Score
   return <ScoreRing score={score} />;
 }
 
+/**
+ * ScoreAxis — labeled horizontal bar for the score-breakdown sidebar
+ * on Job Detail. Teal fill at ≥80, neutral gray below. Width animates
+ * from 0 on mount so the breakdown feels alive without using springs.
+ */
+export function ScoreAxis({
+  label,
+  value,
+  max = 100,
+}: { label: string; value: number; max?: number }) {
+  const clamped = Math.max(0, Math.min(max, value));
+  const pct = (clamped / max) * 100;
+  const top = clamped >= 80;
+  return (
+    <div className="flex flex-col" style={{ gap: 4 }}>
+      <div className="flex items-baseline justify-between">
+        <span style={{ fontSize: 12, color: "var(--ds-fg-muted)", fontWeight: 500 }}>{label}</span>
+        <span className={`ds-mono ${top ? "ds-s-top" : ""}`} style={{ fontSize: 13, fontWeight: 600, letterSpacing: "-0.01em" }}>
+          {Math.round(clamped)}<span style={{ color: "var(--ds-fg-faint)", fontWeight: 400 }}>/{max}</span>
+        </span>
+      </div>
+      <div style={{ height: 3, background: "var(--ds-line)", borderRadius: 2, overflow: "hidden" }}>
+        <div style={{
+          width: `${pct}%`,
+          height: "100%",
+          background: top ? "var(--ds-accent)" : "var(--ds-fg-muted)",
+          borderRadius: 2,
+          transition: "width 360ms cubic-bezier(0.32,0.72,0.32,1)",
+        }} />
+      </div>
+    </div>
+  );
+}
+
 /** Hero score — used in the editorial top-match card. Larger + more
  * dramatic than the inline variants. */
 export function ScoreHero({ score, variant }: { score: number; variant: ScoreVariant }) {

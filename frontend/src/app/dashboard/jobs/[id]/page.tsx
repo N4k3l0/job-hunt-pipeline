@@ -14,7 +14,7 @@ import {
   Briefcase, Star, Sparkles, Loader2, CheckCircle2, AlertCircle,
 } from "lucide-react";
 import { useJob, useShortlistJob, useGenerateTailored, useDeepScore } from "@/hooks/use-api";
-import { ScoreHero } from "@/components/ds/score";
+import { ScoreHero, ScoreAxis } from "@/components/ds/score";
 import { useToast } from "@/components/ui/toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
@@ -614,60 +614,23 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
             <ScoreHero score={overallFit} variant="ring" />
           )}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              shortlist.mutate(id, {
-                onSuccess: () => toast.success("Shortlisted"),
-                onError: (e: any) => toast.error("Couldn't shortlist", { description: e?.message }),
-              })
-            }
-          >
-            <Star className="h-4 w-4" /> Shortlist
-          </Button>
+        {/* Primary action row — ds-btn buttons, primary CTA in teal */}
+        <div className="flex flex-wrap items-center" style={{ gap: 8, marginTop: 22 }}>
           {hasUrl && (
-            <Button
-              variant="outline"
-              size="sm"
+            <button
+              type="button"
+              className="ds-btn primary"
               onClick={handleApply}
               disabled={applying}
-              title="Opens the company's direct ATS posting (Greenhouse, Lever, Ashby, SmartRecruiters) when available — otherwise the source posting. Does NOT mark this as applied."
+              title="Opens the company's direct ATS posting when available."
             >
               {applying ? <Loader2 className="h-4 w-4 animate-spin" /> : <ExternalLink className="h-4 w-4" />}
               {applying ? "Opening…" : "Apply directly"}
-            </Button>
+            </button>
           )}
-          {/* Explicit tracking toggle — shows different state based on whether
-              the job has been marked applied. The user controls this; we
-              never auto-set it from a click. */}
-          {isAlreadyApplied ? (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleUnmarkApplied}
-              disabled={marking}
-              className="border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/5"
-              title="Click to roll back if you didn't actually submit."
-            >
-              {marking ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-              {marking ? "…" : "Applied ✓"}
-            </Button>
-          ) : (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleMarkApplied}
-              disabled={marking}
-              title="Press only after you've actually submitted the application. Adds it to your Applications and Analytics."
-            >
-              {marking ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-              {marking ? "Saving…" : "I applied"}
-            </Button>
-          )}
-          <Button
-            size="sm"
+          <button
+            type="button"
+            className="ds-btn"
             onClick={() =>
               generateTailored.mutate(id, {
                 onSuccess: () => {
@@ -682,249 +645,314 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
             disabled={generateTailored.isPending}
           >
             {generateTailored.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-            {generateTailored.isPending ? "Generating…" : "Generate application"}
-          </Button>
+            {generateTailored.isPending ? "Generating…" : "Tailor application"}
+          </button>
+          <button
+            type="button"
+            className="ds-btn"
+            onClick={() =>
+              shortlist.mutate(id, {
+                onSuccess: () => toast.success("Shortlisted"),
+                onError: (e: any) => toast.error("Couldn't shortlist", { description: e?.message }),
+              })
+            }
+          >
+            <Star className="h-4 w-4" />
+            Shortlist
+          </button>
+          {isAlreadyApplied ? (
+            <button
+              type="button"
+              className="ds-btn"
+              onClick={handleUnmarkApplied}
+              disabled={marking}
+              style={{ color: "var(--ds-accent)", borderColor: "var(--ds-accent-edge)" }}
+              title="Click to roll back if you didn't actually submit."
+            >
+              {marking ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+              {marking ? "…" : "Applied"}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="ds-btn ghost"
+              onClick={handleMarkApplied}
+              disabled={marking}
+              title="Press only after you've actually submitted the application."
+            >
+              {marking ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+              {marking ? "Saving…" : "I applied"}
+            </button>
+          )}
         </div>
       </div>
 
       {generateTailored.isSuccess && (
-        <div className="flex items-center gap-2 text-sm text-emerald-400 bg-emerald-500/5 border border-emerald-500/10 rounded-lg px-4 py-3">
+        <div className="ds-card" style={{
+          display: "flex", alignItems: "center", gap: 10,
+          padding: "10px 14px",
+          background: "var(--ds-accent-soft)",
+          borderColor: "var(--ds-accent-edge)",
+          color: "var(--ds-accent)",
+          fontSize: 13,
+        }}>
           <CheckCircle2 className="h-4 w-4" />
           Tailored application is being generated. Check the Review Queue shortly.
         </div>
       )}
 
-      <div className="grid gap-5 lg:grid-cols-3">
-        {/* Left: Description — 2 cols */}
-        <div className="lg:col-span-2 space-y-5">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Job Description</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {job.raw_description ? (
-                <div
-                  className="text-sm leading-relaxed text-foreground/80 prose prose-invert prose-sm max-w-none
-                    [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:mt-4 [&_h2]:mb-2
-                    [&_h3]:text-sm [&_h3]:font-medium [&_h3]:mt-3 [&_h3]:mb-1
-                    [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:space-y-1
-                    [&_p]:mb-2 [&_a]:text-amber-400 [&_a]:underline"
-                  dangerouslySetInnerHTML={{ __html: job.raw_description }}
-                />
-              ) : (
-                <p className="text-sm text-muted-foreground">No description available.</p>
-              )}
-            </CardContent>
-          </Card>
+      {/* Two-column body: main content + sticky score-breakdown sidebar */}
+      <div className="grid gap-7 lg:grid-cols-[minmax(0,1fr)_320px]" style={{ marginTop: 4 }}>
 
-          {entities && ((entities.skills?.length ?? 0) > 0 || (entities.requirements?.length ?? 0) > 0) && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Requirements & Skills</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {entities.requirements && entities.requirements.length > 0 && (
-                  <div>
-                    <p className="text-sm text-muted-foreground mb-2 font-medium">Requirements</p>
-                    <ul className="space-y-1">
-                      {entities.requirements.map((r: string, i: number) => (
-                        <li key={i} className="text-sm flex items-start gap-2">
-                          <span className="text-muted-foreground/30 mt-1">-</span> {r}
-                        </li>
-                      ))}
-                    </ul>
+        {/* ── LEFT COLUMN ── */}
+        <div className="space-y-6 min-w-0">
+
+          {/* "Why this matched you" — only when deep_score has run */}
+          {score?.deep_score?.summary && (
+            <section>
+              <div className="ds-mono ds-faint" style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                Why this matched you
+              </div>
+              <p style={{
+                fontSize: 14.5, lineHeight: 1.65, marginTop: 8,
+                color: "var(--ds-fg)", maxWidth: "65ch",
+              }}>
+                {score.deep_score.summary}
+              </p>
+              {score.deep_score.recommendation && (
+                <div className="ds-pill accent" style={{ marginTop: 12 }}>
+                  {score.deep_score.recommendation === "strong_apply" ? "Strong Apply" :
+                   score.deep_score.recommendation === "apply" ? "Apply" :
+                   score.deep_score.recommendation === "maybe" ? "Maybe" : "Skip"}
+                </div>
+              )}
+            </section>
+          )}
+
+          {/* Strengths / Gaps grid — design's two-column treatment */}
+          {(score?.deep_score?.strengths?.length || score?.deep_score?.gaps?.length) && (
+            <div className="grid gap-5 sm:grid-cols-2">
+              {score.deep_score.strengths?.length > 0 && (
+                <div>
+                  <div className="ds-mono ds-faint" style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                    Strengths
                   </div>
-                )}
-                {entities.skills && entities.skills.length > 0 && (
-                  <div>
-                    <p className="text-sm text-muted-foreground mb-2 font-medium">Skills</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {entities.skills.map((s: string, i: number) => (
-                        <Badge key={i} variant="secondary" className="text-xs">{s}</Badge>
-                      ))}
-                    </div>
+                  <ul style={{ listStyle: "none", padding: 0, margin: "10px 0 0", display: "flex", flexDirection: "column", gap: 8 }}>
+                    {score.deep_score.strengths.map((s: string, i: number) => (
+                      <li key={i} style={{ display: "flex", gap: 10, fontSize: 13, lineHeight: 1.55, color: "var(--ds-fg)" }}>
+                        <CheckCircle2 className="h-3.5 w-3.5" style={{ color: "var(--ds-accent)", flexShrink: 0, marginTop: 2 }} />
+                        <span>{s}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {score.deep_score.gaps?.length > 0 && (
+                <div>
+                  <div className="ds-mono ds-faint" style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                    Gaps
                   </div>
-                )}
-                {entities.nice_to_have && entities.nice_to_have.length > 0 && (
-                  <div>
-                    <p className="text-sm text-muted-foreground mb-2 font-medium">Nice to have</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {entities.nice_to_have.map((s: string, i: number) => (
-                        <Badge key={i} variant="outline" className="text-xs">{s}</Badge>
-                      ))}
-                    </div>
+                  <ul style={{ listStyle: "none", padding: 0, margin: "10px 0 0", display: "flex", flexDirection: "column", gap: 8 }}>
+                    {score.deep_score.gaps.map((g: string, i: number) => (
+                      <li key={i} style={{ display: "flex", gap: 10, fontSize: 13, lineHeight: 1.55, color: "var(--ds-fg-muted)" }}>
+                        <span style={{ color: "var(--ds-fg-dim)", fontSize: 16, lineHeight: 1, marginTop: 2 }}>·</span>
+                        <span>{g}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Trigger / re-run deep score */}
+          {!score?.deep_score && (
+            <div className="ds-card" style={{ padding: 20, display: "flex", flexDirection: "column", gap: 12, alignItems: "flex-start" }}>
+              <div>
+                <h3 className="ds-h3">Get a deeper fit analysis</h3>
+                <p className="ds-muted" style={{ fontSize: 13, marginTop: 4 }}>
+                  Compares your full resume against this posting and tells you exactly where you match and where you stretch.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="ds-btn primary"
+                onClick={() =>
+                  deepScore.mutate(id, {
+                    onSuccess: () => toast.success("Fit analysis updated"),
+                    onError: (e: any) => toast.error("Analysis failed", { description: e?.message }),
+                  })
+                }
+                disabled={deepScore.isPending}
+              >
+                {deepScore.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                {deepScore.isPending ? "Analyzing…" : "Analyze fit"}
+              </button>
+            </div>
+          )}
+
+          <OperationProgress
+            active={deepScore.isPending}
+            stages={[
+              { label: "Loading your profile", durationMs: 800, tip: "Pulling work history, skills, education." },
+              { label: "Reading the job description", durationMs: 1200, tip: "Parsing requirements + nice-to-haves." },
+              { label: "Cross-referencing your background", durationMs: 3500, tip: "Where you match, where you stretch." },
+              { label: "Drafting the recommendation", durationMs: 3000, tip: "Apply / Maybe / Skip — with reasoning." },
+            ]}
+          />
+
+          {/* About the role + Requirements */}
+          <section>
+            <h3 className="ds-h3">About the role</h3>
+            {job.raw_description ? (
+              <div
+                className="prose prose-invert prose-sm max-w-none"
+                style={{
+                  marginTop: 12, color: "var(--ds-fg-muted)",
+                  fontSize: 14, lineHeight: 1.7, maxWidth: "65ch",
+                }}
+                dangerouslySetInnerHTML={{ __html: job.raw_description }}
+              />
+            ) : (
+              <p className="ds-muted" style={{ fontSize: 13, marginTop: 12 }}>
+                No description available.
+              </p>
+            )}
+          </section>
+
+          {entities && ((entities.requirements?.length ?? 0) > 0 || (entities.skills?.length ?? 0) > 0) && (
+            <section className="space-y-5">
+              {entities.requirements && entities.requirements.length > 0 && (
+                <div>
+                  <h3 className="ds-h3">Requirements</h3>
+                  <ul style={{ marginTop: 12, color: "var(--ds-fg-muted)", fontSize: 14, lineHeight: 1.7, paddingLeft: 18, maxWidth: "65ch" }}>
+                    {entities.requirements.map((r: string, i: number) => (
+                      <li key={i}>{r}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {entities.skills && entities.skills.length > 0 && (
+                <div>
+                  <h3 className="ds-h3">Skills</h3>
+                  <div className="flex flex-wrap" style={{ gap: 6, marginTop: 12 }}>
+                    {entities.skills.map((s: string, i: number) => (
+                      <span key={i} className="ds-pill ds-mono" style={{ fontSize: 11 }}>{s}</span>
+                    ))}
                   </div>
-                )}
-              </CardContent>
-            </Card>
+                </div>
+              )}
+              {entities.nice_to_have && entities.nice_to_have.length > 0 && (
+                <div>
+                  <h3 className="ds-h3">Nice to have</h3>
+                  <div className="flex flex-wrap" style={{ gap: 6, marginTop: 12 }}>
+                    {entities.nice_to_have.map((s: string, i: number) => (
+                      <span key={i} className="ds-pill ds-mono ds-dim" style={{ fontSize: 11 }}>{s}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </section>
           )}
 
         </div>
 
-        {/* Right: Score + Meta — 1 col */}
-        <div className="space-y-5">
-          {/* Deep Score / AI Assessment */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Fit Assessment</CardTitle>
-              <CardDescription>
-                {score?.deep_score ? "AI-powered resume vs job analysis" : "Get a detailed fit analysis"}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <OperationProgress
-                active={deepScore.isPending}
-                stages={[
-                  { label: "Loading your profile", durationMs: 800, tip: "Pulling work history, skills, education." },
-                  { label: "Reading the job description", durationMs: 1200, tip: "Parsing requirements + nice-to-haves." },
-                  { label: "Cross-referencing your background", durationMs: 3500, tip: "Where you match, where you stretch." },
-                  { label: "Drafting the recommendation", durationMs: 3000, tip: "Apply / Maybe / Skip — with reasoning." },
-                ]}
-              />
-              {score?.deep_score ? (
-                <>
-                  {/* Score is already shown as the ring in the page header — show
-                      only the recommendation badge here to avoid duplication. */}
-                  <Badge
-                    variant="secondary"
-                    className={`text-xs self-start ${
-                      score.deep_score.recommendation === "strong_apply"
-                        ? "bg-emerald-500/10 text-emerald-400"
-                        : score.deep_score.recommendation === "apply"
-                          ? "bg-amber-500/10 text-amber-400"
-                          : score.deep_score.recommendation === "maybe"
-                            ? "bg-orange-500/10 text-orange-400"
-                            : "bg-red-500/10 text-red-400"
-                    }`}
-                  >
-                    {score.deep_score.recommendation === "strong_apply" ? "Strong Apply" :
-                     score.deep_score.recommendation === "apply" ? "Apply" :
-                     score.deep_score.recommendation === "maybe" ? "Maybe" : "Skip"}
-                  </Badge>
-
-                  {/* Summary */}
-                  <p className="text-sm text-muted-foreground leading-relaxed">
-                    {score.deep_score.summary}
-                  </p>
-
-                  <Separator />
-
-                  {/* Strengths */}
-                  {score.deep_score.strengths?.length > 0 && (
-                    <div>
-                      <div className="flex items-center gap-1.5 mb-2">
-                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
-                        <span className="text-sm font-medium">Strengths</span>
-                      </div>
-                      <ul className="space-y-1.5">
-                        {score.deep_score.strengths.map((s: string, i: number) => (
-                          <li key={i} className="text-sm text-muted-foreground leading-relaxed">
-                            {s}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-
-                  {/* Gaps */}
-                  {score.deep_score.gaps?.length > 0 && (
-                    <div>
-                      <div className="flex items-center gap-1.5 mb-2">
-                        <AlertCircle className="h-3.5 w-3.5 text-amber-400" />
-                        <span className="text-sm font-medium">Gaps</span>
-                      </div>
-                      <ul className="space-y-1.5">
-                        {score.deep_score.gaps.map((g: string, i: number) => (
-                          <li key={i} className="text-sm text-muted-foreground leading-relaxed">
-                            {g}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-xs w-full"
-                    onClick={() =>
-                      deepScore.mutate(id, {
-                        onSuccess: () => toast.success("Fit analysis updated"),
-                        onError: (e: any) => toast.error("Analysis failed", { description: e?.message }),
-                      })
-                    }
-                    disabled={deepScore.isPending}
-                  >
-                    {deepScore.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
-                    Re-analyze
-                  </Button>
-                </>
-              ) : (
-                <div className="text-center py-4">
-                  <p className="text-sm text-muted-foreground mb-3">
-                    Compare your resume against this job posting
-                  </p>
-                  <Button
-                    size="sm"
-                    onClick={() =>
-                      deepScore.mutate(id, {
-                        onSuccess: () => toast.success("Fit analysis updated"),
-                        onError: (e: any) => toast.error("Analysis failed", { description: e?.message }),
-                      })
-                    }
-                    disabled={deepScore.isPending}
-                  >
-                    {deepScore.isPending ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Sparkles className="h-3.5 w-3.5" />
-                    )}
-                    {deepScore.isPending ? "Analyzing..." : "Analyze fit"}
-                  </Button>
-                </div>
+        {/* ── RIGHT COLUMN — sticky score breakdown ── */}
+        <aside className="min-w-0">
+          <div className="ds-card" style={{ padding: 18, position: "sticky", top: 80 }}>
+            <div className="flex items-baseline justify-between">
+              <h3 className="ds-h3">Score breakdown</h3>
+              {score?.deep_score?.recommendation && (
+                <span className="ds-mono ds-faint" style={{ fontSize: 11 }}>
+                  {score.deep_score.recommendation.replace("_", " ")}
+                </span>
               )}
-            </CardContent>
-          </Card>
+            </div>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Details</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              {job.employment_type && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Type</span>
-                  <span className="capitalize">{job.employment_type?.replace("_", " ")}</span>
-                </div>
+            <div className="flex flex-col" style={{ gap: 12, marginTop: 14 }}>
+              <ScoreAxis label="Overall fit" value={overallFit} />
+              {score?.title_score !== undefined && score?.title_score !== null && (
+                <ScoreAxis label="Title match" value={score.title_score * 5} />
               )}
-              {job.seniority && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Seniority</span>
-                  <span className="capitalize">{job.seniority}</span>
-                </div>
+              {score?.skill_score !== undefined && score?.skill_score !== null && (
+                <ScoreAxis label="Skills overlap" value={score.skill_score * 4} />
               )}
-              {job.country && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Country</span>
-                  <span>{job.country}</span>
-                </div>
+              {score?.seniority_score !== undefined && score?.seniority_score !== null && (
+                <ScoreAxis label="Seniority" value={score.seniority_score * 5} />
               )}
-              {entities?.sponsorship_available !== null && entities?.sponsorship_available !== undefined && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Visa sponsorship</span>
-                  <span>{entities.sponsorship_available ? "Yes" : "No"}</span>
-                </div>
+              {score?.geo_score !== undefined && score?.geo_score !== null && (
+                <ScoreAxis label="Geo fit" value={score.geo_score * 5} />
               )}
-              {job.discovered_at && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Discovered</span>
-                  <span className="font-mono text-xs">{new Date(job.discovered_at).toLocaleDateString()}</span>
-                </div>
+              {score?.remote_score !== undefined && score?.remote_score !== null && (
+                <ScoreAxis label="Remote policy" value={score.remote_score * 10} />
               )}
-            </CardContent>
-          </Card>
+              {score?.industry_score !== undefined && score?.industry_score !== null && (
+                <ScoreAxis label="Industry" value={score.industry_score * 5} />
+              )}
+            </div>
 
-        </div>
+            {/* Details */}
+            <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid var(--ds-line)" }}>
+              <div className="ds-mono ds-faint" style={{ fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                Details
+              </div>
+              <div className="flex flex-col" style={{ gap: 8, marginTop: 10, fontSize: 13 }}>
+                {job.employment_type && (
+                  <div className="flex justify-between">
+                    <span className="ds-muted">Type</span>
+                    <span style={{ textTransform: "capitalize" }}>{job.employment_type?.replace("_", " ")}</span>
+                  </div>
+                )}
+                {job.seniority && (
+                  <div className="flex justify-between">
+                    <span className="ds-muted">Seniority</span>
+                    <span style={{ textTransform: "capitalize" }}>{job.seniority}</span>
+                  </div>
+                )}
+                {job.country && (
+                  <div className="flex justify-between">
+                    <span className="ds-muted">Country</span>
+                    <span className="ds-mono">{job.country}</span>
+                  </div>
+                )}
+                {entities?.sponsorship_available !== null && entities?.sponsorship_available !== undefined && (
+                  <div className="flex justify-between">
+                    <span className="ds-muted">Sponsorship</span>
+                    <span className={entities.sponsorship_available ? "ds-accent-fg" : ""}>
+                      {entities.sponsorship_available ? "Yes" : "No"}
+                    </span>
+                  </div>
+                )}
+                {job.discovered_at && (
+                  <div className="flex justify-between">
+                    <span className="ds-muted">Discovered</span>
+                    <span className="ds-mono ds-dim" style={{ fontSize: 12 }}>
+                      {new Date(job.discovered_at).toLocaleDateString()}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {score?.deep_score && (
+              <button
+                type="button"
+                className="ds-btn ghost"
+                style={{ width: "100%", marginTop: 14, fontSize: 12 }}
+                onClick={() =>
+                  deepScore.mutate(id, {
+                    onSuccess: () => toast.success("Fit analysis updated"),
+                    onError: (e: any) => toast.error("Analysis failed", { description: e?.message }),
+                  })
+                }
+                disabled={deepScore.isPending}
+              >
+                {deepScore.isPending && <Loader2 className="h-3 w-3 animate-spin" />}
+                Re-analyze
+              </button>
+            )}
+          </div>
+        </aside>
       </div>
       </div>
     </div>
