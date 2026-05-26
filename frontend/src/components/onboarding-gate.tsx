@@ -174,10 +174,27 @@ function OnboardingFlow({
   }
 
   return (
-    <div className="max-w-2xl mx-auto py-4 sm:py-10 space-y-6">
-      <div className="space-y-2 text-center">
-        <h1 className="text-2xl sm:text-3xl font-semibold">Welcome — let&apos;s set you up</h1>
-        <p className="text-sm text-muted-foreground max-w-md mx-auto">
+    <div className="ds-page-fade max-w-2xl mx-auto py-4 sm:py-10 space-y-6">
+      {/* Brand-anchored hero — tiny teal "J" mark + welcome.
+          Matches the sidebar brand from the design. */}
+      <div className="space-y-3 text-center">
+        <div className="flex justify-center">
+          <div style={{
+            width: 36, height: 36,
+            borderRadius: 8,
+            background: "var(--ds-accent)",
+            color: "#04140f",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontFamily: "var(--ds-font-mono)",
+            fontWeight: 700,
+            fontSize: 17,
+            letterSpacing: "-0.04em",
+          }}>J</div>
+        </div>
+        <h1 className="ds-h1" style={{ fontSize: 28 }}>Welcome — let&apos;s set you up</h1>
+        <p className="ds-muted" style={{ fontSize: 14, maxWidth: 420, margin: "0 auto" }}>
           Three quick steps and your inbox starts scoring jobs against
           your background and target geographies.
         </p>
