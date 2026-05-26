@@ -22,8 +22,14 @@ import { useState, useMemo } from "react";
 import Link from "next/link";
 import {
   Search, MapPin, Star, Archive, Plus, Loader2, Sparkles, Linkedin,
-  Inbox as InboxIcon, ChevronLeft, ChevronRight,
+  Inbox as InboxIcon, ChevronLeft, ChevronRight, ChevronDown, Check,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useJobs, useFindMoreJobs, useProfile } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/toast";
 import { OperationProgress } from "@/components/operation-progress";
@@ -56,6 +62,92 @@ function timeAgo(dateStr: string | null | undefined): string {
 function pct(raw: number | null | undefined, max: number): number {
   if (raw == null || max <= 0) return 0;
   return Math.max(0, Math.min(100, Math.round((raw / max) * 100)));
+}
+
+const SORT_LABELS: Record<string, string> = {
+  score: "score",
+  date: "date",
+  salary: "salary",
+};
+
+/**
+ * Sort dropdown — replaces the native <select> whose popup uses the
+ * browser's OS-default style and ignores design tokens. Built on the
+ * same Base UI DropdownMenu primitive used in the sidebar, so the
+ * popup picks up bg-elev-2 / line / radius / accent like the rest of
+ * the app.
+ */
+function SortMenu({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const current = SORT_LABELS[value] ?? value;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <button
+            type="button"
+            aria-label="Sort jobs"
+            className="ds-mono"
+            style={{
+              height: 32,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              background: "var(--ds-bg-elev-1)",
+              border: "1px solid var(--ds-line)",
+              borderRadius: "var(--ds-r-pill)",
+              color: "var(--ds-fg)",
+              padding: "0 10px 0 12px",
+              fontSize: 12,
+              cursor: "pointer",
+            }}
+          />
+        }
+      >
+        <span style={{ color: "var(--ds-fg-muted)" }}>Sort:</span>
+        <span>{current}</span>
+        <ChevronDown size={12} strokeWidth={2} style={{ color: "var(--ds-fg-muted)" }} />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="end"
+        sideOffset={6}
+        className="ds-mono"
+        style={{
+          minWidth: 140,
+          background: "var(--ds-bg-elev-1)",
+          border: "1px solid var(--ds-line)",
+          borderRadius: "var(--ds-r-card)",
+          padding: 4,
+          fontSize: 13,
+        }}
+      >
+        {Object.entries(SORT_LABELS).map(([v, label]) => {
+          const active = v === value;
+          return (
+            <DropdownMenuItem
+              key={v}
+              onSelect={() => onChange(v)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "8px 10px",
+                borderRadius: 6,
+                color: active ? "var(--ds-accent)" : "var(--ds-fg)",
+                cursor: "pointer",
+              }}
+            >
+              <Check
+                size={13}
+                strokeWidth={2.4}
+                style={{ opacity: active ? 1 : 0, color: "var(--ds-accent)" }}
+              />
+              <span>{label}</span>
+            </DropdownMenuItem>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 }
 
 type SavedView = {
@@ -343,26 +435,7 @@ export default function JobsInboxPage() {
             ))}
 
             <div className="ml-auto flex items-center gap-2">
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                aria-label="Sort jobs"
-                className="ds-mono"
-                style={{
-                  height: 32,
-                  background: "var(--ds-bg-elev-1)",
-                  border: "1px solid var(--ds-line)",
-                  borderRadius: "var(--ds-r-pill)",
-                  color: "var(--ds-fg)",
-                  padding: "0 10px",
-                  fontSize: 12,
-                  cursor: "pointer",
-                }}
-              >
-                <option value="score">Sort: score</option>
-                <option value="date">Sort: date</option>
-                <option value="salary">Sort: salary</option>
-              </select>
+              <SortMenu value={sortBy} onChange={setSortBy} />
             </div>
           </div>
         </div>
