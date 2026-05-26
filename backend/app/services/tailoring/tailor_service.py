@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import datetime, timezone
 
 from sqlalchemy import select
@@ -45,6 +46,57 @@ async def _load_samples_by_kind(db: AsyncSession, user_id: str) -> dict[str, lis
         if snippet:
             kind_list.append(snippet)
     return by_kind
+
+
+_PREAMBLE_RE = re.compile(
+    r"^\s*(?:"
+    r"here(?:'s| is)?\s+(?:a\s+)?(?:draft|the\s+(?:draft|message|letter|outreach|cover))[^\n]*?[:\-]?\s*\n+"
+    r"|"
+    r"i(?:'ve|\s+have)?\s+(?:drafted|written|put\s+together)[^\n]*?[:\-]?\s*\n+"
+    r"|"
+    r"i'd\s+be\s+happy[^\n]*?[:\-]?\s*\n+"
+    r"|"
+    r"sure[,!]?\s+here(?:'s| is)?[^\n]*?[:\-]?\s*\n+"
+    r"|"
+    r"draft\s*\d*\s*[:\-]\s*\n+"
+    r")",
+    re.I,
+)
+_TRAILING_RE = re.compile(
+    r"\n+\s*(?:"
+    r"let\s+me\s+know\s+if[^$]*"
+    r"|"
+    r"happy\s+to\s+(?:adjust|tweak|iterate|revise)[^$]*"
+    r"|"
+    r"(?:character|word)\s+count[^$]*"
+    r"|"
+    r"\(?\s*\d+\s*(?:character|word|char)s?\b[^$]*"
+    r"|"
+    r"feel\s+free\s+to[^$]*"
+    r"|"
+    r"---+\s*\n+(?:notes?|alt(?:ernative)?s?|variants?)[^$]*"
+    r")$",
+    re.I,
+)
+
+
+def _strip_llm_fluff(text: str) -> str:
+    """Defensive cleanup: strip common preambles and trailing commentary
+    the model sometimes adds even when the prompt says 'only the message'.
+
+    Conservative — only removes lines that match well-known LLM tells.
+    Real opening sentences like 'Hi {recruiter},' or 'Dear hiring team,'
+    don't match any of the patterns.
+    """
+    if not text:
+        return text
+    cleaned = _PREAMBLE_RE.sub("", text, count=1)
+    cleaned = _TRAILING_RE.sub("", cleaned, count=1)
+    # Strip stray opening / closing code fences just in case the model
+    # wrapped the message in ``` for some reason.
+    cleaned = re.sub(r"^```[a-z]*\n", "", cleaned)
+    cleaned = re.sub(r"\n```\s*$", "", cleaned)
+    return cleaned.strip()
 
 
 def _style_examples_block(samples: list[str], artifact_label: str) -> str:
@@ -167,7 +219,7 @@ async def generate_tailored_application(
         for e in tailored_resume.get("selected_experience", [])[:3]
     )
 
-    cover_letter = await llm_client.generate(
+    cover_letter_raw = await llm_client.generate(
         task_type="tailoring",
         system_prompt=SYSTEM_PROMPT,
         user_prompt=(
@@ -181,6 +233,7 @@ async def generate_tailored_application(
             )
         ),
     )
+    cover_letter = _strip_llm_fluff(cover_letter_raw)
 
     # ── Step 3: Generate recruiter outreach ───────────────────────────────
     logger.info("Generating outreach for job %s", job_id)
@@ -198,7 +251,7 @@ async def generate_tailored_application(
     )).first()
     candidate_name = (user_row[0] if user_row else None) or "the candidate"
 
-    outreach = await llm_client.generate(
+    outreach_raw = await llm_client.generate(
         task_type="tailoring",
         system_prompt=SYSTEM_PROMPT,
         user_prompt=(
@@ -219,6 +272,7 @@ async def generate_tailored_application(
         ),
         max_tokens=500,
     )
+    outreach = _strip_llm_fluff(outreach_raw)
 
     # ── Step 4: Generate screening answers (if applicable) ────────────────
     short_answers = {}

@@ -114,7 +114,13 @@ Key Requirements: {job_requirements}
 - Be specific, not generic — mention the company name and role
 - Professional but not stiff — conversational confidence
 - NEVER fabricate any experience or metrics
-- End with a clear call to action"""
+- End with a clear call to action
+
+## Output format (strict)
+Return ONLY the cover letter body. No preamble like "Here's a draft" or
+"I've written this for you". No trailing commentary like "Let me know if
+you'd like changes" or word counts. No markdown code fences. Just the
+letter, ready to copy-paste into an application form."""
 
 OUTREACH_PROMPT = """Draft a LinkedIn recruiter outreach message for this job.
 
@@ -144,7 +150,13 @@ Headline / summary: {candidate_summary}
 - Include a clear ask (brief chat about the role).
 - Professional but human tone. Sign off with the candidate's first name.
 - NEVER fabricate. If a metric isn't in the profile, don't invent one;
-  pick a different achievement that IS in the profile."""
+  pick a different achievement that IS in the profile.
+
+## Output format (strict)
+Return ONLY the message text. No preamble like "Here's a draft" or
+"I'd be happy to help". No trailing commentary like "Let me know if you'd
+like adjustments", no character count, no explanation of choices, no
+multiple variants. Just the single message, ready to paste into LinkedIn."""
 
 SUMMARY_REGEN_PROMPT = """Write only the professional summary (2-3 sentences) for this candidate's resume, tailored to this job:
 

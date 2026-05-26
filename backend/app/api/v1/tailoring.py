@@ -292,7 +292,7 @@ async def regenerate_section(
         SYSTEM_PROMPT, COVER_LETTER_PROMPT, OUTREACH_PROMPT, SUMMARY_REGEN_PROMPT,
     )
     from app.services.tailoring.tailor_service import (
-        _load_samples_by_kind, _style_examples_block,
+        _load_samples_by_kind, _style_examples_block, _strip_llm_fluff,
     )
 
     profile_result = await db.execute(
@@ -367,13 +367,13 @@ async def regenerate_section(
             top_experience=top_exp,
         )
         prompt = style_block + base + ("\n\n" + guidance_block if guidance_block else "")
-        new_content = (await llm_client.generate(
+        new_content = _strip_llm_fluff(await llm_client.generate(
             task_type="tailoring",
             system_prompt=SYSTEM_PROMPT,
             user_prompt=prompt,
             max_tokens=1200,
             temperature=0.6,
-        )).strip()
+        ))
         app.cover_letter = new_content
     else:  # recruiter_message
         # OUTREACH_PROMPT now requires candidate_name + candidate_summary +
@@ -399,13 +399,13 @@ async def regenerate_section(
             strongest_matches="; ".join(strongest),
         )
         prompt = style_block + base + ("\n\n" + guidance_block if guidance_block else "")
-        new_content = (await llm_client.generate(
+        new_content = _strip_llm_fluff(await llm_client.generate(
             task_type="tailoring",
             system_prompt=SYSTEM_PROMPT,
             user_prompt=prompt,
             max_tokens=500,
             temperature=0.6,
-        )).strip()
+        ))
         app.recruiter_message = new_content
 
     await db.commit()
