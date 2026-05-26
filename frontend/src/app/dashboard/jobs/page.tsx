@@ -683,15 +683,16 @@ function TopMatchCard({
         </p>
       )}
 
-      {/* 4-axis breakdown — only renders if we actually have axis scores.
-          The raw axis values are NOT on a 0-100 scale (title maxes at 20,
-          skill at 25, seniority at 15, salary at 10 — see backend scorer.py).
-          Normalize to a percentage so the bars and the "/100" labels read
-          consistently with the rest of the design system. */}
+      {/* 3-axis breakdown — only renders if we actually have axis scores.
+          Salary was removed because most JDs don't list salary, so it
+          defaulted to a neutral 5/10 on almost every row and was just
+          visual noise. The raw axis values are NOT on a 0-100 scale
+          (title maxes at 20, skill at 25, seniority at 15 — see backend
+          scorer.py). Normalize so bars + "/100" labels read consistently. */}
       {job.score && (
         <div style={{
           display: "grid",
-          gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+          gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
           gap: 14,
           marginTop: 18,
           paddingTop: 16,
@@ -700,7 +701,6 @@ function TopMatchCard({
           <ScoreAxis label="TITLE" value={pct(job.score.title_score, 20)} />
           <ScoreAxis label="SKILLS" value={pct(job.score.skill_score, 25)} />
           <ScoreAxis label="SENIORITY" value={pct(job.score.seniority_score, 15)} />
-          <ScoreAxis label="SALARY" value={pct(job.score.salary_score, 10)} />
         </div>
       )}
 

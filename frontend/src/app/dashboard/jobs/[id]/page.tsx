@@ -898,12 +898,12 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
               {score?.industry_score !== undefined && score?.industry_score !== null && (
                 <ScoreAxis label="Industry" value={pct(score.industry_score, 10)} />
               )}
-              {score?.salary_score !== undefined && score?.salary_score !== null && (
-                <ScoreAxis label="Salary band" value={pct(score.salary_score, 10)} />
-              )}
-              {score?.visa_score !== undefined && score?.visa_score !== null && (
-                <ScoreAxis label="Visa / sponsorship" value={pct(score.visa_score, 10)} />
-              )}
+              {/* Salary band + Visa / sponsorship were intentionally removed
+                  from the visible breakdown — both axes default to a neutral
+                  5/10 on the vast majority of postings (salary unlisted,
+                  sponsorship unknown), so the bars were misleading. The
+                  backend still computes them and they're still on the
+                  JobScore row, just hidden from the sidebar. */}
             </div>
 
             {/* Details */}
