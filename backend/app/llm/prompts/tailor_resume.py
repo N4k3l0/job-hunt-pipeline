@@ -116,21 +116,35 @@ Key Requirements: {job_requirements}
 - NEVER fabricate any experience or metrics
 - End with a clear call to action"""
 
-OUTREACH_PROMPT = """Draft a LinkedIn recruiter outreach message for this job:
+OUTREACH_PROMPT = """Draft a LinkedIn recruiter outreach message for this job.
+
+You have the candidate's actual profile data below — use it.
+Do NOT ask for more information; write the message using what's here.
+If a specific metric or project name isn't in the profile, reference
+the role/employer/skill that IS in the profile instead. Fabricate
+nothing, but also don't refuse — there is enough context here to write.
 
 ## Job
 Title: {job_title} at {job_company}
 
-## Candidate's Strongest Matches
+## Candidate
+Name: {candidate_name}
+Headline / summary: {candidate_summary}
+
+## Candidate's recent experience (use ONE specific achievement from this)
+{top_experience}
+
+## Why they're a strong match (pre-computed signals — reference one of these)
 {strongest_matches}
 
 ## Instructions
-- Keep it under 300 characters (LinkedIn connection request limit)
-- Be direct and specific about why you're a fit
-- Reference one concrete, relevant achievement
-- Include a clear ask (coffee chat, learn more about the role)
-- Professional but human tone
-- NEVER fabricate anything"""
+- Keep it under 300 characters (LinkedIn connection-request limit).
+- Reference ONE concrete achievement from the experience above —
+  with the real employer / project name / number that's already there.
+- Include a clear ask (brief chat about the role).
+- Professional but human tone. Sign off with the candidate's first name.
+- NEVER fabricate. If a metric isn't in the profile, don't invent one;
+  pick a different achievement that IS in the profile."""
 
 SUMMARY_REGEN_PROMPT = """Write only the professional summary (2-3 sentences) for this candidate's resume, tailored to this job:
 

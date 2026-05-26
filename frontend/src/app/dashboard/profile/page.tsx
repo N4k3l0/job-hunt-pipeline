@@ -281,9 +281,16 @@ export default function ProfilePage() {
   }
 
   async function handleUploadResume() {
-    if (!selectedFile || !versionName.trim()) return;
+    if (!selectedFile) return;
+    // Version name is optional — if the user didn't type one, fall back
+    // to the file's basename. Only the file actually matters; the label
+    // is just for "which one is this?" in the Resumes list later.
+    const effectiveName =
+      versionName.trim() ||
+      selectedFile.name.replace(/\.[^.]+$/, "") ||
+      "Resume";
     uploadResume.mutate(
-      { file: selectedFile, versionName: versionName.trim(), tags: "" },
+      { file: selectedFile, versionName: effectiveName, tags: "" },
       {
         onSuccess: () => {
           setSelectedFile(null);
@@ -632,12 +639,12 @@ export default function ProfilePage() {
                     type="text"
                     value={versionName}
                     onChange={(e) => setVersionName(e.target.value)}
-                    placeholder="Version name (e.g. PM-General)"
+                    placeholder="Optional label (e.g. PM-General) — defaults to filename"
                     className="max-w-xs"
                   />
                   <Button
                     onClick={handleUploadResume}
-                    disabled={uploadResume.isPending || !selectedFile || !versionName.trim()}
+                    disabled={uploadResume.isPending || !selectedFile}
                   >
                     {uploadResume.isPending ? (
                       <Loader2 className="h-4 w-4 animate-spin" />

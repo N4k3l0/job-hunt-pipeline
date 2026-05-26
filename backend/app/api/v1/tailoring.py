@@ -376,10 +376,26 @@ async def regenerate_section(
         )).strip()
         app.cover_letter = new_content
     else:  # recruiter_message
+        # OUTREACH_PROMPT now requires candidate_name + candidate_summary +
+        # top_experience (not just strongest_matches) so the model has
+        # real material to work from instead of asking for more info.
+        from app.models.user import User
+        user_row = (await db.execute(
+            select(User.name).where(User.id == user_id)
+        )).first()
+        candidate_name = (user_row[0] if user_row else None) or "the candidate"
         strongest = (app.validation_notes or {}).get("strongest_matches", [])
         base = OUTREACH_PROMPT.format(
             job_title=job.title,
             job_company=job.company,
+            candidate_name=candidate_name,
+            candidate_summary=(
+                app.tailored_summary
+                or (profile.master_summary if profile else "")
+                or (profile.headline if profile else "")
+                or ""
+            ),
+            top_experience=top_exp,
             strongest_matches="; ".join(strongest),
         )
         prompt = style_block + base + ("\n\n" + guidance_block if guidance_block else "")

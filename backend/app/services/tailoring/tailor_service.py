@@ -186,6 +186,18 @@ async def generate_tailored_application(
     logger.info("Generating outreach for job %s", job_id)
     await _step("Drafting outreach")
 
+    # Load the user's display name for sign-off + outreach context.
+    # Previously the outreach prompt only saw a list of pre-computed
+    # "strongest matches" with no real employer / project / metric
+    # context, so the model would refuse to draft and ask for more info.
+    # Now we pass the same name + summary + top_experience the cover-
+    # letter prompt gets so the model has real material to work from.
+    from app.models.user import User
+    user_row = (await db.execute(
+        select(User.name).where(User.id == user_id)
+    )).first()
+    candidate_name = (user_row[0] if user_row else None) or "the candidate"
+
     outreach = await llm_client.generate(
         task_type="tailoring",
         system_prompt=SYSTEM_PROMPT,
@@ -194,6 +206,14 @@ async def generate_tailored_application(
             + OUTREACH_PROMPT.format(
                 job_title=job.title,
                 job_company=job.company,
+                candidate_name=candidate_name,
+                candidate_summary=(
+                    tailored_resume.get("tailored_summary")
+                    or profile.master_summary
+                    or profile.headline
+                    or ""
+                ),
+                top_experience=top_exp,
                 strongest_matches="; ".join(tailored_resume.get("strongest_matches", [])),
             )
         ),
