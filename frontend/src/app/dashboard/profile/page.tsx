@@ -403,7 +403,7 @@ export default function ProfilePage() {
                   id="headline"
                   value={headline}
                   onChange={(e) => setHeadline(e.target.value)}
-                  placeholder="e.g. Senior Product Manager | AI/ML | 8 years B2B SaaS"
+                  placeholder="e.g. Senior Marketing Manager | B2B SaaS | 8 years"
                 />
               </div>
               <div className="space-y-2">
@@ -1128,7 +1128,7 @@ function WritingSamplesCard() {
           <Input
             value={label}
             onChange={(e) => setLabel(e.target.value)}
-            placeholder="Optional label (e.g. 'AI Engineer @ Acme — landed interview')"
+            placeholder="Optional label (e.g. 'Marketing Manager @ Acme — landed interview')"
             className="text-sm"
           />
           <textarea

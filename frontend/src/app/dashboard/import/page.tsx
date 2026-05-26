@@ -284,7 +284,7 @@ export default function ImportPage() {
                   value={text}
                   onChange={(e) => { setText(e.target.value); importText.reset(); }}
                   className="flex min-h-[200px] w-full rounded-lg border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  placeholder={"Paste the job posting text here...\n\nExample:\nWe're hiring a Senior Product Manager for our AI Platform team.\nLocation: San Francisco (Hybrid)\nSalary: $180k-$240k\nRequirements: 5+ years PM experience, AI/ML background..."}
+                  placeholder={"Paste the job posting text here...\n\nExample:\nWe're hiring a Senior Marketing Manager to lead our growth team.\nLocation: London (Hybrid)\nSalary: £80k-£110k\nRequirements: 6+ years B2B SaaS marketing, demand-gen experience..."}
                 />
               </div>
               <div className="flex items-center justify-between">

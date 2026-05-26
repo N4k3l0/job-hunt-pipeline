@@ -318,15 +318,10 @@ export default function DashboardPage() {
                     {/* Only render the role badge when scoring actually
                         classified this job. Anything else would just be a
                         guess painted on the wrong half of the inbox. */}
-                    {(job.role_path === "pm" || job.role_path === "ai_automation") && (
-                      <span className={`shrink-0 font-mono text-[10px] px-1.5 py-0.5 rounded-md border ${
-                        job.role_path === "pm"
-                          ? "border-blue-500/20 text-blue-400 bg-blue-500/5"
-                          : "border-emerald-500/20 text-emerald-400 bg-emerald-500/5"
-                      }`}>
-                        {job.role_path === "pm" ? "PM" : "AI"}
-                      </span>
-                    )}
+                    {/* PM/AI badge removed — role_path is an internal
+                        artefact of the two-track scoring architecture
+                        and meaningless to users in other professions
+                        (marketing, design, ops, finance, etc.). */}
                   </div>
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-sm text-muted-foreground">
                     <span className="font-medium text-foreground/80">{job.company}</span>
