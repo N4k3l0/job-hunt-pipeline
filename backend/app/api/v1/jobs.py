@@ -394,11 +394,39 @@ async def list_jobs(
     # the previous response.
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
 
+    # TEMP diagnostic — counts at each filter stage so we can see WHERE
+    # jobs are dropping when total=0. Remove once the empty-inbox issue
+    # is understood.
+    diag: dict = {}
+    try:
+        all_jobs_q = select(func.count()).select_from(Job).where(
+            Job.status.notin_(["duplicate", "raw", "expired", "dismissed"])
+        )
+        diag["all_active_jobs"] = (await db.execute(all_jobs_q)).scalar() or 0
+
+        user_scores_q = select(func.count()).select_from(JobScore).where(
+            JobScore.user_id == user_id
+        )
+        diag["scored_for_user"] = (await db.execute(user_scores_q)).scalar() or 0
+
+        scored_ge_50_q = select(func.count()).select_from(JobScore).where(
+            JobScore.user_id == user_id, JobScore.overall_fit >= 50
+        )
+        diag["scored_ge_50"] = (await db.execute(scored_ge_50_q)).scalar() or 0
+
+        diag["applied_count"] = len(applied_ids)
+        diag["profile_pref_countries"] = profile_pref_countries
+        diag["profile_target_roles"] = target_roles
+        diag["user_skills_count"] = len(user_skills)
+    except Exception as e:
+        diag["error"] = str(e)
+
     return {
         "jobs": jobs_out,
         "total": total,
         "page": page,
         "page_size": page_size,
+        "_diag": diag,
     }
 
 
