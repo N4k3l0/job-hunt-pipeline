@@ -800,11 +800,28 @@ async def resolve_apply_url(job_id: UUID, user_id: CurrentUserId, db: DbSession)
         raise HTTPException(status_code=404, detail="Job not found")
 
     source = job.apply_url or job.job_url
-    resolved = await find_direct_apply(
-        company=job.company or "",
-        title=job.title or "",
-        source_url=source,
-    )
+
+    # Hard cap on the whole resolver cascade so a hung Firecrawl / Claude
+    # web_search call can't burn past Vercel's 60s function ceiling.
+    # Without this the function got SIGKILL'd, the connection dropped,
+    # and the user's browser sat on a fake "loading" popup forever.
+    import asyncio
+    try:
+        resolved = await asyncio.wait_for(
+            find_direct_apply(
+                company=job.company or "",
+                title=job.title or "",
+                source_url=source,
+            ),
+            timeout=45.0,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "Apply resolver timeout for job %s (%s @ %s) — returning aggregator URL",
+            job_id, job.title, job.company,
+        )
+        resolved = None
+
     if resolved and resolved != job.apply_url and not _is_aggregator(resolved):
         # Cache any verified non-aggregator URL — Claude can return company
         # careers-page URLs that aren't on the strict ATS host list but are

@@ -404,9 +404,24 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
       popup.document.close();
     }
     try {
-      const data = await api.post<{ url: string; is_direct_ats: boolean }>(
-        `/api/v1/jobs/${id}/apply`,
-      );
+      // Client-side timeout matches the backend's 45s asyncio.wait_for.
+      // Without this, a dropped Vercel connection (e.g. function killed
+      // at the 60s ceiling before our wait_for could fire) would leave
+      // the fetch promise hanging indefinitely — user staring at a fake
+      // loading popup for minutes. AbortController fires after 50s so
+      // the catch block runs and the popup gets a clear failure card.
+      const controller = new AbortController();
+      const abortTimer = setTimeout(() => controller.abort(), 50_000);
+      let data: { url: string; is_direct_ats: boolean };
+      try {
+        data = await api.post<{ url: string; is_direct_ats: boolean }>(
+          `/api/v1/jobs/${id}/apply`,
+          undefined,
+          { signal: controller.signal },
+        );
+      } finally {
+        clearTimeout(abortTimer);
+      }
       if (popup && !popup.closed) {
         // Sever the opener reference so the destination site can't poke
         // back into our tab. Same protection noopener gives, just applied
@@ -425,8 +440,12 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
       // fail to find a non-aggregator URL. Render a clear failure
       // screen in the popup with manual escape hatches instead of
       // closing it silently.
+      // Also handle client-side abort (50s timeout) the same way —
+      // user shouldn't sit on a fake loading bar forever when the
+      // backend has clearly exceeded its budget.
+      const isAbort = e?.name === "AbortError" || /aborted|timeout/i.test(String(e?.message || ""));
       const detail = e?.detail || e?.response?.data?.detail;
-      const isNoDirect = detail && typeof detail === "object" && detail.code === "no_direct_posting";
+      const isNoDirect = isAbort || (detail && typeof detail === "object" && detail.code === "no_direct_posting");
       if (popup && !popup.closed && isNoDirect) {
         const company = String(detail.company || "");
         const title = String(detail.title || "");

@@ -82,28 +82,39 @@ async function apiRequest<T>(
   return response.json();
 }
 
-export const api = {
-  get: <T>(path: string) => apiRequest<T>(path),
+// Optional per-call options. Subset of RequestInit — most callers don't
+// need any of this, but `signal` is critical for the apply-resolver
+// flow where a stale fetch needs to be abortable from the client side
+// when the backend exceeds its budget.
+type ApiCallOptions = Pick<RequestInit, "signal" | "headers">;
 
-  post: <T>(path: string, body?: unknown) =>
+export const api = {
+  get: <T>(path: string, opts?: ApiCallOptions) =>
+    apiRequest<T>(path, opts ?? {}),
+
+  post: <T>(path: string, body?: unknown, opts?: ApiCallOptions) =>
     apiRequest<T>(path, {
       method: "POST",
       body: body ? JSON.stringify(body) : undefined,
+      ...(opts ?? {}),
     }),
 
-  put: <T>(path: string, body?: unknown) =>
+  put: <T>(path: string, body?: unknown, opts?: ApiCallOptions) =>
     apiRequest<T>(path, {
       method: "PUT",
       body: body ? JSON.stringify(body) : undefined,
+      ...(opts ?? {}),
     }),
 
-  patch: <T>(path: string, body?: unknown) =>
+  patch: <T>(path: string, body?: unknown, opts?: ApiCallOptions) =>
     apiRequest<T>(path, {
       method: "PATCH",
       body: body ? JSON.stringify(body) : undefined,
+      ...(opts ?? {}),
     }),
 
-  delete: <T>(path: string) => apiRequest<T>(path, { method: "DELETE" }),
+  delete: <T>(path: string, opts?: ApiCallOptions) =>
+    apiRequest<T>(path, { method: "DELETE", ...(opts ?? {}) }),
 
   upload: async <T>(
     path: string,
