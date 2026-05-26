@@ -415,6 +415,34 @@ async def _collect_all_keywords() -> list[str]:
     return keywords
 
 
+async def _collect_user_countries() -> list[str]:
+    """Union of every user's preferred_countries (2-letter ISO codes),
+    deduplicated. Returns empty list when no users / no preferences.
+
+    Used by sources that fan out per-country (Adzuna primarily) so we
+    only spend API budget on countries someone actually targets. If a
+    user adds NL to their preferences, the next cron picks it up; if
+    the last user wanting CA leaves, CA stops being queried.
+    """
+    from app.models.candidate import CandidateProfile
+
+    countries: set[str] = set()
+    async with create_worker_session()() as db:
+        result = await db.execute(select(CandidateProfile.preferred_countries))
+        for (pref,) in result:
+            for raw in (pref or []):
+                code = (raw or "").strip().upper()
+                if len(code) == 2 and code.isalpha():
+                    countries.add(code)
+
+    out = sorted(countries)
+    logger.info(
+        "User-driven country pool: %d countries %s",
+        len(out), out or "(none — no users have preferred_countries set)",
+    )
+    return out
+
+
 async def _collect_user_roles(limit: int = 8) -> list[str]:
     """Just target_roles + custom search_keywords (NO skills). Use for
     sources with a tight query budget where role-precision matters more
@@ -483,10 +511,10 @@ async def _run_adzuna_async():
     import asyncio
     from app.services.discovery.adzuna_service import fetch_jobs, ADZUNA_COUNTRIES
 
-    # Search every distinct role across all users, up to 15. With 8
-    # countries × 15 keywords = 120 calls; semaphore(3) paces them to
-    # ~40 batches × ~500ms = ~20s wall time. Sorted by frequency so
-    # high-overlap roles fire first in case rate limit cuts off.
+    # Everything driven by user data — no hardcoded countries OR keywords.
+    # Keywords: top 15 most-overlapping user target_roles.
+    # Countries: intersection of users' preferred_countries with Adzuna's
+    # supported set. If no one targets AU, AU never gets queried.
     adzuna_keywords = await _collect_user_roles(limit=15)
     if not adzuna_keywords:
         logger.info(
@@ -495,7 +523,38 @@ async def _run_adzuna_async():
         )
         return
 
-    sem = asyncio.Semaphore(3)
+    wanted_countries = await _collect_user_countries()
+    if not wanted_countries:
+        logger.info(
+            "Adzuna: skipping — no users have preferred_countries set yet, "
+            "nothing to search for"
+        )
+        return
+
+    # Adzuna only has endpoints for a subset of ISO codes (no NG, JP, etc).
+    # Intersect — anything missing here gets caught by other sources.
+    supported_iso = set(ADZUNA_COUNTRIES.keys())
+    runnable = [
+        (iso, ADZUNA_COUNTRIES[iso])
+        for iso in wanted_countries
+        if iso in supported_iso
+    ]
+    if not runnable:
+        logger.info(
+            "Adzuna: skipping — none of the user-wanted countries (%s) are "
+            "in Adzuna's supported set (%s). Other sources cover them.",
+            wanted_countries, sorted(supported_iso),
+        )
+        return
+
+    logger.info(
+        "Adzuna: querying %d countries × %d keywords = %d calls",
+        len(runnable), len(adzuna_keywords), len(runnable) * len(adzuna_keywords),
+    )
+
+    # Semaphore(2) keeps us safely under the ~25/min rate limit even on
+    # the largest user base configurations.
+    sem = asyncio.Semaphore(2)
 
     async def run_country(iso: str, code: str) -> list[dict]:
         async with sem:
@@ -506,7 +565,7 @@ async def _run_adzuna_async():
                 return []
 
     batches = await asyncio.gather(*[
-        run_country(iso, code) for iso, code in ADZUNA_COUNTRIES.items()
+        run_country(iso, code) for iso, code in runnable
     ])
     all_jobs = [j for batch in batches for j in batch]
     if all_jobs:
