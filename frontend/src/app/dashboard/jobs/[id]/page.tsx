@@ -20,6 +20,15 @@ import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 import { OperationProgress } from "@/components/operation-progress";
 
+/** Normalize an axis sub-score (raw 0..max) to a 0–100 percentage so
+ *  the bars render consistently against the overall_fit scale. Each
+ *  axis has a different max in the backend scorer (title 20, skill 25,
+ *  seniority 15, industry 10, geo 15, remote 5, salary 10, visa 10). */
+function pct(raw: number | null | undefined, max: number): number {
+  if (raw == null || max <= 0) return 0;
+  return Math.max(0, Math.min(100, Math.round((raw / max) * 100)));
+}
+
 function ScoreRing({ score, size = 56 }: { score: number; size?: number }) {
   const strokeWidth = 4;
   const radius = (size - strokeWidth) / 2;
@@ -872,22 +881,28 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
             <div className="flex flex-col" style={{ gap: 12, marginTop: 14 }}>
               <ScoreAxis label="Overall fit" value={overallFit} />
               {score?.title_score !== undefined && score?.title_score !== null && (
-                <ScoreAxis label="Title match" value={score.title_score * 5} />
+                <ScoreAxis label="Title match" value={pct(score.title_score, 20)} />
               )}
               {score?.skill_score !== undefined && score?.skill_score !== null && (
-                <ScoreAxis label="Skills overlap" value={score.skill_score * 4} />
+                <ScoreAxis label="Skills overlap" value={pct(score.skill_score, 25)} />
               )}
               {score?.seniority_score !== undefined && score?.seniority_score !== null && (
-                <ScoreAxis label="Seniority" value={score.seniority_score * 5} />
+                <ScoreAxis label="Seniority" value={pct(score.seniority_score, 15)} />
               )}
               {score?.geo_score !== undefined && score?.geo_score !== null && (
-                <ScoreAxis label="Geo fit" value={score.geo_score * 5} />
+                <ScoreAxis label="Geo fit" value={pct(score.geo_score, 15)} />
               )}
               {score?.remote_score !== undefined && score?.remote_score !== null && (
-                <ScoreAxis label="Remote policy" value={score.remote_score * 10} />
+                <ScoreAxis label="Remote policy" value={pct(score.remote_score, 5)} />
               )}
               {score?.industry_score !== undefined && score?.industry_score !== null && (
-                <ScoreAxis label="Industry" value={score.industry_score * 5} />
+                <ScoreAxis label="Industry" value={pct(score.industry_score, 10)} />
+              )}
+              {score?.salary_score !== undefined && score?.salary_score !== null && (
+                <ScoreAxis label="Salary band" value={pct(score.salary_score, 10)} />
+              )}
+              {score?.visa_score !== undefined && score?.visa_score !== null && (
+                <ScoreAxis label="Visa / sponsorship" value={pct(score.visa_score, 10)} />
               )}
             </div>
 
