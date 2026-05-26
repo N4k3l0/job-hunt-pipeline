@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   Sidebar,
@@ -17,64 +17,111 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import {
-  Briefcase,
-  ClipboardCheck,
-  FileText,
+  LayoutDashboard,
+  Inbox,
+  ClipboardList,
+  Send,
   BarChart3,
   User,
-  Import,
   Settings,
   LogOut,
   MessageSquare,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import { createClient } from "@/lib/supabase";
-import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import { useCurrentUser } from "@/hooks/use-api";
+import {
+  useCurrentUser,
+  useAnalytics,
+  useReviewQueue,
+} from "@/hooks/use-api";
 import { FeedbackDialog } from "@/components/feedback-dialog";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 
-const navItems = [
-  { title: "Jobs Inbox", href: "/dashboard/jobs", icon: Briefcase },
-  { title: "Review Queue", href: "/dashboard/review", icon: ClipboardCheck },
-  { title: "Applications", href: "/dashboard/applications", icon: FileText },
-  { title: "Import", href: "/dashboard/import", icon: Import },
+type Item = {
+  title: string;
+  href: string;
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+  countKey?: "review" | "applied";
+};
+
+const PIPELINE_ITEMS: Item[] = [
+  { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { title: "Inbox", href: "/dashboard/jobs", icon: Inbox },
+  { title: "Review Queue", href: "/dashboard/review", icon: ClipboardList, countKey: "review" },
+  { title: "Applications", href: "/dashboard/applications", icon: Send, countKey: "applied" },
   { title: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
 ];
 
-// Profile is for everyone. Admin only appears for users with role=admin —
-// the page itself is also gated server-side via AdminUser dep, but hiding
-// the link prevents non-admins from seeing a 403 wall they'd never use.
-const PROFILE_ITEM = { title: "Profile", href: "/dashboard/profile", icon: User };
-const ADMIN_ITEM = { title: "Admin", href: "/dashboard/admin", icon: Settings };
+const ACCOUNT_ITEMS: Item[] = [
+  { title: "Profile", href: "/dashboard/profile", icon: User },
+];
 
 export function AppSidebar() {
   const pathname = usePathname();
-  const router = useRouter();
   const { setOpenMobile, isMobile } = useSidebar();
   const { data: currentUser } = useCurrentUser();
-  const profileItems = currentUser?.role === "admin"
-    ? [PROFILE_ITEM, ADMIN_ITEM]
-    : [PROFILE_ITEM];
+  const { data: analytics } = useAnalytics();
+  const { data: reviewQueue } = useReviewQueue();
 
-  // Auto-collapse the mobile sheet whenever the route changes. Belt-and-
-  // braces with the per-button onClick: covers cases where the click
-  // handler races the navigation, or the user lands here from a
-  // programmatic redirect.
+  const counts = {
+    review: (reviewQueue ?? []).filter((r: { approval_status?: string }) => r.approval_status === "ready").length,
+    applied: analytics?.applications_sent ?? 0,
+  };
+
+  // Auto-collapse the mobile sheet whenever the route changes.
   useEffect(() => {
     if (isMobile) setOpenMobile(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
 
-  async function handleSignOut() {
-    const supabase = createClient();
-    await supabase.auth.signOut();
-    router.push("/login");
-  }
+  const renderItem = (item: Item) => {
+    const isActive = pathname === item.href;
+    const count = item.countKey ? counts[item.countKey] : undefined;
+    return (
+      <SidebarMenuItem key={item.href}>
+        <SidebarMenuButton
+          render={<Link href={item.href} />}
+          isActive={isActive}
+          // Override the default shadcn active treatment (which uses
+          // primary/accent text + glow) with a calm "filled card" — bg-elev-1
+          // + normal fg text. Matches the Claude design.
+          className={[
+            "h-10 gap-3 px-3 text-[14px] font-medium",
+            "data-[active=true]:bg-[var(--bg-elev-1)]",
+            "data-[active=true]:text-[var(--fg)]",
+            "hover:bg-[var(--bg-elev-1)] hover:text-[var(--fg)]",
+            "text-[var(--fg-muted)]",
+          ].join(" ")}
+          onClick={() => isMobile && setOpenMobile(false)}
+        >
+          <item.icon size={16} className="opacity-90" />
+          <span className="flex-1 truncate">{item.title}</span>
+          {count !== undefined && count > 0 && (
+            <span
+              className="ds-mono"
+              style={{
+                fontSize: 11,
+                color: isActive ? "var(--accent)" : "var(--fg-dim)",
+                fontVariantNumeric: "tabular-nums",
+              }}
+            >
+              {count}
+            </span>
+          )}
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+    );
+  };
 
   return (
     <Sidebar>
-      <SidebarHeader className="border-b px-6 py-5">
+      <SidebarHeader className="px-6 py-5">
         <Link href="/dashboard" className="flex items-center gap-2.5">
           <span
             aria-hidden
@@ -100,97 +147,70 @@ export function AppSidebar() {
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel className="text-xs font-semibold uppercase tracking-wider px-3 mb-1">
+          <SidebarGroupLabel
+            className="text-[11px] font-semibold uppercase tracking-[0.09em] px-3 mb-1"
+            style={{ color: "var(--fg-faint)" }}
+          >
             Pipeline
           </SidebarGroupLabel>
           <SidebarGroupContent>
-            <SidebarMenu>
-              {navItems.map((item) => (
-                <SidebarMenuItem key={item.href}>
-                  <SidebarMenuButton
-                    render={<Link href={item.href} />}
-                    isActive={pathname === item.href}
-                    className="text-[15px] py-3 px-3 gap-3"
-                    onClick={() => isMobile && setOpenMobile(false)}
-                  >
-                    <item.icon className="h-5 w-5" />
-                    <span className="font-medium">{item.title}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
+            <SidebarMenu>{PIPELINE_ITEMS.map(renderItem)}</SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
         <SidebarGroup>
-          <SidebarGroupLabel className="text-xs font-semibold uppercase tracking-wider px-3 mb-1">
-            Settings
+          <SidebarGroupLabel
+            className="text-[11px] font-semibold uppercase tracking-[0.09em] px-3 mb-1"
+            style={{ color: "var(--fg-faint)" }}
+          >
+            Account
           </SidebarGroupLabel>
           <SidebarGroupContent>
-            <SidebarMenu>
-              {profileItems.map((item) => (
-                <SidebarMenuItem key={item.href}>
-                  <SidebarMenuButton
-                    render={<Link href={item.href} />}
-                    isActive={pathname === item.href}
-                    className="text-[15px] py-3 px-3 gap-3"
-                    onClick={() => isMobile && setOpenMobile(false)}
-                  >
-                    <item.icon className="h-5 w-5" />
-                    <span className="font-medium">{item.title}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
+            <SidebarMenu>{ACCOUNT_ITEMS.map(renderItem)}</SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter className="border-t p-4 space-y-2">
+      <SidebarFooter className="p-4 space-y-3">
         <ThemeToggle />
-        <FeedbackDialog
-          trigger={
-            <Button
-              variant="ghost"
-              className="w-full justify-start text-[14px] py-2.5 h-auto"
-            >
-              <MessageSquare className="mr-2.5 h-4 w-4" />
-              Send feedback
-            </Button>
-          }
-        />
-        <Button
-          variant="ghost"
-          className="w-full justify-start text-[14px] py-2.5 h-auto"
-          onClick={handleSignOut}
-        >
-          <LogOut className="mr-2.5 h-4 w-4" />
-          Sign out
-        </Button>
         <UserPill user={currentUser} />
       </SidebarFooter>
     </Sidebar>
   );
 }
 
-/* Identity pill at the bottom of the sidebar — initials avatar + name +
-   role/build line. Matches the v2 handoff (`[AO] Adaeze Okoye / Invite · v1`). */
-function UserPill({ user }: { user: { name?: string | null; email?: string | null; role?: string | null } | undefined }) {
+/* Identity strip + settings dropdown — initials avatar, name, role/build
+   line, and a ⚙ that opens Send feedback / (Admin) / Sign out. Matches
+   the Claude design's compact footer. */
+function UserPill({
+  user,
+}: {
+  user:
+    | { name?: string | null; email?: string | null; role?: string | null }
+    | undefined;
+}) {
+  const router = useRouter();
   const name = (user?.name?.trim() || user?.email || "").trim();
   if (!name) return null;
   const initials = (() => {
-    const raw = (user?.name?.trim() || user?.email || "");
+    const raw = user?.name?.trim() || user?.email || "";
     if (!raw) return "·";
     if (raw.includes(" ")) {
       const parts = raw.split(/\s+/).slice(0, 2);
       return parts.map((p) => p[0]?.toUpperCase() ?? "").join("");
     }
-    // Single token — first 2 letters, uppercased.
     return raw.slice(0, 2).toUpperCase();
   })();
   const sub = user?.role === "admin" ? "Admin · v1" : "Invite · v1";
+
+  async function handleSignOut() {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.push("/login");
+  }
+
   return (
     <div
-      className="flex items-center gap-2.5 mt-1 pt-3 border-t"
-      style={{ borderColor: "var(--line)" }}
+      className="flex items-center gap-2.5 pt-3"
+      style={{ borderTop: "1px solid var(--line)" }}
     >
       <span
         aria-hidden
@@ -227,6 +247,59 @@ function UserPill({ user }: { user: { name?: string | null; email?: string | nul
           {sub}
         </div>
       </div>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label="Settings"
+            className="inline-flex items-center justify-center"
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: 6,
+              color: "var(--fg-muted)",
+              background: "transparent",
+              border: 0,
+              cursor: "pointer",
+              flexShrink: 0,
+              transition: "color 120ms ease, background 120ms ease",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "var(--bg-hover)";
+              e.currentTarget.style.color = "var(--fg)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "transparent";
+              e.currentTarget.style.color = "var(--fg-muted)";
+            }}
+          >
+            <Settings size={14} />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="top" align="end" className="w-56">
+          <FeedbackDialog
+            trigger={
+              <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
+                <MessageSquare className="mr-2 h-4 w-4" />
+                Send feedback
+              </DropdownMenuItem>
+            }
+          />
+          {user?.role === "admin" && (
+            <DropdownMenuItem asChild>
+              <Link href="/dashboard/admin">
+                <Settings className="mr-2 h-4 w-4" />
+                Admin
+              </Link>
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={handleSignOut}>
+            <LogOut className="mr-2 h-4 w-4" />
+            Sign out
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }
