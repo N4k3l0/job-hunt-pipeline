@@ -163,12 +163,12 @@ export default function JobsInboxPage() {
   const nextFive = heroEligible ? filtered.slice(1, 6) : [];
   const rest = heroEligible ? filtered.slice(6) : filtered;
 
-  // ── Optimistic shortlist / dismiss ─────────────────────────────────
+  // ── Optimistic shortlist / unshortlist / dismiss ───────────────────
   const optimisticJobAction = (
     job: any,
-    nextStatus: "shortlisted" | "dismissed",
+    nextStatus: "shortlisted" | "dismissed" | "enriched",
     label: string,
-    endpoint: "shortlist" | "dismiss",
+    endpoint: "shortlist" | "unshortlist" | "dismiss",
   ) => {
     const queryKeys = qc.getQueryCache().findAll({ queryKey: ["jobs"] });
     const snapshots = queryKeys.map((q) => ({ key: q.queryKey, data: q.state.data }));
@@ -391,7 +391,11 @@ export default function JobsInboxPage() {
               >
                 <TopMatchCard
                   job={topMatch}
-                  onShortlist={(j) => optimisticJobAction(j, "shortlisted", "Shortlisted", "shortlist")}
+                  onShortlist={(j) =>
+                    j.status === "shortlisted"
+                      ? optimisticJobAction(j, "enriched", "Removed from shortlist", "unshortlist")
+                      : optimisticJobAction(j, "shortlisted", "Shortlisted", "shortlist")
+                  }
                 />
                 {nextFive.length > 0 && <NextUpPanel jobs={nextFive} />}
               </div>
@@ -422,7 +426,11 @@ export default function JobsInboxPage() {
                     <DenseRow
                       key={job.id}
                       job={job}
-                      onShortlist={(j) => optimisticJobAction(j, "shortlisted", "Shortlisted", "shortlist")}
+                      onShortlist={(j) =>
+                    j.status === "shortlisted"
+                      ? optimisticJobAction(j, "enriched", "Removed from shortlist", "unshortlist")
+                      : optimisticJobAction(j, "shortlisted", "Shortlisted", "shortlist")
+                  }
                       onArchive={(j) => optimisticJobAction(j, "dismissed", "Archived", "dismiss")}
                     />
                   ))}
@@ -578,6 +586,22 @@ function TopMatchCard({
           </span>
         </div>
       </div>
+
+      {/* LLM-generated summary — falls back gracefully when deep scoring
+          hasn't run yet. Max-width keeps it readable inside the asymmetric
+          column without rivaling the title. */}
+      {job.score?.summary && (
+        <p style={{
+          fontSize: 14,
+          lineHeight: 1.55,
+          color: "var(--ds-fg-muted)",
+          margin: "16px 0 0",
+          maxWidth: "80ch",
+          textWrap: "pretty" as any,
+        }}>
+          {job.score.summary}
+        </p>
+      )}
 
       {/* 4-axis breakdown — only renders if we actually have axis scores. */}
       {job.score && (

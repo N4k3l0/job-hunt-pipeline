@@ -359,6 +359,14 @@ async def list_jobs(
                 "remote_score": score.remote_score,
                 "salary_score": score.salary_score,
                 "visa_score": score.visa_score,
+                # Pull the LLM-generated 1–2 sentence summary out of deep_score
+                # so the inbox's TopMatchCard can show it without a second
+                # round-trip. Falls back to None when deep scoring hasn't run.
+                "summary": (
+                    (score.deep_score or {}).get("summary")
+                    if isinstance(score.deep_score, dict)
+                    else None
+                ),
             } if score else None,
         }
         jobs_out.append(job_dict)
@@ -834,6 +842,23 @@ async def shortlist_job(job_id: UUID, user_id: CurrentUserId, db: DbSession):
     job.status = "shortlisted"
     await db.commit()
     return {"status": "shortlisted", "job_id": str(job_id)}
+
+
+@router.post("/{job_id}/unshortlist")
+async def unshortlist_job(job_id: UUID, user_id: CurrentUserId, db: DbSession):
+    """Move a shortlisted job back to the regular inbox.
+
+    Reverts status to "enriched" — the standard post-scoring inbox state.
+    If the job was never shortlisted, this is a no-op.
+    """
+    result = await db.execute(select(Job).where(Job.id == job_id))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status == "shortlisted":
+        job.status = "enriched"
+        await db.commit()
+    return {"status": job.status, "job_id": str(job_id)}
 
 
 @router.post("/{job_id}/dismiss")
