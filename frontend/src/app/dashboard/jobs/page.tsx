@@ -22,15 +22,22 @@ import { useState, useMemo } from "react";
 import Link from "next/link";
 import {
   Search, MapPin, Star, Archive, Plus, Loader2, Sparkles, Linkedin,
-  Inbox as InboxIcon, ChevronLeft, ChevronRight, LayoutList, Rows3,
-  Circle, BarChart3, Hash,
+  Inbox as InboxIcon, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { useJobs, useFindMoreJobs, useProfile } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/toast";
 import { OperationProgress } from "@/components/operation-progress";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
-import { Score, ScoreAxis, type ScoreVariant } from "@/components/ds/score";
+import { Score, ScoreAxis } from "@/components/ds/score";
+
+// Two-letter ISO codes for the "Europe" saved view. Kept inline so the
+// chip works without an extra API trip. Add codes as the matcher expands.
+const EUROPE_CODES = new Set([
+  "AT","BE","BG","CH","CY","CZ","DE","DK","EE","ES","FI","FR","GB","GR",
+  "HR","HU","IE","IS","IT","LI","LT","LU","LV","MT","NL","NO","PL","PT",
+  "RO","SE","SI","SK","UK",
+]);
 
 function timeAgo(dateStr: string | null | undefined): string {
   if (!dateStr) return "";
@@ -55,10 +62,6 @@ export default function JobsInboxPage() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [sortBy, setSortBy] = useState("score");
-
-  // New: visual toggles for the design-system tweaks
-  const [scoreVariant, setScoreVariant] = useState<ScoreVariant>("ring");
-  const [density, setDensity] = useState<"comfortable" | "dense">("comfortable");
   const [activeView, setActiveView] = useState<string | null>(null);
 
   // ── Data ───────────────────────────────────────────────────────────
@@ -92,30 +95,42 @@ export default function JobsInboxPage() {
     return `https://www.linkedin.com/jobs/search/?${params.toString()}`;
   }, [profile?.target_roles, profile?.remote_preference]);
 
-  // ── Saved views (client-side, defined per profile) ─────────────────
-  // For v1 these are static presets keyed off the data we already have.
-  // Later: user can save their own filter combos to chips here.
-  const savedViews: SavedView[] = useMemo(() => {
-    const views: SavedView[] = [
-      { id: "top", label: "Top matches", matches: (j) => (j.score?.overall_fit ?? 0) >= 80 },
-      { id: "fresh", label: "New this week", matches: (j) => {
+  // ── Saved views (client-side presets) ──────────────────────────────
+  // Labels match the Claude Design handoff exactly. "Founding roles"
+  // intentionally omitted per request. To add user-defined chips later,
+  // append to this list.
+  const savedViews: SavedView[] = useMemo(() => [
+    {
+      id: "top",
+      label: "Top matches (≥80)",
+      matches: (j) => (j.score?.overall_fit ?? 0) >= 80,
+    },
+    {
+      id: "today",
+      label: "New today",
+      matches: (j) => {
         if (!j.discovered_at) return false;
-        const ageDays = (Date.now() - new Date(j.discovered_at).getTime()) / 86400000;
-        return ageDays <= 7;
-      }},
-      { id: "remote", label: "Remote", matches: (j) => j.remote_type === "full_remote" },
-      { id: "salary", label: "Has salary", matches: (j) => !!j.salary_text },
-    ];
-    // Add a chip per preferred country (e.g. "NL only", "DE only")
-    for (const code of (profile?.preferred_countries || []).slice(0, 4)) {
-      views.push({
-        id: `country-${code}`,
-        label: `${code} only`,
-        matches: (j) => j.country?.toUpperCase() === code.toUpperCase(),
-      });
-    }
-    return views;
-  }, [profile?.preferred_countries]);
+        const ageHours = (Date.now() - new Date(j.discovered_at).getTime()) / 3600000;
+        return ageHours <= 24;
+      },
+    },
+    {
+      id: "remote-us",
+      label: "Remote · US",
+      matches: (j) =>
+        j.remote_type === "full_remote" && (j.country ?? "").toUpperCase() === "US",
+    },
+    {
+      id: "europe",
+      label: "Europe",
+      matches: (j) => EUROPE_CODES.has((j.country ?? "").toUpperCase()),
+    },
+    {
+      id: "shortlisted",
+      label: "Shortlisted",
+      matches: (j) => j.status === "shortlisted",
+    },
+  ], []);
 
   // ── Filtering pipeline ─────────────────────────────────────────────
   const filtered = useMemo(() => {
@@ -216,7 +231,7 @@ export default function JobsInboxPage() {
 
   // ── Render ─────────────────────────────────────────────────────────
   return (
-    <div className="ds-root" data-density={density}>
+    <div className="ds-root" data-density="comfortable">
       <div className="ds-page ds-page-fade">
 
         {/* ── Header row ─────────────────────────────────────────── */}
@@ -302,7 +317,7 @@ export default function JobsInboxPage() {
             {/* Saved view chips */}
             <button
               type="button"
-              className="ds-chip ds-tap44"
+              className="inbox-chip"
               data-active={activeView === null ? "true" : "false"}
               onClick={() => setActiveView(null)}
             >
@@ -312,7 +327,7 @@ export default function JobsInboxPage() {
               <button
                 key={v.id}
                 type="button"
-                className="ds-chip ds-tap44"
+                className="inbox-chip"
                 data-active={activeView === v.id ? "true" : "false"}
                 onClick={() => setActiveView(activeView === v.id ? null : v.id)}
               >
@@ -320,76 +335,14 @@ export default function JobsInboxPage() {
               </button>
             ))}
 
-            {/* Right-side: density + score variant + sort */}
             <div className="ml-auto flex items-center gap-2">
-              {/* Density toggle */}
-              <div className="inline-flex" style={{ background: "var(--ds-bg-elev-1)", border: "1px solid var(--ds-line)", borderRadius: 8, padding: 2 }}>
-                {(["comfortable", "dense"] as const).map((d) => (
-                  <button
-                    key={d}
-                    type="button"
-                    onClick={() => setDensity(d)}
-                    aria-label={d === "comfortable" ? "Comfortable density" : "Dense density"}
-                    title={d === "comfortable" ? "Comfortable density" : "Dense density"}
-                    style={{
-                      minHeight: 32,
-                      width: 32,
-                      borderRadius: 6,
-                      background: density === d ? "var(--ds-bg-elev-2)" : "transparent",
-                      color: density === d ? "var(--ds-fg)" : "var(--ds-fg-muted)",
-                      border: density === d ? "1px solid var(--ds-line-strong)" : "1px solid transparent",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      cursor: "pointer",
-                      transition: "all 120ms ease",
-                    }}
-                  >
-                    {d === "comfortable" ? <LayoutList className="h-3.5 w-3.5" /> : <Rows3 className="h-3.5 w-3.5" />}
-                  </button>
-                ))}
-              </div>
-
-              {/* Score variant — small icon segmented */}
-              <div className="inline-flex" style={{ background: "var(--ds-bg-elev-1)", border: "1px solid var(--ds-line)", borderRadius: 8, padding: 2 }}>
-                {([
-                  { v: "ring" as const, icon: <Circle className="h-3.5 w-3.5" />, label: "Ring score" },
-                  { v: "edge" as const, icon: <BarChart3 className="h-3.5 w-3.5" />, label: "Edge score" },
-                  { v: "mono" as const, icon: <Hash className="h-3.5 w-3.5" />, label: "Mono score" },
-                ]).map(({ v, icon, label }) => (
-                  <button
-                    key={v}
-                    type="button"
-                    onClick={() => setScoreVariant(v)}
-                    aria-label={label}
-                    title={label}
-                    style={{
-                      minHeight: 32,
-                      width: 32,
-                      borderRadius: 6,
-                      background: scoreVariant === v ? "var(--ds-bg-elev-2)" : "transparent",
-                      color: scoreVariant === v ? "var(--ds-fg)" : "var(--ds-fg-muted)",
-                      border: scoreVariant === v ? "1px solid var(--ds-line-strong)" : "1px solid transparent",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      cursor: "pointer",
-                      transition: "all 120ms ease",
-                    }}
-                  >
-                    {icon}
-                  </button>
-                ))}
-              </div>
-
-              {/* Sort */}
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value)}
                 aria-label="Sort jobs"
                 className="ds-mono"
                 style={{
-                  height: 36,
+                  height: 32,
                   background: "var(--ds-bg-elev-1)",
                   border: "1px solid var(--ds-line)",
                   borderRadius: "var(--ds-r-pill)",
@@ -469,8 +422,6 @@ export default function JobsInboxPage() {
                     <DenseRow
                       key={job.id}
                       job={job}
-                      density={density}
-                      scoreVariant={scoreVariant}
                       onShortlist={(j) => optimisticJobAction(j, "shortlisted", "Shortlisted", "shortlist")}
                       onArchive={(j) => optimisticJobAction(j, "dismissed", "Archived", "dismiss")}
                     />
@@ -512,6 +463,35 @@ export default function JobsInboxPage() {
         <style>{`
           @media (max-width: 900px) {
             .inbox-asym { grid-template-columns: 1fr !important; }
+          }
+          /* Filter chips — Claude design spec: 32px tall, 13.5px text. */
+          .inbox-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            height: 32px;
+            padding: 0 12px;
+            background: var(--ds-bg-elev-1);
+            border: 1px solid var(--ds-line);
+            border-radius: var(--ds-r-pill);
+            font-size: 13.5px;
+            color: var(--ds-fg-muted);
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 120ms cubic-bezier(0.32, 0.72, 0.32, 1);
+          }
+          .inbox-chip:hover {
+            color: var(--ds-fg);
+            border-color: var(--ds-line-strong);
+            background: var(--ds-bg-elev-2);
+          }
+          .inbox-chip[data-active="true"] {
+            background: var(--ds-accent-soft);
+            border-color: var(--ds-accent-edge);
+            color: var(--ds-accent);
+          }
+          @media (max-width: 640px) {
+            .inbox-chip { height: 44px; padding: 0 14px; font-size: 14px; }
           }
         `}</style>
       </div>
@@ -675,72 +655,57 @@ function NextUpPanel({ jobs }: { jobs: any[] }) {
         </span>
       </div>
       <div style={{ flex: 1 }}>
-        {jobs.map((job) => {
-          const score = job.score?.overall_fit ?? null;
-          const top = score != null && score >= 80;
-          return (
-            <Link
-              key={job.id}
-              href={`/dashboard/jobs/${job.id}`}
-              className="ds-row"
-              style={{
-                display: "grid",
-                gridTemplateColumns: "40px 1fr auto",
-                gap: 12,
-                alignItems: "center",
-                padding: "12px 14px",
-                borderTop: "1px solid var(--ds-line-faint)",
-                textDecoration: "none",
-                minHeight: 56,
-              }}
-            >
-              <span
-                className={`ds-mono ${top ? "ds-s-top" : "ds-s-mid"}`}
-                style={{
-                  fontSize: 17,
-                  fontWeight: 600,
-                  letterSpacing: "-0.03em",
-                  textAlign: "left",
-                  lineHeight: 1,
-                }}
-              >
-                {score != null ? Math.round(score) : "—"}
-              </span>
-              <div style={{ minWidth: 0 }}>
-                <div style={{
-                  fontSize: 13.5,
-                  fontWeight: 600,
-                  color: "var(--ds-fg)",
-                  letterSpacing: "-0.005em",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}>
-                  {job.title}
-                </div>
-                <div style={{
-                  fontSize: 12,
-                  color: "var(--ds-fg-muted)",
-                  marginTop: 2,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}>
-                  {job.company}
-                  {job.salary_text && (
-                    <>
-                      <span style={{ color: "var(--ds-fg-faint)", margin: "0 6px" }}>·</span>
-                      <span className="ds-mono">{job.salary_text}</span>
-                    </>
-                  )}
-                </div>
+        {jobs.map((job) => (
+          <Link
+            key={job.id}
+            href={`/dashboard/jobs/${job.id}`}
+            className="ds-row"
+            style={{
+              display: "grid",
+              gridTemplateColumns: "auto 1fr auto",
+              gap: 12,
+              alignItems: "center",
+              padding: "12px 14px",
+              borderTop: "1px solid var(--ds-line-faint)",
+              textDecoration: "none",
+              minHeight: 56,
+            }}
+          >
+            <Score score={job.score?.overall_fit ?? null} variant="ring" />
+            <div style={{ minWidth: 0 }}>
+              <div style={{
+                fontSize: 13.5,
+                fontWeight: 600,
+                color: "var(--ds-fg)",
+                letterSpacing: "-0.005em",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}>
+                {job.title}
               </div>
-              <span className="ds-mono ds-dim" style={{ fontSize: 11 }}>
-                {timeAgo(job.discovered_at)}
-              </span>
-            </Link>
-          );
-        })}
+              <div style={{
+                fontSize: 12,
+                color: "var(--ds-fg-muted)",
+                marginTop: 2,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}>
+                {job.company}
+                {job.salary_text && (
+                  <>
+                    <span style={{ color: "var(--ds-fg-faint)", margin: "0 6px" }}>·</span>
+                    <span className="ds-mono">{job.salary_text}</span>
+                  </>
+                )}
+              </div>
+            </div>
+            <span className="ds-mono ds-dim" style={{ fontSize: 11 }}>
+              {timeAgo(job.discovered_at)}
+            </span>
+          </Link>
+        ))}
       </div>
     </div>
   );
@@ -753,25 +718,21 @@ function NextUpPanel({ jobs }: { jobs: any[] }) {
    ============================================================ */
 function DenseRow({
   job,
-  density,
-  scoreVariant,
   onShortlist,
   onArchive,
 }: {
   job: any;
-  density: "comfortable" | "dense";
-  scoreVariant: ScoreVariant;
   onShortlist: (job: any) => void;
   onArchive: (job: any) => void;
 }) {
   return (
     <Link href={`/dashboard/jobs/${job.id}`} className="ds-row">
-      <Score score={job.score?.overall_fit ?? null} variant={scoreVariant} />
+      <Score score={job.score?.overall_fit ?? null} variant="ring" />
 
       <div style={{ minWidth: 0 }}>
         <div style={{
           fontWeight: 600,
-          fontSize: density === "dense" ? 13.5 : 14.5,
+          fontSize: 14.5,
           letterSpacing: "-0.01em",
           color: "var(--ds-fg)",
           lineHeight: 1.25,
@@ -785,9 +746,9 @@ function DenseRow({
           display: "flex",
           alignItems: "center",
           gap: 12,
-          marginTop: density === "dense" ? 1 : 3,
+          marginTop: 3,
           flexWrap: "wrap",
-          fontSize: density === "dense" ? 12 : 12.5,
+          fontSize: 12.5,
           color: "var(--ds-fg-muted)",
         }}>
           <span style={{ color: "var(--ds-fg)", fontWeight: 500 }}>{job.company}</span>
