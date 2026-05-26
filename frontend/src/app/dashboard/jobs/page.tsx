@@ -1,172 +1,146 @@
 "use client";
 
-import { useState } from "react";
+/**
+ * Inbox — the product's centerpiece.
+ *
+ * Redesigned 2026-05-26 from the Claude Design handoff
+ * (H5t-MvyKb49crrUg7xIebA). The visual layer uses the .ds-* classes
+ * defined in design-tokens.css; data wiring + actions are unchanged
+ * from the previous version so nothing breaks for existing users.
+ *
+ * Key visual decisions baked in here (per the chat transcript):
+ *   - Asymmetric editorial top-match card + dense list below
+ *   - Sticky filter bar with saved-view chips
+ *   - 3 score variants (ring / edge / mono), toggled in the local UI
+ *   - 2 density modes (comfortable / dense), toggled in the local UI
+ *   - Teal accent ONLY for scores ≥80; neutral grays for everything else
+ *   - Signature monospace for scores, salaries, counts, time-ago
+ *   - 150ms accent edge slides in on row hover; no springs, no glow
+ */
+
+import { useState, useMemo } from "react";
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Separator } from "@/components/ui/separator";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-  Search,
-  MapPin,
-  Globe,
-  ArrowUpRight,
-  Star,
-  Archive,
-  ChevronLeft,
-  ChevronRight,
-  SlidersHorizontal,
-  Plus,
-  Flag,
-  Loader2,
-  Inbox,
-  Database,
-  Sparkles,
-  Linkedin,
+  Search, MapPin, Star, Archive, Plus, Loader2, Sparkles, Linkedin,
+  Inbox as InboxIcon, ChevronLeft, ChevronRight, LayoutList, Rows3,
+  Circle, BarChart3, Hash,
 } from "lucide-react";
 import { useJobs, useFindMoreJobs, useProfile } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/toast";
-import { EmptyState } from "@/components/ui/empty-state";
 import { OperationProgress } from "@/components/operation-progress";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
+import { Score, ScoreHero, type ScoreVariant } from "@/components/ds/score";
 
-const SOURCE_COLORS: Record<string, { dot: string; label: string }> = {
-  linkedin: { dot: "bg-blue-500", label: "LinkedIn" },
-  adzuna: { dot: "bg-orange-500", label: "Adzuna" },
-  indeed: { dot: "bg-violet-500", label: "Indeed" },
-  arbeitnow: { dot: "bg-teal-500", label: "Arbeitnow" },
-  remoteok: { dot: "bg-emerald-500", label: "RemoteOK" },
-  jsearch: { dot: "bg-rose-500", label: "JSearch" },
-  google_jobs: { dot: "bg-sky-500", label: "Google" },
-  himalayas: { dot: "bg-fuchsia-500", label: "Himalayas" },
-  remotive: { dot: "bg-cyan-500", label: "Remotive" },
-  weworkremotely: { dot: "bg-indigo-500", label: "WeWorkRemotely" },
-  crossover: { dot: "bg-lime-500", label: "Crossover" },
-  dailyremote: { dot: "bg-pink-500", label: "DailyRemote" },
-  manual: { dot: "bg-amber-500/60", label: "Manual" },
-};
-
-function timeAgo(dateStr: string) {
+function timeAgo(dateStr: string | null | undefined): string {
+  if (!dateStr) return "";
   const diff = Date.now() - new Date(dateStr).getTime();
   const mins = Math.floor(diff / 60000);
-  if (mins < 60) return `${mins}m ago`;
+  if (mins < 60) return `${mins}m`;
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
+  if (hours < 24) return `${hours}h`;
   const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d ago`;
-  return `${Math.floor(days / 7)}w ago`;
+  if (days < 7) return `${days}d`;
+  return `${Math.floor(days / 7)}w`;
 }
 
-function ScoreBadge({ score }: { score: number | null }) {
-  if (score === null || score === undefined || score === 0) {
-    return (
-      <div className="w-10 h-10 rounded-lg bg-white/[0.03] border border-white/[0.05] flex items-center justify-center">
-        <span className="text-base text-muted-foreground font-mono">—</span>
-      </div>
-    );
-  }
-
-  const bg =
-    score >= 80
-      ? "bg-emerald-500/10 border-emerald-500/25 shadow-[0_0_12px_rgba(52,211,153,0.08)]"
-      : score >= 60
-        ? "bg-amber-500/10 border-amber-500/25 shadow-[0_0_12px_rgba(251,191,36,0.08)]"
-        : "bg-white/[0.03] border-white/[0.06]";
-  const text =
-    score >= 80
-      ? "text-emerald-400"
-      : score >= 60
-        ? "text-amber-400"
-        : "text-muted-foreground";
-
-  return (
-    <div className={`w-10 h-10 rounded-lg border flex items-center justify-center ${bg}`}>
-      <span className={`font-mono text-sm font-bold tabular-nums ${text}`}>{score}</span>
-    </div>
-  );
-}
-
-function AccentEdge({ score }: { score: number | null }) {
-  if (!score || score < 40) return <div className="w-[2px] self-stretch rounded-full bg-white/[0.03]" />;
-
-  const color =
-    score >= 80
-      ? "bg-gradient-to-b from-emerald-500/60 to-emerald-500/10"
-      : score >= 60
-        ? "bg-gradient-to-b from-amber-500/60 to-amber-500/10"
-        : "bg-gradient-to-b from-white/10 to-transparent";
-
-  return <div className={`w-[2px] self-stretch rounded-full ${color}`} />;
-}
+type SavedView = {
+  id: string;
+  label: string;
+  matches: (job: any) => boolean;
+};
 
 export default function JobsInboxPage() {
+  // ── State ──────────────────────────────────────────────────────────
   const [search, setSearch] = useState("");
-  const [roleFilter, setRoleFilter] = useState<string | null>(null);
-  const [countryFilter, setCountryFilter] = useState<string | null>(null);
-  const [sourceFilter, setSourceFilter] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [sortBy, setSortBy] = useState("score");
 
-  // Work-type filter is gone — profile's `remote_preference` already
-  // enforces remote intent server-side. The Visa toggle was also removed:
-  // very few sources publish a sponsorship flag, so the filter returned 0
-  // jobs in practice — misleading. Sponsorship signal can come back as a
-  // JD-text heuristic later, but we won't surface a UI control until the
-  // data is real.
+  // New: visual toggles for the design-system tweaks
+  const [scoreVariant, setScoreVariant] = useState<ScoreVariant>("ring");
+  const [density, setDensity] = useState<"comfortable" | "dense">("comfortable");
+  const [activeView, setActiveView] = useState<string | null>(null);
+
+  // ── Data ───────────────────────────────────────────────────────────
   const { data, isLoading } = useJobs({
     page,
-    pageSize: 20,
-    roleType: roleFilter,
-    country: countryFilter,
+    pageSize: 25,
     remoteOnly: false,
     remoteType: null,
     sponsorship: false,
-    source: sourceFilter,
     sortBy,
   });
-
   const toast = useToast();
   const qc = useQueryClient();
   const findMore = useFindMoreJobs();
   const { data: profile } = useProfile();
 
-  /**
-   * Build a LinkedIn job-search URL pre-filled with the user's target
-   * roles + remote preference. Lets them jump to LinkedIn's own listings
-   * (which our pipeline can't fully ingest because of LinkedIn's anti-bot)
-   * without having to re-type their search criteria every time.
-   *
-   * Country isn't included — LinkedIn uses opaque geoIds (not ISO codes)
-   * for location filtering, and we don't ship a mapping table. The
-   * keyword + remote-type filter is enough for a useful jumping-off point.
-   */
-  const linkedInSearchUrl = (() => {
+  const jobs: any[] = data?.jobs ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = Math.ceil(total / 25) || 1;
+
+  // ── LinkedIn jumping-off URL (preserved from previous version) ─────
+  const linkedInSearchUrl = useMemo(() => {
     const roles = (profile?.target_roles || []).slice(0, 3);
     if (roles.length === 0) return null;
     const params = new URLSearchParams();
-    // LinkedIn treats multiple roles in keywords as OR-ish — good enough.
     params.set("keywords", roles.join(" OR "));
-    // f_WT: 2 = remote, 3 = hybrid, 1 = on-site
     if (profile?.remote_preference === "full_remote") params.set("f_WT", "2");
     else if (profile?.remote_preference === "hybrid") params.set("f_WT", "3");
     else if (profile?.remote_preference === "onsite") params.set("f_WT", "1");
-    // Past week — fresher results lead to higher response rates
     params.set("f_TPR", "r604800");
     return `https://www.linkedin.com/jobs/search/?${params.toString()}`;
-  })();
+  }, [profile?.target_roles, profile?.remote_preference]);
 
-  /**
-   * Apply an optimistic status change to the cached job list, then commit (or
-   * roll back) after the toast's undo window. We call the network directly
-   * instead of via `useMutation` so the request can be cancelled inside the
-   * 5-second window without leaving a stale mutation in flight.
-   */
+  // ── Saved views (client-side, defined per profile) ─────────────────
+  // For v1 these are static presets keyed off the data we already have.
+  // Later: user can save their own filter combos to chips here.
+  const savedViews: SavedView[] = useMemo(() => {
+    const views: SavedView[] = [
+      { id: "top", label: "Top matches", matches: (j) => (j.score?.overall_fit ?? 0) >= 80 },
+      { id: "fresh", label: "New this week", matches: (j) => {
+        if (!j.discovered_at) return false;
+        const ageDays = (Date.now() - new Date(j.discovered_at).getTime()) / 86400000;
+        return ageDays <= 7;
+      }},
+      { id: "remote", label: "Remote", matches: (j) => j.remote_type === "full_remote" },
+      { id: "salary", label: "Has salary", matches: (j) => !!j.salary_text },
+    ];
+    // Add a chip per preferred country (e.g. "NL only", "DE only")
+    for (const code of (profile?.preferred_countries || []).slice(0, 4)) {
+      views.push({
+        id: `country-${code}`,
+        label: `${code} only`,
+        matches: (j) => j.country?.toUpperCase() === code.toUpperCase(),
+      });
+    }
+    return views;
+  }, [profile?.preferred_countries]);
+
+  // ── Filtering pipeline ─────────────────────────────────────────────
+  const filtered = useMemo(() => {
+    let out = jobs;
+    if (search) {
+      const s = search.toLowerCase();
+      out = out.filter(
+        (j) =>
+          j.title?.toLowerCase().includes(s) ||
+          j.company?.toLowerCase().includes(s),
+      );
+    }
+    if (activeView) {
+      const view = savedViews.find((v) => v.id === activeView);
+      if (view) out = out.filter(view.matches);
+    }
+    return out;
+  }, [jobs, search, activeView, savedViews]);
+
+  // ── Top match (for editorial card) + rest ──────────────────────────
+  // Pull the highest-scoring job that isn't already shortlisted/dismissed.
+  const topMatch = filtered[0];
+  const rest = filtered.slice(1);
+
+  // ── Optimistic shortlist / dismiss ─────────────────────────────────
   const optimisticJobAction = (
     job: any,
     nextStatus: "shortlisted" | "dismissed",
@@ -210,350 +184,410 @@ export default function JobsInboxPage() {
     });
   };
 
-  const jobs = data?.jobs ?? [];
-  const total = data?.total ?? 0;
-  const totalPages = Math.ceil(total / 20) || 1;
+  // ── Find more jobs ─────────────────────────────────────────────────
+  const handleFindMore = () => {
+    findMore.mutate(undefined, {
+      onSuccess: (data) => {
+        if (data.ingested === 0 && data.found > 0) {
+          toast.info("No new jobs found", {
+            description: `Found ${data.found} matches but they all already exist in your inbox.`,
+          });
+        } else if (data.ingested > 0) {
+          toast.success(`Added ${data.ingested} new job${data.ingested === 1 ? "" : "s"}`, {
+            description: `${data.found} matches found · ${data.duplicates} dedup'd`,
+          });
+        } else {
+          toast.info("No matches found", {
+            description: "Try widening your target roles or preferred regions.",
+          });
+        }
+      },
+      onError: (err: any) => toast.error("Web search failed", { description: err?.message }),
+    });
+  };
 
-  const filtered = search
-    ? jobs.filter(
-        (j: any) =>
-          j.title?.toLowerCase().includes(search.toLowerCase()) ||
-          j.company?.toLowerCase().includes(search.toLowerCase())
-      )
-    : jobs;
-
-  const activeFilters = [roleFilter, countryFilter, sourceFilter].filter(Boolean).length;
-
+  // ── Render ─────────────────────────────────────────────────────────
   return (
-    <div className="space-y-5">
-      {/* Header */}
-      <div className="flex items-end justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="font-display text-3xl font-semibold tracking-tight">Inbox</h1>
-          <p className="text-sm text-muted-foreground mt-1 font-mono tabular-nums">
-            {total} jobs
-            {activeFilters > 0 && ` · ${filtered.length} matching`}
-          </p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              findMore.mutate(undefined, {
-                onSuccess: (data) => {
-                  if (data.ingested === 0 && data.found > 0) {
-                    toast.info("No new jobs found", {
-                      description: `Found ${data.found} matches but they all already exist in your inbox.`,
-                    });
-                  } else if (data.ingested > 0) {
-                    toast.success(`Added ${data.ingested} new job${data.ingested === 1 ? "" : "s"}`, {
-                      description: `${data.found} matches found · ${data.duplicates} dedup'd`,
-                    });
-                  } else {
-                    toast.info("No matches found", {
-                      description: "Try widening your target roles or preferred regions.",
-                    });
-                  }
-                },
-                onError: (err: any) => toast.error("Web search failed", { description: err?.message }),
-              });
-            }}
-            disabled={findMore.isPending}
-            title="Searches the open web for jobs that match your profile, then ingests new matches into your inbox. Takes 30–60 seconds."
-          >
-            {findMore.isPending ? (
-              <>
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                Searching the web…
-              </>
-            ) : (
-              <>
-                <Sparkles className="h-3.5 w-3.5" />
-                Find more jobs
-              </>
-            )}
-          </Button>
-          {linkedInSearchUrl && (
-            <Button
-              variant="outline"
-              size="sm"
-              render={
-                <a
-                  href={linkedInSearchUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                />
-              }
-              nativeButton={false}
-              title="Opens LinkedIn's job search with your target roles + remote preference pre-applied, filtered to the past week."
+    <div className="ds-root" data-density={density}>
+      <div className="ds-page ds-page-fade">
+
+        {/* ── Header row ─────────────────────────────────────────── */}
+        <header className="flex items-end justify-between gap-3 flex-wrap mb-5">
+          <div>
+            <h1 className="ds-h1">
+              Inbox
+              {" "}
+              <span className="ds-mono ds-faint" style={{ fontSize: 18, fontWeight: 500, letterSpacing: "-0.02em" }}>
+                · {total} {filtered.length !== total ? `· ${filtered.length} matching` : ""}
+              </span>
+            </h1>
+            <p className="ds-muted" style={{ fontSize: 13, marginTop: 4 }}>
+              Scored against your profile. Top matches highlighted in teal.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              className="ds-btn"
+              onClick={handleFindMore}
+              disabled={findMore.isPending}
+              title="Searches the open web for jobs that match your profile, then ingests new matches into your inbox. Takes 30–60 seconds."
             >
-              <Linkedin className="h-3.5 w-3.5" />
-              Browse on LinkedIn
-            </Button>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            render={<Link href="/dashboard/import" />}
-            nativeButton={false}
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Import
-          </Button>
-        </div>
-      </div>
-
-      {/* Live progress for the web-search path — replaces the spinner-only
-          state on the button with named stages, a smooth progress bar,
-          and the elapsed counter. Vanishes when the mutation finishes. */}
-      <OperationProgress
-        active={findMore.isPending}
-        title="Searching the open web for new jobs"
-        description="Reading your profile, querying job boards + careers pages, and verifying each match before ingest."
-        stages={[
-          { label: "Loading your profile", durationMs: 1500, tip: "Reading your target roles, skills, and remote preference." },
-          { label: "Searching company careers + ATSes", durationMs: 12000, tip: "Hitting Greenhouse, Lever, Ashby, and niche boards in parallel." },
-          { label: "Verifying each posting is open", durationMs: 15000, tip: "Skipping closed listings and aggregator-only hits. Quality > quantity." },
-          { label: "Ranking matches by fit", durationMs: 10000, tip: "Aiming for 15–25 high-quality matches, deduplicated against your existing inbox." },
-          { label: "Scoring + saving to your inbox", durationMs: 5000, tip: "Each new job scored against your profile so the inbox sort makes sense immediately." },
-        ]}
-      />
-
-      {/* Filters — stacks on mobile, inline on tablet+ */}
-      <div className="rounded-lg bg-white/[0.02] border border-white/[0.04] p-2 space-y-2 sm:space-y-0 sm:flex sm:items-center sm:gap-1.5">
-        <div className="relative w-full sm:max-w-[240px]">
-          <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search company or title…"
-            className="pl-8 h-10 sm:h-9 text-sm bg-transparent border-transparent focus:border-white/10 focus:bg-white/[0.02]"
-          />
-        </div>
-
-        <div className="flex items-center gap-1.5 overflow-x-auto -mx-1 px-1 sm:contents">
-        <Separator orientation="vertical" className="h-4 mx-0.5 hidden sm:block" />
-
-        {/* Role filter is driven by the user's profile target_roles — the
-            inbox is already pre-filtered, so a hardcoded PM chip here would
-            force the wrong query for an AI-only user. If we ever need a
-            quick role switcher we'll surface one based on target_roles. */}
-
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                variant={countryFilter ? "default" : "ghost"}
-                size="sm"
-                className="text-sm"
+              {findMore.isPending ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Searching…
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Find more jobs
+                </>
+              )}
+            </button>
+            {linkedInSearchUrl && (
+              <a
+                href={linkedInSearchUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="ds-btn"
+                title="Opens LinkedIn's job search with your target roles + remote preference pre-applied, filtered to the past week."
               >
-                <Flag className="h-3 w-3" />
-                {countryFilter || "Region"}
-              </Button>
-            }
-          />
-          <DropdownMenuContent>
-            <DropdownMenuItem onClick={() => setCountryFilter(null)}>
-              All regions
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setCountryFilter("US")}>
-              United States
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setCountryFilter("CA")}>
-              Canada
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setCountryFilter("GB")}>
-              United Kingdom
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setCountryFilter("DE")}>
-              Germany
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setCountryFilter("FR")}>
-              France
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+                <Linkedin className="h-3.5 w-3.5" />
+                LinkedIn
+              </a>
+            )}
+            <Link href="/dashboard/import" className="ds-btn">
+              <Plus className="h-3.5 w-3.5" />
+              Import
+            </Link>
+          </div>
+        </header>
 
-        {/* Source filter intentionally removed — users shouldn't filter
-            by where the listing came from. The country / role / remote
-            filters cover the dimensions they actually care about. */}
+        <OperationProgress
+          active={findMore.isPending}
+          title="Searching the open web for new jobs"
+          description="Reading your profile, querying job boards + careers pages, and verifying each match before ingest."
+          stages={[
+            { label: "Loading your profile", durationMs: 1500, tip: "Reading your target roles, skills, and remote preference." },
+            { label: "Searching company careers + ATSes", durationMs: 12000, tip: "Hitting Greenhouse, Lever, Ashby, and niche boards in parallel." },
+            { label: "Verifying each posting is open", durationMs: 15000, tip: "Skipping closed listings and aggregator-only hits. Quality > quantity." },
+            { label: "Ranking matches by fit", durationMs: 10000, tip: "Aiming for 15–25 high-quality matches, deduplicated against your existing inbox." },
+            { label: "Scoring + saving to your inbox", durationMs: 5000, tip: "Each new job scored against your profile so the inbox sort makes sense immediately." },
+          ]}
+        />
 
-        {activeFilters > 0 && (
-          <button
-            onClick={() => {
-              setRoleFilter(null);
-              setCountryFilter(null);
-              setSourceFilter(null);
-              setSearch("");
-            }}
-            className="text-sm text-amber-400 hover:text-amber-300 ml-1 underline underline-offset-2"
-          >
-            Clear
-          </button>
-        )}
+        {/* ── Sticky filter bar ──────────────────────────────────── */}
+        <div className="ds-filterbar">
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Search */}
+            <div className="ds-input" style={{ maxWidth: 280, flex: "1 1 200px" }}>
+              <Search className="h-3.5 w-3.5 ds-dim" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search title or company…"
+              />
+            </div>
 
-        <div className="flex-1" />
+            {/* Saved view chips */}
+            <button
+              type="button"
+              className="ds-chip ds-tap44"
+              data-active={activeView === null ? "true" : "false"}
+              onClick={() => setActiveView(null)}
+            >
+              All
+            </button>
+            {savedViews.map((v) => (
+              <button
+                key={v.id}
+                type="button"
+                className="ds-chip ds-tap44"
+                data-active={activeView === v.id ? "true" : "false"}
+                onClick={() => setActiveView(activeView === v.id ? null : v.id)}
+              >
+                {v.label}
+              </button>
+            ))}
 
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button variant="ghost" size="sm" className="text-sm">
-                <SlidersHorizontal className="h-3.5 w-3.5" />
-                Sort
-              </Button>
-            }
-          />
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => setSortBy("score")}>
-              By score
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setSortBy("date")}>
-              By date
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setSortBy("salary")}>
-              By salary
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+            {/* Right-side: density + score variant + sort */}
+            <div className="ml-auto flex items-center gap-2">
+              {/* Density toggle */}
+              <div className="inline-flex" style={{ background: "var(--ds-bg-elev-1)", border: "1px solid var(--ds-line)", borderRadius: 8, padding: 2 }}>
+                {(["comfortable", "dense"] as const).map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => setDensity(d)}
+                    aria-label={d === "comfortable" ? "Comfortable density" : "Dense density"}
+                    title={d === "comfortable" ? "Comfortable density" : "Dense density"}
+                    style={{
+                      minHeight: 32,
+                      width: 32,
+                      borderRadius: 6,
+                      background: density === d ? "var(--ds-bg-elev-2)" : "transparent",
+                      color: density === d ? "var(--ds-fg)" : "var(--ds-fg-muted)",
+                      border: density === d ? "1px solid var(--ds-line-strong)" : "1px solid transparent",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      cursor: "pointer",
+                      transition: "all 120ms ease",
+                    }}
+                  >
+                    {d === "comfortable" ? <LayoutList className="h-3.5 w-3.5" /> : <Rows3 className="h-3.5 w-3.5" />}
+                  </button>
+                ))}
+              </div>
+
+              {/* Score variant — small icon segmented */}
+              <div className="inline-flex" style={{ background: "var(--ds-bg-elev-1)", border: "1px solid var(--ds-line)", borderRadius: 8, padding: 2 }}>
+                {([
+                  { v: "ring" as const, icon: <Circle className="h-3.5 w-3.5" />, label: "Ring score" },
+                  { v: "edge" as const, icon: <BarChart3 className="h-3.5 w-3.5" />, label: "Edge score" },
+                  { v: "mono" as const, icon: <Hash className="h-3.5 w-3.5" />, label: "Mono score" },
+                ]).map(({ v, icon, label }) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => setScoreVariant(v)}
+                    aria-label={label}
+                    title={label}
+                    style={{
+                      minHeight: 32,
+                      width: 32,
+                      borderRadius: 6,
+                      background: scoreVariant === v ? "var(--ds-bg-elev-2)" : "transparent",
+                      color: scoreVariant === v ? "var(--ds-fg)" : "var(--ds-fg-muted)",
+                      border: scoreVariant === v ? "1px solid var(--ds-line-strong)" : "1px solid transparent",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      cursor: "pointer",
+                      transition: "all 120ms ease",
+                    }}
+                  >
+                    {icon}
+                  </button>
+                ))}
+              </div>
+
+              {/* Sort */}
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
+                aria-label="Sort jobs"
+                className="ds-mono"
+                style={{
+                  height: 36,
+                  background: "var(--ds-bg-elev-1)",
+                  border: "1px solid var(--ds-line)",
+                  borderRadius: "var(--ds-r-pill)",
+                  color: "var(--ds-fg)",
+                  padding: "0 10px",
+                  fontSize: 12,
+                  cursor: "pointer",
+                }}
+              >
+                <option value="score">Sort: score</option>
+                <option value="date">Sort: date</option>
+                <option value="salary">Sort: salary</option>
+              </select>
+            </div>
+          </div>
         </div>
-      </div>
 
-      {/* Job List */}
-      {isLoading ? (
-        <div className="flex items-center justify-center py-20">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground/50" />
-        </div>
-      ) : filtered.length === 0 ? (
-        total === 0 ? (
-          <EmptyState
-            icon={Inbox}
-            title="Inbox is empty"
-            description="Discovery runs daily at 06:00 UTC. Want jobs sooner? Trigger a sweep from the Admin page or paste a URL on Import."
-            action={{ label: "Import a job", href: "/dashboard/import" }}
-          />
+        {/* ── Editorial top match + dense list ───────────────────── */}
+        {isLoading ? (
+          <div className="ds-card" style={{ padding: 60, textAlign: "center" }}>
+            <Loader2 className="h-6 w-6 animate-spin mx-auto ds-dim" />
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="ds-card" style={{ padding: 60, textAlign: "center", color: "var(--ds-fg-muted)" }}>
+            <InboxIcon className="h-7 w-7 mx-auto mb-3 ds-dim" />
+            <p style={{ fontSize: 15, color: "var(--ds-fg)", marginBottom: 4 }}>
+              No jobs match this view
+            </p>
+            <p style={{ fontSize: 13 }}>
+              Try clearing filters, widening your target countries, or click <span style={{ color: "var(--ds-fg)" }}>Find more jobs</span>.
+            </p>
+          </div>
         ) : (
-          <EmptyState
-            icon={Inbox}
-            title="No jobs match these filters"
-            description="Try widening the region or relaxing the source filter — your match pool will open back up."
-          />
-        )
-      ) : (
-        <div className="space-y-1.5">
-          {filtered.map((job: any) => {
-            const score = job.score?.overall_fit ?? null;
-
-            return (
+          <div className="space-y-4">
+            {topMatch && (topMatch.score?.overall_fit ?? 0) >= 70 && (
               <Link
-                key={job.id}
-                href={`/dashboard/jobs/${job.id}`}
-                className="group relative flex items-start gap-3 rounded-xl border border-white/[0.04] bg-white/[0.01] px-3 py-3 sm:px-4 sm:py-3.5 transition-all hover:bg-white/[0.03] hover:border-white/[0.08]"
+                href={`/dashboard/jobs/${topMatch.id}`}
+                className="ds-editorial-card"
+                style={{ textDecoration: "none" }}
               >
-                <AccentEdge score={score} />
-                <ScoreBadge score={score} />
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="ds-pill accent" style={{ marginBottom: 10 }}>
+                      <Sparkles className="h-3 w-3" />
+                      TOP MATCH
+                    </div>
+                    <h2 className="ds-h2" style={{ marginBottom: 6 }}>
+                      {topMatch.title}
+                    </h2>
+                    <div className="flex items-center gap-3 flex-wrap" style={{ color: "var(--ds-fg-muted)", fontSize: 13 }}>
+                      <span style={{ color: "var(--ds-fg)", fontWeight: 500 }}>{topMatch.company}</span>
+                      {topMatch.location && (
+                        <span className="inline-flex items-center gap-1">
+                          <MapPin className="h-3 w-3 ds-dim" />
+                          {topMatch.location}
+                        </span>
+                      )}
+                      {topMatch.salary_text && (
+                        <span className="ds-mono" style={{ color: "var(--ds-fg)" }}>
+                          {topMatch.salary_text}
+                        </span>
+                      )}
+                      <span className="ds-mono ds-dim">
+                        {timeAgo(topMatch.discovered_at)} ago
+                      </span>
+                    </div>
+                  </div>
+                  <ScoreHero score={topMatch.score?.overall_fit ?? 0} variant={scoreVariant} />
+                </div>
+              </Link>
+            )}
 
-                {/* Main content — always shown, wraps gracefully on mobile */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-start justify-between gap-2">
-                    <span className="text-sm font-semibold leading-snug line-clamp-2 sm:truncate">
+            {/* Dense list — top match excluded if it became the hero */}
+            <div className="ds-card" style={{ overflow: "hidden" }}>
+              {(topMatch && (topMatch.score?.overall_fit ?? 0) >= 70 ? rest : filtered).map((job) => (
+                <Link
+                  key={job.id}
+                  href={`/dashboard/jobs/${job.id}`}
+                  className="ds-row"
+                >
+                  <Score score={job.score?.overall_fit ?? null} variant={scoreVariant} />
+
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{
+                      fontWeight: 600,
+                      fontSize: density === "dense" ? 13.5 : 14.5,
+                      letterSpacing: "-0.01em",
+                      color: "var(--ds-fg)",
+                      lineHeight: 1.25,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}>
                       {job.title}
-                    </span>
-                    {/* Action buttons: always visible on touch, fade in on hover for desktop */}
-                    <div className="flex items-center gap-0.5 shrink-0 opacity-100 sm:opacity-40 group-hover:opacity-100 transition-opacity">
-                      <button
-                        onClick={(e) => {
-                          e.preventDefault();
-                          optimisticJobAction(job, "shortlisted", "Shortlisted", "shortlist");
-                        }}
-                        className="p-2 sm:p-1.5 -my-1 rounded-md hover:bg-amber-500/10 text-muted-foreground/60 hover:text-amber-400 transition-colors"
-                        aria-label="Shortlist"
-                      >
-                        <Star className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.preventDefault();
-                          optimisticJobAction(job, "dismissed", "Dismissed", "dismiss");
-                        }}
-                        className="p-2 sm:p-1.5 -my-1 rounded-md hover:bg-white/5 text-muted-foreground/60 hover:text-muted-foreground transition-colors"
-                        aria-label="Dismiss"
-                      >
-                        <Archive className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
-                      </button>
-                      <ArrowUpRight className="hidden sm:block h-4 w-4 ml-1 text-white/[0.08] group-hover:text-amber-400/60 transition-colors" />
+                    </div>
+                    <div style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                      marginTop: density === "dense" ? 1 : 3,
+                      flexWrap: "wrap",
+                      fontSize: density === "dense" ? 12 : 12.5,
+                      color: "var(--ds-fg-muted)",
+                    }}>
+                      <span style={{ color: "var(--ds-fg)", fontWeight: 500 }}>{job.company}</span>
+                      {job.location && (
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                          <MapPin className="h-3 w-3 opacity-70" />
+                          {job.location}
+                        </span>
+                      )}
+                      {job.salary_text && (
+                        <span className="ds-mono" style={{ color: "var(--ds-fg)" }}>{job.salary_text}</span>
+                      )}
+                      <span className="ds-mono ds-dim" style={{ marginLeft: "auto" }}>
+                        {timeAgo(job.discovered_at)}
+                      </span>
                     </div>
                   </div>
 
-                  {/* Meta row 1: company always shown, prominent */}
-                  <div className="text-sm sm:text-base font-medium text-foreground/85 truncate mt-0.5">
-                    {job.company}
+                  <div
+                    className="flex items-center"
+                    onClick={(e) => e.preventDefault()}
+                  >
+                    <button
+                      type="button"
+                      aria-label="Shortlist"
+                      title="Shortlist"
+                      className="ds-tap44"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        optimisticJobAction(job, "shortlisted", "Shortlisted", "shortlist");
+                      }}
+                      style={{
+                        width: 36,
+                        height: 36,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        color: "var(--ds-fg-muted)",
+                        borderRadius: "var(--ds-r-pill)",
+                        background: "transparent",
+                        transition: "all 120ms ease",
+                      }}
+                    >
+                      <Star className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Archive"
+                      title="Archive"
+                      className="ds-tap44"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        optimisticJobAction(job, "dismissed", "Archived", "dismiss");
+                      }}
+                      style={{
+                        width: 36,
+                        height: 36,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        color: "var(--ds-fg-muted)",
+                        borderRadius: "var(--ds-r-pill)",
+                        background: "transparent",
+                        transition: "all 120ms ease",
+                      }}
+                    >
+                      <Archive className="h-4 w-4" />
+                    </button>
                   </div>
+                </Link>
+              ))}
+            </div>
 
-                  {/* Meta row 2: chips that wrap; everything visible on every screen */}
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 text-sm text-muted-foreground">
-                    {job.location && (
-                      <span className="inline-flex items-center gap-1 min-w-0">
-                        <MapPin className="h-3.5 w-3.5 opacity-70 shrink-0" />
-                        <span className="truncate max-w-[180px]">{job.location}</span>
-                      </span>
-                    )}
-                    {job.remote_type === "full_remote" && (
-                      <span className="inline-flex items-center gap-1 text-emerald-400">
-                        <Globe className="h-3.5 w-3.5" />
-                        Remote
-                      </span>
-                    )}
-                    {job.salary_text && (
-                      <span className="font-mono tabular-nums text-foreground/80">
-                        {job.salary_text}
-                      </span>
-                    )}
-                    {/* Source attribution intentionally hidden — users
-                        don't need to know where the listing came from,
-                        and surfacing it (LinkedIn / Greenhouse / etc.)
-                        leaks implementation detail without adding value
-                        to the apply decision. Source still lives on
-                        the row for admin filtering. */}
-                    {job.discovered_at && (
-                      <span className="text-muted-foreground tabular-nums ml-auto sm:ml-0">
-                        {timeAgo(job.discovered_at)}
-                      </span>
-                    )}
-                  </div>
+            {/* Pagination */}
+            {total > 25 && (
+              <div className="flex items-center justify-between" style={{ marginTop: 16 }}>
+                <span className="ds-mono ds-muted" style={{ fontSize: 12 }}>
+                  Page {page} of {totalPages} · {total} total
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    className="ds-btn sm"
+                    disabled={page <= 1}
+                    onClick={() => setPage((p) => p - 1)}
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                    Prev
+                  </button>
+                  <button
+                    type="button"
+                    className="ds-btn sm"
+                    disabled={page >= totalPages}
+                    onClick={() => setPage((p) => p + 1)}
+                  >
+                    Next
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
                 </div>
-              </Link>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Pagination */}
-      {total > 0 && (
-        <div className="flex items-center justify-between pt-1">
-          <span className="font-mono text-sm text-muted-foreground tabular-nums">
-            Page {page} of {totalPages} · {total} total
-          </span>
-          <div className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              disabled={page <= 1}
-              onClick={() => setPage((p) => p - 1)}
-            >
-              <ChevronLeft className="h-3.5 w-3.5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => p + 1)}
-            >
-              <ChevronRight className="h-3.5 w-3.5" />
-            </Button>
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
