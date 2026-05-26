@@ -555,12 +555,18 @@ async def admin_source_health(admin: AdminUser):
 
     async def _probe_arcdev():
         from app.services.discovery.arcdev_service import fetch_jobs
-        return await fetch_jobs(max_detail_fetches=2)
+        # Probe with a generic engineering role so the diagnostic still
+        # shows liveness even if no real user roles map to Arc yet.
+        return await fetch_jobs(
+            user_roles=["AI Engineer"], max_detail_fetches=2,
+        )
     probes.append(("arcdev", _probe_arcdev, "firecrawl_api_key"))
 
     async def _probe_wellfound():
         from app.services.discovery.wellfound_service import fetch_jobs
-        return await fetch_jobs(max_detail_fetches=2)
+        return await fetch_jobs(
+            user_roles=["AI Engineer"], max_detail_fetches=2,
+        )
     probes.append(("wellfound", _probe_wellfound, "firecrawl_api_key"))
 
     async def _probe_curated():

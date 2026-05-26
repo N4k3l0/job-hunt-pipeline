@@ -26,13 +26,25 @@ logger = logging.getLogger(__name__)
 
 WELLFOUND_BASE = "https://wellfound.com"
 
-# Discover-page role themes. Wellfound's URL structure for filtered
-# discovery is /role/r/<role-slug>.
-WELLFOUND_ROLES = (
-    "ai-engineer",
-    "machine-learning-engineer",
-    "software-engineer",
-)
+# Wellfound's URL structure for filtered discovery is /role/r/<slug>.
+# This is the set of slugs we've verified Wellfound actually serves.
+# Add more here when Wellfound's role index expands. Intentionally
+# broad across professions so the scraper isn't biased toward tech.
+WELLFOUND_KNOWN_ROLES: set[str] = {
+    # Engineering
+    "ai-engineer", "machine-learning-engineer", "software-engineer",
+    "backend-engineer", "frontend-engineer", "full-stack-engineer",
+    "mobile-engineer", "devops-engineer", "data-engineer", "data-scientist",
+    "qa-engineer", "security-engineer", "infrastructure-engineer",
+    # Design / product
+    "product-designer", "ui-designer", "ux-designer", "graphic-designer",
+    "product-manager", "technical-product-manager",
+    # Business / growth
+    "marketing-manager", "growth-marketer", "content-marketer",
+    "sales-representative", "account-executive", "customer-success-manager",
+    "business-development", "operations-manager", "finance-manager",
+    "people-operations", "recruiter",
+}
 
 # Individual job postings live at /jobs/<numeric-id>-<slug>.
 JOB_LINK_RE = re.compile(
@@ -51,17 +63,62 @@ LOCATION_LABEL_RE = re.compile(
 )
 
 
+def roles_for_user(user_roles: list[str]) -> list[str]:
+    """Map free-text user target_roles to Wellfound role slugs.
+    Slugifies and intersects with WELLFOUND_KNOWN_ROLES.
+
+    Examples:
+        ["Senior AI Engineer"]    → ["ai-engineer"]
+        ["Brand Designer"]        → ["graphic-designer"] (closest match)
+        ["Marketing Manager"]     → ["marketing-manager"]
+        ["Veterinarian"]          → []  (no match — skip)
+    """
+    if not user_roles:
+        return []
+    slugs: set[str] = set()
+    seniority_strip = {"senior", "sr", "junior", "jr", "lead", "principal",
+                       "staff", "head", "of", "the"}
+    for raw in user_roles:
+        role = (raw or "").lower().strip()
+        if not role:
+            continue
+        tokens = [t for t in re.split(r"[^a-z0-9]+", role) if t and t not in seniority_strip]
+        if not tokens:
+            continue
+        # Try full slug first, then progressively shorter ones until a match.
+        for n in range(len(tokens), 0, -1):
+            for start in range(len(tokens) - n + 1):
+                candidate = "-".join(tokens[start:start + n])
+                if candidate in WELLFOUND_KNOWN_ROLES:
+                    slugs.add(candidate)
+                    break
+            if slugs:
+                break
+    return sorted(slugs)
+
+
 async def fetch_jobs(
+    user_roles: list[str] | None = None,
     keywords: set[str] | None = None,
     max_detail_fetches: int = 6,
     skip_urls: set[str] | None = None,
 ) -> list[dict]:
-    """Walk a few role themes, pull a small batch of detail pages."""
+    """Walk Wellfound role pages driven by user roles. Skip entirely
+    when none of the user roles map to a known Wellfound slug."""
     skip_urls = skip_urls or set()
     seen: set[str] = set()
     candidates: list[tuple[str, str]] = []
 
-    for role in WELLFOUND_ROLES:
+    roles_to_visit = roles_for_user(user_roles or [])
+    if not roles_to_visit:
+        logger.info(
+            "Wellfound: skipping — no user roles map to any known Wellfound "
+            "slug. user_roles=%s",
+            user_roles,
+        )
+        return []
+
+    for role in roles_to_visit:
         listing_url = f"{WELLFOUND_BASE}/role/r/{role}"
         try:
             md = await scrape_url(listing_url)
@@ -75,8 +132,8 @@ async def fetch_jobs(
             seen.add(cleaned)
             candidates.append((title.strip(), cleaned))
 
-    logger.info("Wellfound: %d unique candidate listings across %d roles",
-                len(candidates), len(WELLFOUND_ROLES))
+    logger.info("Wellfound: %d unique candidate listings across %d roles (%s)",
+                len(candidates), len(roles_to_visit), roles_to_visit)
 
     if len(candidates) > max_detail_fetches:
         candidates = candidates[:max_detail_fetches]

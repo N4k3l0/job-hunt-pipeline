@@ -797,14 +797,21 @@ async def _run_workingnomads_async():
 
 
 async def _run_arcdev_async():
-    """Arc.dev curates dev/engineering remote jobs with deep category
-    targeting (/remote-jobs/ai, /agentic-frameworks, /automation, ...).
-    Costs ~30 Firecrawl credits/run — bounded by category × detail caps.
+    """Arc.dev curates remote jobs with deep category targeting at
+    /remote-jobs/<slug>. Categories visited are driven by the union of
+    all users' target_roles (mapped to Arc-known slugs). Skips entirely
+    when no user roles map to any Arc category — don't waste Firecrawl
+    credits searching for roles no user wants.
+    Costs ~30 Firecrawl credits/run when active.
     """
     from app.services.discovery.arcdev_service import fetch_jobs
     from app.services.parsing.normalizer import normalize_url
 
-    keywords = await _collect_all_keywords()
+    user_roles = await _collect_user_roles(limit=20)
+    if not user_roles:
+        logger.info("Arc.dev: skipping — no users have target_roles set")
+        return
+
     # Skip URLs already in our DB to save Firecrawl credits.
     skip_urls: set[str] = set()
     async with create_worker_session()() as db:
@@ -818,7 +825,7 @@ async def _run_arcdev_async():
                 skip_urls.add(normalized)
     try:
         jobs = await fetch_jobs(
-            keywords=set(keywords) if keywords else None,
+            user_roles=user_roles,
             skip_urls=skip_urls,
         )
         if jobs:
@@ -832,9 +839,17 @@ async def _run_arcdev_async():
 
 async def _run_wellfound_async():
     """Wellfound serves startup roles, often with direct apply. Plain
-    HTTP gets 403'd (anti-bot); Firecrawl handles. ~18 credits/run."""
+    HTTP gets 403'd (anti-bot); Firecrawl handles. Roles visited driven
+    by users' target_roles (mapped to Wellfound-known slugs). Skips
+    entirely when no user role maps to a known slug.
+    ~18 credits/run when active."""
     from app.services.discovery.wellfound_service import fetch_jobs
     from app.services.parsing.normalizer import normalize_url
+
+    user_roles = await _collect_user_roles(limit=20)
+    if not user_roles:
+        logger.info("Wellfound: skipping — no users have target_roles set")
+        return
 
     skip_urls: set[str] = set()
     async with create_worker_session()() as db:
@@ -847,7 +862,7 @@ async def _run_wellfound_async():
             if normalized:
                 skip_urls.add(normalized)
     try:
-        jobs = await fetch_jobs(skip_urls=skip_urls)
+        jobs = await fetch_jobs(user_roles=user_roles, skip_urls=skip_urls)
         if jobs:
             await _ingest_raw_jobs(jobs)
     except Exception as e:

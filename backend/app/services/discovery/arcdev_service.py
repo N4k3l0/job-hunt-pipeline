@@ -28,15 +28,28 @@ logger = logging.getLogger(__name__)
 
 ARC_BASE = "https://arc.dev"
 
-# Categories we target — biased toward AI / automation / engineering
-# roles. Each one is one listing-page scrape per run.
-ARC_CATEGORIES = (
-    "ai",
-    "agentic-frameworks",
-    "automation",
-    "machine-learning",
-    "llm",
-)
+# Arc.dev exposes category pages at /remote-jobs/<slug>. The slug list
+# below is NOT exhaustive — it's the set of slugs we've verified Arc.dev
+# actually serves. The runner passes role slugs derived from user
+# profiles AND we keep this as the allowed-set so we don't 404-spam
+# Firecrawl on slugs Arc doesn't recognise.
+#
+# Add more here when Arc.dev's category index expands (visible at
+# https://arc.dev/remote-jobs). The set is intentionally broad across
+# professions so this scraper isn't biased toward any one user type.
+ARC_KNOWN_CATEGORIES: set[str] = {
+    # Engineering / data
+    "ai", "agentic-frameworks", "automation", "machine-learning", "llm",
+    "back-end", "front-end", "full-stack", "mobile", "devops",
+    "blockchain", "android", "ios", "python", "javascript", "go", "rust",
+    "data-science", "data-engineering", "qa",
+    # Design
+    "design", "ui-ux", "product-design", "graphic-design", "animation",
+    # Product
+    "product-management", "product",
+    # Marketing / content (Arc exposes these too)
+    "marketing", "content", "growth",
+}
 
 # Arc renders individual job links as /remote-jobs/c/<slug> or
 # /remote-jobs/<numeric-id>/<slug>. We accept both.
@@ -52,18 +65,71 @@ COMPANY_LABEL_RE = re.compile(
 )
 
 
+def categories_for_user_roles(user_roles: list[str]) -> list[str]:
+    """Map a list of free-text user target_roles to Arc.dev category
+    slugs. Slugifies (lowercase + hyphenate + drop seniority words)
+    and intersects with ARC_KNOWN_CATEGORIES so we only hit slugs the
+    site actually serves.
+
+    Examples:
+        ["Senior AI Engineer"]           → ["ai"]
+        ["Brand Designer"]               → ["design"]   (after stem fallback)
+        ["Marketing Manager"]            → ["marketing"]
+        ["Healthcare Administrator"]     → []  (no overlap with Arc.dev — skip)
+    """
+    if not user_roles:
+        return []
+    slugs: set[str] = set()
+    seniority_strip = {"senior", "sr", "junior", "jr", "lead", "principal",
+                       "staff", "head", "of", "the", "vp", "director"}
+    for raw in user_roles:
+        role = (raw or "").lower().strip()
+        if not role:
+            continue
+        # Drop seniority modifiers + tokenise.
+        tokens = [t for t in re.split(r"[^a-z0-9]+", role) if t and t not in seniority_strip]
+        if not tokens:
+            continue
+        # Try full slug, then 2-word, then last token only — longest match wins.
+        for n in range(len(tokens), 0, -1):
+            for start in range(len(tokens) - n + 1):
+                candidate = "-".join(tokens[start:start + n])
+                if candidate in ARC_KNOWN_CATEGORIES:
+                    slugs.add(candidate)
+                    break
+            if slugs:
+                break
+    return sorted(slugs)
+
+
 async def fetch_jobs(
+    user_roles: list[str] | None = None,
     keywords: set[str] | None = None,
     max_detail_fetches: int = 8,
     skip_urls: set[str] | None = None,
 ) -> list[dict]:
-    """Walk the target categories, pull a small batch of detail pages
-    per run."""
+    """Walk Arc.dev category pages driven by user roles, pull a small
+    batch of detail pages per run.
+
+    Categories visited = intersection of {user target_roles slugged}
+    with ARC_KNOWN_CATEGORIES. If no users have roles that map to any
+    Arc.dev category, we skip the scraper entirely rather than waste
+    Firecrawl credits on roles no one wants.
+    """
     skip_urls = skip_urls or set()
     seen: set[str] = set()
     candidates: list[tuple[str, str]] = []
 
-    for category in ARC_CATEGORIES:
+    categories = categories_for_user_roles(user_roles or [])
+    if not categories:
+        logger.info(
+            "Arc.dev: skipping — no user roles map to any known Arc.dev "
+            "category. user_roles=%s",
+            user_roles,
+        )
+        return []
+
+    for category in categories:
         listing_url = f"{ARC_BASE}/remote-jobs/{category}"
         try:
             md = await scrape_url(listing_url)
@@ -77,8 +143,8 @@ async def fetch_jobs(
             seen.add(cleaned)
             candidates.append((title.strip(), cleaned))
 
-    logger.info("Arc.dev: %d unique candidate listings across %d categories",
-                len(candidates), len(ARC_CATEGORIES))
+    logger.info("Arc.dev: %d unique candidate listings across %d categories (%s)",
+                len(candidates), len(categories), categories)
 
     if len(candidates) > max_detail_fetches:
         candidates = candidates[:max_detail_fetches]
