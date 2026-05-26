@@ -791,20 +791,27 @@ export default function ReviewQueuePage() {
   );
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 ds-page-fade">
       <div className="flex items-end justify-between gap-3">
         <div>
-          <h1 className="font-display text-3xl font-semibold tracking-tight">Review Queue</h1>
-          <p className="text-muted-foreground text-sm">
-            {counts.ready > 0 && <span>{counts.ready} ready</span>}
+          <h1 className="ds-h1">
+            Review Queue
+            {(counts.ready + counts.generating + counts.failed) > 0 && (
+              <span className="ds-mono ds-faint" style={{ fontSize: 18, fontWeight: 500, marginLeft: 8 }}>
+                · {counts.ready + counts.generating + counts.failed}
+              </span>
+            )}
+          </h1>
+          <p className="ds-muted" style={{ fontSize: 13, marginTop: 6 }}>
+            {counts.ready > 0 && <span className="ds-mono">{counts.ready} ready</span>}
             {counts.generating > 0 && (
-              <span className={counts.ready > 0 ? "ml-2" : ""}>
-                <Loader2 className="inline h-3 w-3 animate-spin text-amber-400 mr-1" />
-                {counts.generating} generating
+              <span className={counts.ready > 0 ? "ml-3" : ""} style={{ color: "var(--ds-fg-muted)" }}>
+                <Loader2 className="inline h-3 w-3 animate-spin mr-1" style={{ color: "var(--ds-accent)" }} />
+                <span className="ds-mono">{counts.generating}</span> generating
               </span>
             )}
             {counts.failed > 0 && (
-              <span className="ml-2 text-red-400">
+              <span className="ml-3 text-red-400 ds-mono">
                 {counts.failed} failed
               </span>
             )}

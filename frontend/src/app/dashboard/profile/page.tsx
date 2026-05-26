@@ -274,11 +274,11 @@ export default function ProfilePage() {
   const isSavingProfile = createProfile.isPending || updateProfile.isPending;
 
   return (
-    <div className="space-y-5 sm:space-y-6 max-w-4xl">
+    <div className="space-y-5 sm:space-y-6 ds-page-fade" style={{ maxWidth: 960, margin: "0 auto" }}>
       <div>
-        <h1 className="font-display text-2xl sm:text-3xl font-semibold tracking-tight">Profile</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Powers job scoring and resume tailoring.
+        <h1 className="ds-h1">Profile</h1>
+        <p className="ds-muted" style={{ fontSize: 13, marginTop: 6 }}>
+          These power the matcher. Tighter inputs → sharper scores.
         </p>
       </div>
 
