@@ -628,3 +628,49 @@ export function useAnalytics() {
     staleTime: 5 * 60 * 1000,
   });
 }
+
+
+// ── Feedback ────────────────────────────────────────────────────────────────
+
+export interface FeedbackPayload {
+  category: "bug" | "feature" | "general";
+  message: string;
+  context?: string;
+}
+
+export interface FeedbackRow {
+  id: string;
+  user_id: string;
+  user_name: string | null;
+  user_email: string | null;
+  category: string;
+  message: string;
+  context: string | null;
+  resolved: boolean;
+  created_at: string;
+}
+
+export function useSubmitFeedback() {
+  return useMutation({
+    mutationFn: (body: FeedbackPayload) =>
+      api.post<{ id: string; status: string }>("/api/v1/feedback", body),
+  });
+}
+
+export function useFeedbackList(resolved?: boolean) {
+  const qs = resolved !== undefined ? `?resolved=${resolved}` : "";
+  return useQuery({
+    queryKey: ["feedback", { resolved }],
+    queryFn: () => api.get<FeedbackRow[]>(`/api/v1/feedback${qs}`),
+    staleTime: 60 * 1000,
+  });
+}
+
+export function useUpdateFeedback() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, resolved }: { id: string; resolved: boolean }) =>
+      api.patch<{ id: string; resolved: boolean }>(`/api/v1/feedback/${id}`, { resolved }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["feedback"] }),
+  });
+}

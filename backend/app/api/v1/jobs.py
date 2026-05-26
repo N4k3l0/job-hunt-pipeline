@@ -86,6 +86,32 @@ async def list_jobs(
     profile_remote_pref = profile_row[3] if profile_row else None
     profile_pref_countries = profile_row[4] if profile_row else None
 
+    # Fallback: if the user hasn't set preferred_countries yet, use the
+    # union of every other user's preferences as their default filter.
+    # This is the "system's covered countries" — what we've already
+    # decided to actively look for. Avoids dropping a brand-new user
+    # into an inbox full of Brazil/India-restricted jobs they can't act
+    # on. They can still change to specific countries any time.
+    if not profile_pref_countries:
+        from app.models.candidate import CandidateProfile as _CP
+        covered = await db.execute(
+            select(_CP.preferred_countries).where(
+                _CP.user_id != user_id,
+                _CP.preferred_countries.is_not(None),
+            )
+        )
+        union: set[str] = set()
+        for (countries_list,) in covered.all():
+            if countries_list:
+                for c in countries_list:
+                    if c:
+                        union.add(c.strip().upper())
+        # Empty fallback (brand-new system, no users yet) → keep None so
+        # apply_user_filters runs without the country filter. New systems
+        # start permissive.
+        if union:
+            profile_pref_countries = sorted(union)
+
     # Fallback: if THIS user hasn't set preferred_countries, restrict the
     # inbox to the union of countries other users have set ("the system's
     # covered countries"). Keeps the inbox useful without dumping the full

@@ -926,3 +926,70 @@ async def _run_wellfound_async():
             await _ingest_raw_jobs(jobs)
     except Exception as e:
         logger.error("Wellfound discovery failed: %s", e)
+
+
+# ── Jobberman (Nigeria's largest job board, plain HTML scrape) ──────────────
+
+
+async def _run_jobberman_async():
+    """Jobberman covers Nigeria-local jobs (mostly Lagos / Abuja). Plain
+    httpx scrape — no Firecrawl, no API key. Only runs if at least one
+    user has Nigeria (NG) in preferred_countries — wastes nothing if
+    no user wants NG coverage."""
+    from app.services.discovery.jobberman_service import fetch_jobs
+    from app.services.parsing.normalizer import normalize_url
+
+    countries = await _collect_user_countries()
+    if "NG" not in countries:
+        logger.info("Jobberman: skipping — no users have NG in preferred_countries")
+        return
+
+    skip_urls: set[str] = set()
+    async with create_worker_session()() as db:
+        result = await db.execute(
+            select(Job.job_url).join(JobSource, Job.source_id == JobSource.id)
+            .where(JobSource.name == "jobberman", Job.job_url.is_not(None))
+        )
+        for row in result.all():
+            normalized = normalize_url(row[0])
+            if normalized:
+                skip_urls.add(normalized)
+    try:
+        jobs = await fetch_jobs(skip_urls=skip_urls)
+        if jobs:
+            await _ingest_raw_jobs(jobs)
+    except Exception as e:
+        logger.error("Jobberman discovery failed: %s", e)
+
+
+# ── MyJobMag (Nigeria #2; JS-rendered, Firecrawl required) ──────────────────
+
+
+async def _run_myjobmag_async():
+    """MyJobMag is Nigeria's #2 board. Like Jobberman, only runs when a
+    user wants NG. Firecrawl-based since the page is JS-rendered.
+    ~10 credits/run."""
+    from app.services.discovery.myjobmag_service import fetch_jobs
+    from app.services.parsing.normalizer import normalize_url
+
+    countries = await _collect_user_countries()
+    if "NG" not in countries:
+        logger.info("MyJobMag: skipping — no users have NG in preferred_countries")
+        return
+
+    skip_urls: set[str] = set()
+    async with create_worker_session()() as db:
+        result = await db.execute(
+            select(Job.job_url).join(JobSource, Job.source_id == JobSource.id)
+            .where(JobSource.name == "myjobmag", Job.job_url.is_not(None))
+        )
+        for row in result.all():
+            normalized = normalize_url(row[0])
+            if normalized:
+                skip_urls.add(normalized)
+    try:
+        jobs = await fetch_jobs(skip_urls=skip_urls)
+        if jobs:
+            await _ingest_raw_jobs(jobs)
+    except Exception as e:
+        logger.error("MyJobMag discovery failed: %s", e)

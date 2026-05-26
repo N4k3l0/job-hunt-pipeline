@@ -178,7 +178,8 @@ function OnboardingFlow({
       <div className="space-y-2 text-center">
         <h1 className="text-2xl sm:text-3xl font-semibold">Welcome — let&apos;s set you up</h1>
         <p className="text-sm text-muted-foreground max-w-md mx-auto">
-          Two quick steps and your inbox starts scoring jobs against your background.
+          Three quick steps and your inbox starts scoring jobs against
+          your background and target geographies.
         </p>
       </div>
 

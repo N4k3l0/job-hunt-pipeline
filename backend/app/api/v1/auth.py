@@ -569,6 +569,16 @@ async def admin_source_health(admin: AdminUser):
         )
     probes.append(("wellfound", _probe_wellfound, "firecrawl_api_key"))
 
+    async def _probe_jobberman():
+        from app.services.discovery.jobberman_service import fetch_jobs
+        return await fetch_jobs(max_detail_fetches=2)
+    probes.append(("jobberman", _probe_jobberman, None))
+
+    async def _probe_myjobmag():
+        from app.services.discovery.myjobmag_service import fetch_jobs
+        return await fetch_jobs(max_detail_fetches=2)
+    probes.append(("myjobmag", _probe_myjobmag, "firecrawl_api_key"))
+
     async def _probe_curated():
         from app.services.discovery.curated_service import fetch_jobs
         return await fetch_jobs(keywords=None)

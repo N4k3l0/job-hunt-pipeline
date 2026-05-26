@@ -136,7 +136,8 @@ async def cron_discover_remote(authorization: str | None = Header(None)):
         _run_remotive_async, _run_weworkremotely_async,
         _run_dailyremote_async, _run_undutchables_async,
         _run_workingnomads_async, _run_arcdev_async,
-        _run_wellfound_async, quick_score_all_users,
+        _run_wellfound_async, _run_jobberman_async,
+        _run_myjobmag_async, quick_score_all_users,
     )
 
     # DailyRemote routes through Firecrawl now — Cloudflare blocks direct
@@ -158,6 +159,8 @@ async def cron_discover_remote(authorization: str | None = Header(None)):
         ("workingnomads", _run_workingnomads_async),
         ("arcdev", _run_arcdev_async),
         ("wellfound", _run_wellfound_async),
+        ("jobberman", _run_jobberman_async),
+        ("myjobmag", _run_myjobmag_async),
     ])
     scoring = await quick_score_all_users(per_user_timeout=10)
     return {"status": "complete", "results": results, "scoring": scoring}

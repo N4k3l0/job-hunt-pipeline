@@ -58,9 +58,10 @@ export const COUNTRY_OPTIONS: CountryOption[] = [
   { code: "JP", name: "Japan", group: "Asia-Pacific", coverage: "remote" },
   { code: "IN", name: "India", group: "Asia-Pacific", coverage: "remote" },
   { code: "AE", name: "United Arab Emirates", group: "Asia-Pacific", coverage: "remote" },
-  // Africa (mostly remote-only coverage; local sources can be added on
-  // request — Jobberman / MyJobMag scrapers would give strong NG support)
-  { code: "NG", name: "Nigeria", group: "Africa", coverage: "remote" },
+  // Africa — NG now has Jobberman + MyJobMag scrapers for local jobs.
+  // Other African countries stay "remote-only" until we add similar
+  // local-board integrations on request.
+  { code: "NG", name: "Nigeria", group: "Africa", coverage: "strong" },
   { code: "KE", name: "Kenya", group: "Africa", coverage: "remote" },
   { code: "ZA", name: "South Africa", group: "Africa", coverage: "remote" },
   { code: "GH", name: "Ghana", group: "Africa", coverage: "remote" },

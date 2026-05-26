@@ -25,11 +25,13 @@ import {
   Import,
   Settings,
   LogOut,
+  MessageSquare,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { useCurrentUser } from "@/hooks/use-api";
+import { FeedbackDialog } from "@/components/feedback-dialog";
 
 const navItems = [
   { title: "Jobs Inbox", href: "/dashboard/jobs", icon: Briefcase },
@@ -123,7 +125,18 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter className="border-t p-4">
+      <SidebarFooter className="border-t p-4 space-y-1">
+        <FeedbackDialog
+          trigger={
+            <Button
+              variant="ghost"
+              className="w-full justify-start text-[15px] py-3 h-auto"
+            >
+              <MessageSquare className="mr-2.5 h-5 w-5" />
+              Send feedback
+            </Button>
+          }
+        />
         <Button
           variant="ghost"
           className="w-full justify-start text-[15px] py-3 h-auto"
