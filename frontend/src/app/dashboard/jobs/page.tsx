@@ -51,6 +51,13 @@ function timeAgo(dateStr: string | null | undefined): string {
   return `${Math.floor(days / 7)}w`;
 }
 
+/** Normalize an axis sub-score (raw 0..max) to a 0–100 percentage so
+ *  it can be rendered consistently against the overall_fit scale. */
+function pct(raw: number | null | undefined, max: number): number {
+  if (raw == null || max <= 0) return 0;
+  return Math.max(0, Math.min(100, Math.round((raw / max) * 100)));
+}
+
 type SavedView = {
   id: string;
   label: string;
@@ -603,7 +610,11 @@ function TopMatchCard({
         </p>
       )}
 
-      {/* 4-axis breakdown — only renders if we actually have axis scores. */}
+      {/* 4-axis breakdown — only renders if we actually have axis scores.
+          The raw axis values are NOT on a 0-100 scale (title maxes at 20,
+          skill at 25, seniority at 15, salary at 10 — see backend scorer.py).
+          Normalize to a percentage so the bars and the "/100" labels read
+          consistently with the rest of the design system. */}
       {job.score && (
         <div style={{
           display: "grid",
@@ -613,10 +624,10 @@ function TopMatchCard({
           paddingTop: 16,
           borderTop: "1px solid var(--ds-line)",
         }}>
-          <ScoreAxis label="TITLE" value={job.score.title_score ?? 0} />
-          <ScoreAxis label="SKILLS" value={job.score.skill_score ?? 0} />
-          <ScoreAxis label="SENIORITY" value={job.score.seniority_score ?? 0} />
-          <ScoreAxis label="SALARY" value={job.score.salary_score ?? 0} />
+          <ScoreAxis label="TITLE" value={pct(job.score.title_score, 20)} />
+          <ScoreAxis label="SKILLS" value={pct(job.score.skill_score, 25)} />
+          <ScoreAxis label="SENIORITY" value={pct(job.score.seniority_score, 15)} />
+          <ScoreAxis label="SALARY" value={pct(job.score.salary_score, 10)} />
         </div>
       )}
 
