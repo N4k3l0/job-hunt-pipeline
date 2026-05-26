@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, Fragment } from "react";
+import { useMemo } from "react";
 import Link from "next/link";
 import {
   ChevronRight,
@@ -93,19 +93,36 @@ export default function DashboardOverview() {
     };
   })();
 
-  // Pulse strip
-  const pulse: PulseItem[] = [
-    { value: formatNumber(analytics?.jobs_discovered), label: "scored" },
-    { value: String(topMatchCount), label: "top matches", accent: true },
-    { value: formatNumber(analytics?.jobs_shortlisted), label: "shortlisted" },
-    { value: formatNumber(analytics?.applications_sent), label: "applied" },
+  // Stat cards — four-card row, the layout we had before the pulse strip.
+  const stats: StatCardData[] = [
     {
-      value: String(Math.round((analytics?.response_rate ?? 0) * (analytics?.applications_sent ?? 0))),
-      label: "replies",
+      label: "DISCOVERED",
+      value: formatNumber(analytics?.jobs_discovered),
+      sub:
+        analytics?.jobs_shortlisted
+          ? `${analytics.jobs_shortlisted} shortlisted`
+          : "0 shortlisted",
     },
     {
-      value: `${Math.round((analytics?.response_rate ?? 0) * 100)}%`,
-      label: "response",
+      label: "REVIEW QUEUE",
+      value: reviewReady > 0 ? String(reviewReady) : "—",
+      sub: "awaiting review",
+    },
+    {
+      label: "APPLIED",
+      value: formatNumber(analytics?.applications_sent),
+      sub:
+        analytics?.applications_this_week != null
+          ? `${analytics.applications_this_week} this week`
+          : "—",
+    },
+    {
+      label: "RESPONSE RATE",
+      value:
+        (analytics?.applications_sent ?? 0) > 0
+          ? `${Math.round((analytics?.response_rate ?? 0) * 100)}%`
+          : "—",
+      sub: `${Math.round((analytics?.interview_rate ?? 0) * 100)}% interview rate`,
     },
   ];
 
@@ -126,8 +143,8 @@ export default function DashboardOverview() {
         </Link>
       </header>
 
-      {/* Pulse strip */}
-      <PulseStrip items={pulse} />
+      {/* Stat cards */}
+      <StatCards stats={stats} />
 
       {/* Two-column body */}
       <div className="dash-grid">
@@ -138,18 +155,11 @@ export default function DashboardOverview() {
             totalScored={analytics?.jobs_discovered ?? 0}
             lastSweep={analytics?.last_discovery_at}
           />
-          <ActivityFeed
-            lastSweep={analytics?.last_discovery_at}
-            topMatchCount={topMatchCount}
-            reviewReady={reviewReady}
-            applicationsSent={analytics?.applications_sent ?? 0}
-          />
         </div>
 
         {/* RIGHT */}
         <aside className="dash-right">
           <WaitingCard reviewReady={reviewReady} followUps={followUps} />
-          <SweepStatusCard lastSweep={analytics?.last_discovery_at} />
           <QuickActions />
         </aside>
       </div>
@@ -163,21 +173,17 @@ export default function DashboardOverview() {
    Components
    ============================================================ */
 
-type PulseItem = { value: string; label: string; accent?: boolean };
+type StatCardData = { label: string; value: string; sub: string };
 
-function PulseStrip({ items }: { items: PulseItem[] }) {
+function StatCards({ stats }: { stats: StatCardData[] }) {
   return (
-    <div className="dash-pulse">
-      {items.map((it, i) => (
-        <Fragment key={it.label}>
-          {i > 0 && <span className="dash-pulse-sep">·</span>}
-          <div className="dash-pulse-item">
-            <span className={`ds-mono dash-pulse-n${it.accent ? " dash-pulse-accent" : ""}`}>
-              {it.value}
-            </span>
-            <span className="ds-mono dash-pulse-l">{it.label}</span>
-          </div>
-        </Fragment>
+    <div className="dash-stats">
+      {stats.map((s) => (
+        <div key={s.label} className="dash-stat">
+          <div className="ds-mono dash-stat-label">{s.label}</div>
+          <div className="ds-mono dash-stat-value">{s.value}</div>
+          <div className="dash-stat-sub">{s.sub}</div>
+        </div>
       ))}
     </div>
   );
@@ -529,32 +535,39 @@ function DashStyle() {
       .dash-hint-accent .dash-hint-dot { background: var(--accent); box-shadow: 0 0 10px var(--accent); }
       .dash-hint-warn .dash-hint-dot { background: var(--fg-muted); }
 
-      .dash-pulse {
-        display: flex;
-        align-items: baseline;
+      .dash-stats {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: 14px;
-        flex-wrap: wrap;
-        padding: 18px 0;
-        border-top: 1px solid var(--line);
-        border-bottom: 1px solid var(--line);
       }
-      .dash-pulse-sep {
+      @media (max-width: 900px) { .dash-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+      @media (max-width: 540px) { .dash-stats { grid-template-columns: 1fr; } }
+      .dash-stat {
+        background: var(--bg-elev-1);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px 18px 16px;
+        min-width: 0;
+      }
+      .dash-stat-label {
+        font-size: 10px;
+        letter-spacing: 0.12em;
         color: var(--fg-faint);
-        font-family: var(--font-mono);
+        text-transform: uppercase;
+        font-weight: 600;
       }
-      .dash-pulse-item { display: flex; align-items: baseline; gap: 6px; }
-      .dash-pulse-n {
-        font-size: 22px;
+      .dash-stat-value {
+        font-size: 30px;
         font-weight: 600;
         letter-spacing: -0.03em;
         color: var(--fg);
+        line-height: 1.1;
+        margin-top: 10px;
       }
-      .dash-pulse-accent { color: var(--accent); }
-      .dash-pulse-l {
-        font-size: 10px;
-        letter-spacing: 0.1em;
-        text-transform: uppercase;
-        color: var(--fg-dim);
+      .dash-stat-sub {
+        font-size: 12px;
+        color: var(--fg-muted);
+        margin-top: 6px;
       }
 
       .dash-grid {
