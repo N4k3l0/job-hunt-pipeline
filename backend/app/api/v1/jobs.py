@@ -63,10 +63,9 @@ async def list_jobs(
     page calls this with ?include_applied=true to see them.
     """
     # Hide jobs the user has actually moved past the inbox. Narrow scope:
-    # only post-"applied" statuses (sent through ghosted/rejected/offered).
-    # Tailored-but-not-yet-applied rows (status="approved", created by
-    # /tailoring) stay visible so the user can keep iterating from the
-    # inbox without losing the draft.
+    # only post-"applied" statuses. Tailored-but-not-yet-applied rows
+    # (status="approved", created by /tailoring) stay visible so the
+    # user can keep iterating from the draft.
     APPLIED_STATUSES = (
         "applied",
         "follow_up_due",
@@ -75,13 +74,22 @@ async def list_jobs(
         "rejected",
         "ghosted",
     )
-    # Use NOT EXISTS correlated against the outer Job. Avoids the NOT IN
-    # subquery NULL-trap that can silently empty the result set when the
-    # planner sees a NULL even once in the inner select.
-    applied_exists = exists().where(
-        ApplicationTracking.job_id == Job.id,
-        ApplicationTracking.user_id == user_id,
-        ApplicationTracking.status.in_(APPLIED_STATUSES),
+    # Eagerly fetch the small list of applied job IDs and use a plain
+    # IN-list filter. Earlier attempts with NOT IN (subquery) and
+    # NOT EXISTS were emptying the inbox — likely a correlation issue
+    # in the SQLAlchemy-generated subquery that silently matched every
+    # job. The list approach is unambiguous and fast: applied counts
+    # are typically <100, well below any IN-list size concern.
+    applied_ids_result = await db.execute(
+        select(ApplicationTracking.job_id).where(
+            ApplicationTracking.user_id == user_id,
+            ApplicationTracking.status.in_(APPLIED_STATUSES),
+        )
+    )
+    applied_ids = [row[0] for row in applied_ids_result.all()]
+    logger.info(
+        "Inbox pipeline filter: user=%s applied_count=%d include_applied=%s",
+        user_id, len(applied_ids), include_applied,
     )
 
     # Base query
@@ -92,8 +100,8 @@ async def list_jobs(
         .outerjoin(JobEntity, JobEntity.job_id == Job.id)
         .where(Job.status.notin_(["duplicate", "raw", "expired", "dismissed"]))
     )
-    if not include_applied:
-        query = query.where(not_(applied_exists))
+    if not include_applied and applied_ids:
+        query = query.where(Job.id.notin_(applied_ids))
 
     # Pull profile preferences once and run them through the shared filter
     # (same code path the dashboard's /analytics/overview uses, so the counts
@@ -269,8 +277,8 @@ async def list_jobs(
         .outerjoin(JobEntity, JobEntity.job_id == Job.id)
         .where(Job.status.notin_(["duplicate", "raw", "expired", "dismissed"]))
     )
-    if not include_applied:
-        count_base = count_base.where(not_(applied_exists))
+    if not include_applied and applied_ids:
+        count_base = count_base.where(Job.id.notin_(applied_ids))
     count_base = apply_user_filters(
         count_base,
         target_roles=apply_target_roles,
