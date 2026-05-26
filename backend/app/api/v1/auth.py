@@ -599,6 +599,37 @@ async def admin_source_health(admin: AdminUser):
     return {"sources": results}
 
 
+@router.post("/admin/fix/scrub-asset-apply-urls")
+async def admin_scrub_asset_apply_urls(admin: AdminUser, db: DbSession):
+    """Wipe Job.apply_url for any row where the cached value points at a
+    static asset (font / css / image) instead of a job posting.
+
+    Background: the resolver's body-scan accidentally returned font and
+    asset URLs (e.g. metaboldlf-webfont-2017.woff) before the
+    _looks_like_asset filter shipped. The next click on those jobs would
+    re-trigger the popup-downloads-a-font bug. Resetting apply_url here
+    forces the resolver to run again with the fix in place.
+
+    Safe to re-run: only NULLs out rows that match the asset pattern.
+    """
+    from sqlalchemy import text
+    # Use Postgres regex to find apply_url ending in obvious asset
+    # extensions OR containing asset-directory hints.
+    result = await db.execute(text(r"""
+        UPDATE jobs
+           SET apply_url = NULL
+         WHERE apply_url IS NOT NULL
+           AND (
+                apply_url ~* '\.(woff2?|ttf|otf|eot|css|js|mjs|map|png|jpe?g|gif|svg|ico|webp|avif|pdf|zip|gz|xml|json|txt|mp4|webm|mp3|wav)(\?.*)?$'
+                OR apply_url ~* '/(assets|static|fonts|_next|images|img|css|js|build|dist|public|media)/'
+           )
+        RETURNING id
+    """))
+    rows = result.fetchall()
+    await db.commit()
+    return {"scrubbed": len(rows)}
+
+
 @router.post("/admin/fix/raw-description")
 async def admin_fix_raw_description(
     admin: AdminUser,

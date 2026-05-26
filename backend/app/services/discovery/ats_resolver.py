@@ -259,6 +259,42 @@ _ATS_URL_RE = re.compile(
     re.I,
 )
 
+# File extensions that absolutely aren't job postings. Companies on
+# Workday / iCIMS / SmartRecruiters often serve their own fonts, CSS,
+# and image assets from the same subdomain — without this filter the
+# body-scan happily picks up '...metaboldlf-webfont-2017.woff' and
+# returns it as the apply URL, the popup downloads a font file, and
+# the user has no idea what just happened.
+_ASSET_EXTENSIONS = (
+    ".woff", ".woff2", ".ttf", ".otf", ".eot",      # fonts
+    ".css", ".js", ".mjs", ".map",                   # bundles
+    ".png", ".jpg", ".jpeg", ".gif", ".svg",         # images
+    ".ico", ".webp", ".avif",
+    ".pdf", ".zip", ".gz", ".xml", ".json", ".txt",  # docs / data
+    ".mp4", ".webm", ".mp3", ".wav",                 # media
+)
+# Path segments that signal an asset directory, not a job posting.
+_ASSET_PATH_HINTS = (
+    "/assets/", "/static/", "/fonts/", "/_next/",
+    "/images/", "/img/", "/css/", "/js/",
+    "/build/", "/dist/", "/public/", "/media/",
+)
+
+
+def _looks_like_asset(url: str) -> bool:
+    """True if the URL is obviously a static asset, not a job posting.
+    Cheap pre-filter before we hand the URL back as 'apply here'."""
+    try:
+        u = httpx.URL(url)
+    except Exception:
+        return False
+    path_lower = (u.path or "").lower()
+    if any(path_lower.endswith(ext) for ext in _ASSET_EXTENSIONS):
+        return True
+    if any(hint in path_lower for hint in _ASSET_PATH_HINTS):
+        return True
+    return False
+
 
 async def follow_to_ats(client: httpx.AsyncClient, source_url: str) -> str | None:
     """Try two cheap signals before any slug-guessing:
@@ -307,6 +343,11 @@ async def follow_to_ats(client: httpx.AsyncClient, source_url: str) -> str | Non
             # Bare provider domain, not a customer subdomain → skip
             continue
         if not path or path == "/":
+            continue
+        # Reject obvious static assets (fonts / css / images) — companies
+        # on Workday/iCIMS host their own fonts at /assets/...woff which
+        # the regex happily matches.
+        if _looks_like_asset(candidate):
             continue
         logger.info("Body-scan resolved %s → %s", source_url, candidate)
         return candidate
@@ -410,6 +451,8 @@ async def follow_to_ats_via_firecrawl(source_url: str) -> str | None:
                     "ashbyhq.com", "smartrecruiters.com", "personio.com"):
             continue
         if not path or path == "/":
+            continue
+        if _looks_like_asset(candidate):
             continue
         logger.info("Firecrawl body-scan resolved %s → %s", source_url, candidate)
         return candidate
@@ -522,6 +565,9 @@ async def find_direct_apply_via_claude(
             if _is_aggregator(url):
                 logger.warning("Claude returned aggregator URL %s — discarding", url)
                 return None
+            if _looks_like_asset(url):
+                logger.warning("Claude returned asset URL %s — discarding", url)
+                return None
             logger.info("Claude resolved %s @ %s → %s", title, company, url)
             return url
     return None
@@ -546,7 +592,10 @@ async def find_direct_apply(
        ICIMS, Pinpoint, custom careers pages) and company-name mismatches.
     6. Otherwise → None, caller falls back to source URL.
     """
-    if source_url and is_ats_url(source_url):
+    # If the cached URL points to a static asset (font / css / image),
+    # drop it and re-resolve. This catches stale cache rows from before
+    # the asset filter shipped — and any new bad data Claude might emit.
+    if source_url and is_ats_url(source_url) and not _looks_like_asset(source_url):
         return source_url
 
     async with httpx.AsyncClient(
