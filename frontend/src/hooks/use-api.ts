@@ -577,6 +577,10 @@ export function useApproveTailored() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["tailoring"] });
       qc.invalidateQueries({ queryKey: ["tracking"] });
+      // Approve creates an application_tracking row — the inbox filter
+      // hides jobs that have one, so the inbox + dashboard need to refetch.
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      qc.invalidateQueries({ queryKey: ["analytics"] });
     },
   });
 }
@@ -607,7 +611,13 @@ export function useUpdateStatus() {
     }) => api.put(`/api/v1/tracking/${id}/status`, {
       status, notes, follow_up_date: followUpDate,
     }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["tracking"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["tracking"] });
+      // Status transitions in/out of applied/interviewing/offered/etc.
+      // change inbox visibility — refresh so the inbox + dashboard agree.
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      qc.invalidateQueries({ queryKey: ["analytics"] });
+    },
   });
 }
 

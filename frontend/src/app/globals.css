@@ -177,3 +177,8 @@
   font-optical-sizing: auto;
   letter-spacing: -0.02em;
 }
+
+/* v2 design system — imported LAST so its tokens win over the legacy
+   shadcn :root/.dark blocks for any clashing names (--accent, --background,
+   --foreground, --card, --input, etc.). */
+@import "./design-system-v2.css";

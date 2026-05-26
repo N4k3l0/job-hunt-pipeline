@@ -16,41 +16,47 @@
  * ─────────────────────────────────────────────────────────────────── */
 
 :root {
+  /* v1 tokens now ALIAS to v2 tokens (defined in design-system-v2.css). This
+     keeps every v1-styled component (Inbox, Job Detail, Onboarding, Sidebar)
+     theme-aware automatically — when the user flips data-theme to "light",
+     all v1 surfaces, text, and accents pick up the new values via cascade.
+     The original hex values are preserved as fallbacks for the edge case
+     where the v2 file isn't loaded. */
   /* Surfaces */
-  --ds-bg: #0a0e14;
-  --ds-bg-chrome: #06080b;
-  --ds-bg-elev-1: #0e131a;
-  --ds-bg-elev-2: #131922;
-  --ds-bg-hover: #161d27;
+  --ds-bg: var(--bg, #0a0e14);
+  --ds-bg-chrome: var(--bg-chrome, #06080b);
+  --ds-bg-elev-1: var(--bg-elev-1, #0e131a);
+  --ds-bg-elev-2: var(--bg-elev-2, #131922);
+  --ds-bg-hover: var(--bg-hover, #161d27);
 
   /* Borders / hairlines */
-  --ds-line: #1a212c;
-  --ds-line-strong: #232c39;
-  --ds-line-faint: #131923;
+  --ds-line: var(--line, #1a212c);
+  --ds-line-strong: var(--line-strong, #232c39);
+  --ds-line-faint: var(--line-faint, #131923);
 
   /* Text */
-  --ds-fg: #e8eaf0;
-  --ds-fg-muted: #a0a6b3;
-  --ds-fg-dim: #6a7180;
-  --ds-fg-faint: #4a5161;
+  --ds-fg: var(--fg, #e8eaf0);
+  --ds-fg-muted: var(--fg-muted, #a0a6b3);
+  --ds-fg-dim: var(--fg-dim, #6a7180);
+  --ds-fg-faint: var(--fg-faint, #4a5161);
 
   /* Accent — single teal. Tweakable. */
-  --ds-accent: #1ed8b7;
-  --ds-accent-hover: #2ce6c5;
-  --ds-accent-soft: rgba(30, 216, 183, 0.10);
-  --ds-accent-edge: rgba(30, 216, 183, 0.30);
-  --ds-accent-glow: rgba(30, 216, 183, 0.18);
+  --ds-accent: var(--accent, #1ed8b7);
+  --ds-accent-hover: var(--accent-hover, #2ce6c5);
+  --ds-accent-soft: var(--accent-soft, rgba(30, 216, 183, 0.10));
+  --ds-accent-edge: var(--accent-edge, rgba(30, 216, 183, 0.30));
+  --ds-accent-glow: var(--accent-glow, rgba(30, 216, 183, 0.18));
 
   /* Radii */
   --ds-r-pill: 6px;
   --ds-r-card: 8px;
   --ds-r-lg: 12px;
 
-  /* Type — Geist + JetBrains Mono. We reuse the existing next/font
-     Geist + Geist_Mono variables; the design uses JetBrains Mono but
-     Geist Mono is close enough in feel and we already pay for it. */
+  /* Type — Geist + JetBrains Mono, both loaded via next/font/google in
+     layout.tsx. v2 design system requires JetBrains Mono for the mono
+     utility (score numbers, salaries, time-ago, tabular figures). */
   --ds-font-sans: var(--font-geist-sans, "Geist"), system-ui, -apple-system, "Segoe UI", sans-serif;
-  --ds-font-mono: var(--font-geist-mono, "JetBrains Mono"), ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --ds-font-mono: var(--font-jetbrains-mono, "JetBrains Mono"), ui-monospace, "SFMono-Regular", Menlo, monospace;
 
   /* Density — flipped at runtime via data-density on .ds-root */
   --ds-row-py: 14px;

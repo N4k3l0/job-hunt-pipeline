@@ -1,433 +1,828 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, Fragment } from "react";
 import Link from "next/link";
 import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardAction,
-} from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Briefcase,
-  ClipboardCheck,
-  FileText,
-  TrendingUp,
-  ArrowUpRight,
-  MapPin,
-  Clock,
-  Link as LinkIcon,
-  Plus,
-  Radar,
   ChevronRight,
-  Globe,
+  ArrowUpRight,
+  Link as LinkIcon,
   Sparkles,
-  CircleDot,
+  User as UserIcon,
+  Sliders,
 } from "lucide-react";
-import { useAnalytics, useJobs, useReviewQueue, useReminders, useCurrentUser } from "@/hooks/use-api";
 
-// Data is now fetched from the API via hooks in the component
+import {
+  useAnalytics,
+  useJobs,
+  useReviewQueue,
+  useReminders,
+  useCurrentUser,
+} from "@/hooks/use-api";
+import { ScoreRing } from "@/components/ds/score";
 
-function timeAgo(dateStr: string) {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const hours = Math.floor(diff / (1000 * 60 * 60));
-  if (hours < 1) return "now";
-  if (hours < 24) return `${hours}h`;
-  return `${Math.floor(hours / 24)}d`;
-}
+/* ============================================================
+   Dashboard overview — v2 command-center layout.
+   No stat cards. Editorial greeting, mono pulse strip, asymmetric
+   two-column grid: radar + activity on the left, waiting / sweep
+   status / quick actions on the right.
+   ============================================================ */
 
-function ScoreRing({ score, size = 44 }: { score: number; size?: number }) {
-  const strokeWidth = 3;
-  const radius = (size - strokeWidth) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const offset = circumference - (score / 100) * circumference;
-  const color = score >= 85 ? "#34d399" : score >= 70 ? "#fbbf24" : "#6b7280";
-
-  return (
-    <div className="relative" style={{ width: size, height: size }}>
-      <svg width={size} height={size} className="-rotate-90">
-        <circle
-          cx={size / 2} cy={size / 2} r={radius}
-          fill="none" stroke="currentColor" strokeWidth={strokeWidth}
-          className="text-white/[0.04]"
-        />
-        <circle
-          cx={size / 2} cy={size / 2} r={radius}
-          fill="none" stroke={color} strokeWidth={strokeWidth}
-          strokeLinecap="round"
-          strokeDasharray={circumference}
-          strokeDashoffset={offset}
-          className="transition-all duration-1000 ease-out"
-        />
-      </svg>
-      <span className="absolute inset-0 flex items-center justify-center font-mono text-xs font-bold tabular-nums">
-        {score}
-      </span>
-    </div>
-  );
-}
-
-function StatCard({
-  label, value, sub, icon: Icon,
-}: {
-  label: string; value: string | number; sub: string;
-  icon: React.ElementType;
-}) {
-  // Zero values shouldn't shout — render a muted dash instead so an empty
-  // dashboard doesn't feel like a wall of failures.
-  const isZero = value === 0 || value === "0" || value === "0%";
-  return (
-    <div className="rounded-xl border border-white/[0.06] bg-white/[0.015] p-4 transition-colors hover:border-white/[0.12]">
-      <div className="flex items-center gap-2 mb-2.5">
-        <Icon className="h-4 w-4 text-muted-foreground" />
-        <span className="text-xs uppercase tracking-[0.1em] text-muted-foreground font-medium">
-          {label}
-        </span>
-      </div>
-      <span className={`text-3xl font-bold tracking-tight tabular-nums block ${isZero ? "text-muted-foreground/40" : ""}`}>
-        {isZero ? "—" : value}
-      </span>
-      <span className="text-sm text-muted-foreground mt-1 block">{sub}</span>
-    </div>
-  );
-}
-
-export default function DashboardPage() {
+export default function DashboardOverview() {
   const { data: analytics } = useAnalytics();
-  const { data: jobsData } = useJobs({ pageSize: 5, sortBy: "score" });
+  const { data: jobsData } = useJobs({ pageSize: 10, sortBy: "score" });
   const { data: reviewQueue } = useReviewQueue();
   const { data: reminders } = useReminders();
   const { data: currentUser } = useCurrentUser();
 
-  const stats = {
-    jobs_discovered: analytics?.jobs_discovered ?? 0,
-    jobs_shortlisted: analytics?.jobs_shortlisted ?? 0,
-    applications_sent: analytics?.applications_sent ?? 0,
-    response_rate: analytics?.response_rate ?? 0,
-    interview_rate: analytics?.interview_rate ?? 0,
-    applications_this_week: analytics?.applications_this_week ?? 0,
-    review_queue: analytics?.review_queue ?? 0,
-  };
+  // Scored top-of-inbox. The API embeds `score` on each Job for the
+  // inbox endpoint; we flatten and sort by overall_fit.
+  const scoredJobs = useMemo(() => {
+    const list = (jobsData?.jobs ?? []).map((j: any) => ({
+      id: j.id as string,
+      company: j.company as string,
+      title: j.title as string,
+      location: (j.location ?? "—") as string,
+      salary: j.salary_text as string | null,
+      time: j.discovered_at ? timeAgo(j.discovered_at) : "",
+      score: j.score?.overall_fit != null ? Math.round(j.score.overall_fit) : null,
+    }));
+    return list
+      .filter((j) => j.score != null)
+      .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  }, [jobsData]);
 
-  const topJobs = (jobsData?.jobs ?? []).map((j: any) => ({
-    ...j,
-    score: j.score?.overall_fit ?? 0,
-    // Pass role_path through as-is — null when the job hasn't been scored yet.
-    // Falling back to "pm" was wrong: it made every unscored job (most of them)
-    // render a PM badge, even on AI-only inboxes.
-    role_path: j.score?.role_path ?? null,
-    salary_text: j.salary_text ?? "",
-    discovered_at: j.discovered_at,
-  }));
+  const radar = scoredJobs.slice(0, 3);
+  const topMatchCount = scoredJobs.filter((j) => (j.score ?? 0) >= 80).length;
 
-  const actions = [
-    ...(reviewQueue ?? []).map((r: any) => ({
-      id: r.id,
-      type: "review" as const,
-      label: "Review tailored application",
-      target: r.job_id,
-      urgency: "high" as const,
-      time: new Date(r.created_at).toLocaleDateString(),
-    })),
-    ...(reminders ?? []).map((r: any) => ({
-      id: r.id,
-      type: "follow_up" as const,
-      label: "Follow up due",
-      target: r.job?.title ? `${r.job.company} — ${r.job.title}` : r.job_id,
-      urgency: "medium" as const,
-      time: r.follow_up_date ?? "",
-    })),
-  ];
-
+  // Greeting
   const now = useMemo(() => new Date(), []);
-  const greeting =
-    now.getHours() < 12 ? "Good morning"
-      : now.getHours() < 18 ? "Good afternoon"
-        : "Good evening";
-  // First name only — friendlier than the full name on a personal command center.
-  // The previous fallback used the email local-part, which on
-  // `olalekanoderinlo@gmail.com` becomes the mashed string "olalekanoderinlo".
-  // Now: only show a name if it's actually a name (has a space, OR is a single
-  // short word). Otherwise drop the name and just greet the time of day.
-  const firstName = (() => {
-    const raw = currentUser?.name?.trim() ?? "";
-    if (!raw) return "";
-    if (raw.includes(" ")) {
-      const first = raw.split(/\s+/)[0];
-      return first[0].toUpperCase() + first.slice(1).toLowerCase();
-    }
-    // Single token. Treat as a name only if it's short enough to plausibly
-    // BE a single name ("olalekan"), not an email local-part with no spaces
-    // ("olalekanoderinlo").
-    if (raw.length <= 12 && /^[a-z]+$/i.test(raw)) {
-      return raw[0].toUpperCase() + raw.slice(1).toLowerCase();
-    }
-    return "";
-  })();
+  const hr = now.getHours();
+  const greeting = hr < 12 ? "Good morning" : hr < 18 ? "Good afternoon" : "Good evening";
+  const firstName = formatFirstName(currentUser?.name);
+  const dayLine = now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
 
-  // Compose a one-line "what matters right now" hint. Stops the dashboard
-  // feeling like a stat board on slow days.
-  const reviewCount = (reviewQueue ?? []).filter((r: any) => r.approval_status === "ready").length;
-  const reminderCount = (reminders ?? []).length;
-  const hotMatchCount = topJobs.filter((j: any) => (j.score ?? 0) >= 80).length;
-  type Hint = { text: string; href: string; tone: "warn" | "info" | "calm" };
-  const hint: Hint = (() => {
-    const parts: { text: string; href: string }[] = [];
-    if (reviewCount > 0) parts.push({ text: `${reviewCount} ready to review`, href: "/dashboard/review" });
-    if (reminderCount > 0) parts.push({ text: `${reminderCount} follow-up${reminderCount === 1 ? "" : "s"} due`, href: "/dashboard/applications" });
-    if (parts.length > 0) {
-      return { text: parts.map((p) => p.text).join(" · "), href: parts[0].href, tone: "warn" };
-    }
-    if (hotMatchCount > 0) {
-      return { text: `${hotMatchCount} hot match${hotMatchCount === 1 ? "" : "es"} today`, href: "/dashboard/jobs", tone: "info" };
-    }
-    // Calm path: be honest about when discovery actually last ran instead of
-    // claiming it's "running in the background" (cron fires once a day at
-    // 6 AM UTC). If the sweep is older than 36h we surface that as a warning
-    // so the user knows to investigate.
-    const last = analytics?.last_discovery_at ? new Date(analytics.last_discovery_at) : null;
-    if (last) {
-      const hoursSince = (now.getTime() - last.getTime()) / 3_600_000;
-      if (hoursSince > 36) {
-        return {
-          text: `Discovery hasn't run in ${Math.round(hoursSince / 24)} day${hoursSince > 48 ? "s" : ""} — check the cron`,
-          href: "/dashboard/jobs",
-          tone: "warn",
-        };
-      }
-      const ago = hoursSince < 1
-        ? "just now"
-        : hoursSince < 24
-          ? `${Math.round(hoursSince)}h ago`
-          : `${Math.round(hoursSince / 24)}d ago`;
+  // Hint logic — show the most-pressing single thing
+  const reviewReady = (reviewQueue ?? []).filter((r: any) => r.approval_status === "ready").length;
+  const followUps = (reminders ?? []).length;
+  const hint = (() => {
+    if (reviewReady > 0) {
       return {
-        text: `All clear · last job sweep ${ago}, next ~6 AM UTC`,
-        href: "/dashboard/jobs",
-        tone: "calm",
+        text: `${reviewReady} tailored application${reviewReady === 1 ? "" : "s"} ready to review`,
+        href: "/dashboard/review",
+        tone: "accent" as const,
       };
     }
-    return { text: "All clear — no jobs in the pipeline yet", href: "/dashboard/import", tone: "calm" };
+    if (followUps > 0) {
+      return {
+        text: `${followUps} follow-up${followUps === 1 ? "" : "s"} due this week`,
+        href: "/dashboard/applications",
+        tone: "warn" as const,
+      };
+    }
+    if (topMatchCount > 0) {
+      return {
+        text: `${topMatchCount} hot match${topMatchCount === 1 ? "" : "es"} today · last sweep ${formatSweepTime(analytics?.last_discovery_at)}`,
+        href: "/dashboard/jobs",
+        tone: "info" as const,
+      };
+    }
+    return {
+      text: `Inbox is calm · last sweep ${formatSweepTime(analytics?.last_discovery_at)}`,
+      href: "/dashboard/jobs",
+      tone: "info" as const,
+    };
   })();
 
+  // Pulse strip
+  const pulse: PulseItem[] = [
+    { value: formatNumber(analytics?.jobs_discovered), label: "scored" },
+    { value: String(topMatchCount), label: "top matches", accent: true },
+    { value: formatNumber(analytics?.jobs_shortlisted), label: "shortlisted" },
+    { value: formatNumber(analytics?.applications_sent), label: "applied" },
+    {
+      value: String(Math.round((analytics?.response_rate ?? 0) * (analytics?.applications_sent ?? 0))),
+      label: "replies",
+    },
+    {
+      value: `${Math.round((analytics?.response_rate ?? 0) * 100)}%`,
+      label: "response",
+    },
+  ];
+
   return (
-    <div className="space-y-6 sm:space-y-8">
-      {/* Header — stacks on mobile so the greeting doesn't fight the buttons */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0">
-          <p className="text-xs uppercase tracking-[0.25em] text-muted-foreground font-medium mb-1.5">
-            {now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
-          </p>
-          <h1 className="font-display text-3xl sm:text-4xl font-semibold tracking-tight">
-            {greeting}{firstName && <span className="text-foreground/70">, {firstName}</span>}
-          </h1>
-          <Link
-            href={hint.href}
-            className={`inline-flex items-center gap-1.5 text-sm sm:text-base mt-2 group ${
-              hint.tone === "warn" ? "text-amber-400 hover:text-amber-300"
-              : hint.tone === "info" ? "text-emerald-400 hover:text-emerald-300"
-              : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <span
-              className={`inline-block h-1.5 w-1.5 rounded-full ${
-                hint.tone === "warn" ? "bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.4)]"
-                : hint.tone === "info" ? "bg-emerald-400"
-                : "bg-muted-foreground/40"
-              }`}
-            />
-            {hint.text}
-            {hint.tone !== "calm" && (
-              <ChevronRight className="h-3.5 w-3.5 opacity-0 -ml-1 group-hover:opacity-100 group-hover:ml-0 transition-all" />
-            )}
-          </Link>
+    <div className="page dash-page">
+      {/* Greeting block */}
+      <header style={{ marginBottom: 28 }}>
+        <div className="ds-mono dash-day">{dayLine.toUpperCase()}</div>
+        <h1 className="dash-greeting">
+          {greeting}
+          {firstName ? <>,{" "}<span>{firstName}.</span></> : "."}
+        </h1>
+
+        <Link href={hint.href} className={`dash-hint dash-hint-${hint.tone}`}>
+          <span className="dash-hint-dot" />
+          {hint.text}
+          <ChevronRight size={14} style={{ opacity: 0.6 }} />
+        </Link>
+      </header>
+
+      {/* Pulse strip */}
+      <PulseStrip items={pulse} />
+
+      {/* Two-column body */}
+      <div className="dash-grid">
+        {/* LEFT */}
+        <div className="dash-left">
+          <RadarSection
+            radar={radar}
+            totalScored={analytics?.jobs_discovered ?? 0}
+            lastSweep={analytics?.last_discovery_at}
+          />
+          <ActivityFeed
+            lastSweep={analytics?.last_discovery_at}
+            topMatchCount={topMatchCount}
+            reviewReady={reviewReady}
+            applicationsSent={analytics?.applications_sent ?? 0}
+          />
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" render={<Link href="/dashboard/import" />}>
-            <Plus className="h-3.5 w-3.5" />
-            Import
-          </Button>
-          <Button size="sm" render={<Link href="/dashboard/jobs" />}>
-            <Radar className="h-3.5 w-3.5" />
-            View inbox
-          </Button>
-        </div>
+
+        {/* RIGHT */}
+        <aside className="dash-right">
+          <WaitingCard reviewReady={reviewReady} followUps={followUps} />
+          <SweepStatusCard lastSweep={analytics?.last_discovery_at} />
+          <QuickActions />
+        </aside>
       </div>
 
-      {/* Stats Row */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard
-          icon={Briefcase} label="Discovered" value={stats.jobs_discovered}
-          sub={`${stats.jobs_shortlisted} shortlisted`}
-        />
-        <StatCard
-          icon={ClipboardCheck} label="Review Queue"
-          value={actions.filter(a => a.type === "review").length}
-          sub="awaiting review"
-        />
-        <StatCard
-          icon={FileText} label="Applied" value={stats.applications_sent}
-          sub={`${stats.applications_this_week} this week`}
-        />
-        <StatCard
-          icon={TrendingUp} label="Response Rate"
-          value={`${stats.response_rate.toFixed(0)}%`}
-          sub={`${stats.interview_rate.toFixed(0)}% interview rate`}
-        />
-      </div>
-
-      {/* Main Grid */}
-      <div className="grid gap-5 lg:grid-cols-5">
-        {/* Top Jobs — 3 cols */}
-        <div className="lg:col-span-3 space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <Sparkles className="h-4 w-4 text-amber-400" />
-              <h2 className="text-base font-semibold">Top matches</h2>
-              <Badge variant="secondary" className="font-mono text-xs">24h</Badge>
-            </div>
-            <Button variant="ghost" size="sm" render={<Link href="/dashboard/jobs" />}>
-              All jobs <ChevronRight className="h-3.5 w-3.5" />
-            </Button>
-          </div>
-
-          <div className="rounded-xl border border-white/[0.06] overflow-hidden bg-white/[0.015]">
-            {topJobs.length === 0 ? (
-              <p className="px-4 py-4 text-sm text-muted-foreground">
-                No matches yet — discovery runs every few hours.{" "}
-                <Link href="/dashboard/import" className="text-amber-400 hover:underline">
-                  Import one manually
-                </Link>
-                .
-              </p>
-            ) : topJobs.map((job, i) => (
-              <Link
-                key={job.id}
-                href={`/dashboard/jobs/${job.id}`}
-                className={`group flex items-center gap-4 px-4 py-3.5 transition-all hover:bg-white/[0.03] ${
-                  i > 0 ? "border-t border-white/[0.04]" : ""
-                }`}
-              >
-                <ScoreRing score={job.score} />
-
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-base font-medium truncate">{job.title}</span>
-                    {/* Only render the role badge when scoring actually
-                        classified this job. Anything else would just be a
-                        guess painted on the wrong half of the inbox. */}
-                    {/* PM/AI badge removed — role_path is an internal
-                        artefact of the two-track scoring architecture
-                        and meaningless to users in other professions
-                        (marketing, design, ops, finance, etc.). */}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-sm text-muted-foreground">
-                    <span className="font-medium text-foreground/80">{job.company}</span>
-                    {job.location && (
-                      <span className="flex items-center gap-1">
-                        <MapPin className="h-3.5 w-3.5 opacity-70" />
-                        {job.location}
-                      </span>
-                    )}
-                    {job.remote_type === "full_remote" && (
-                      <span className="flex items-center gap-1 text-emerald-400">
-                        <Globe className="h-3.5 w-3.5" />
-                        Remote
-                      </span>
-                    )}
-                    {job.discovered_at && (
-                      <span className="flex items-center gap-1 sm:hidden tabular-nums">
-                        <Clock className="h-3.5 w-3.5 opacity-70" />
-                        {timeAgo(job.discovered_at)}
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="shrink-0 text-right hidden sm:block">
-                  {job.salary_text && (
-                    <span className="text-sm font-mono text-foreground/80">{job.salary_text}</span>
-                  )}
-                  <div className="flex items-center justify-end gap-1 mt-0.5 text-sm text-muted-foreground tabular-nums">
-                    <Clock className="h-3.5 w-3.5" />
-                    {timeAgo(job.discovered_at)}
-                  </div>
-                </div>
-
-                <ArrowUpRight className="h-4 w-4 text-white/20 group-hover:text-amber-400 transition-colors shrink-0" />
-              </Link>
-            ))}
-          </div>
-        </div>
-
-        {/* Right Column — 2 cols */}
-        <div className="lg:col-span-2 space-y-5">
-          {/* Pending Actions */}
-          <Card className="border-white/[0.06]">
-            <CardHeader>
-              <CardTitle className="text-base font-semibold flex items-center gap-2">
-                <CircleDot className="h-4 w-4 text-amber-400" />
-                Actions needed
-              </CardTitle>
-              <CardAction>
-                <span className="font-mono text-xs bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded-md">
-                  {actions.length}
-                </span>
-              </CardAction>
-            </CardHeader>
-            <CardContent className="space-y-1 -mt-1">
-              {actions.length === 0 ? (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground px-3 py-3">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400/60" />
-                  All clear — nothing waiting on you.
-                </div>
-              ) : actions.map((action) => (
-                <div
-                  key={action.id}
-                  className="flex items-start gap-3 rounded-lg px-3 py-3 hover:bg-white/[0.03] transition-colors cursor-pointer"
-                >
-                  <div className={`mt-2 h-2 w-2 rounded-full shrink-0 ${
-                    action.urgency === "high" ? "bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.4)]"
-                      : action.urgency === "medium" ? "bg-white/30"
-                        : "bg-white/10"
-                  }`} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm sm:text-base font-semibold truncate">{action.label}</p>
-                    <p className="text-sm text-muted-foreground truncate mt-0.5">{action.target}</p>
-                  </div>
-                  <span className="text-xs sm:text-sm text-muted-foreground shrink-0 mt-0.5 tabular-nums">
-                    {action.time}
-                  </span>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-
-          {/* Quick Import — compact, looks like a row not a hero */}
-          <Link
-            href="/dashboard/import"
-            className="flex items-center gap-3 rounded-xl border border-dashed border-white/[0.08] px-4 py-3 hover:border-white/[0.15] hover:bg-white/[0.02] transition-colors group"
-          >
-            <div className="h-8 w-8 rounded-lg bg-white/[0.04] border border-white/[0.06] flex items-center justify-center group-hover:border-amber-500/20 transition-colors shrink-0">
-              <LinkIcon className="h-4 w-4 text-muted-foreground group-hover:text-amber-400 transition-colors" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-base font-semibold">Quick import</p>
-              <p className="text-sm text-muted-foreground truncate">
-                Paste a job URL or WhatsApp message
-              </p>
-            </div>
-            <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-amber-400 transition-colors shrink-0" />
-          </Link>
-
-          {/* Pipeline snapshot removed — its three stages (Review / Applied /
-              Interviews) duplicate numbers already shown in the top stat
-              cards row, and the labels visually echo the sidebar nav, which
-              made the bottom of the dashboard feel like a second menu. */}
-        </div>
-      </div>
+      <DashStyle />
     </div>
+  );
+}
+
+/* ============================================================
+   Components
+   ============================================================ */
+
+type PulseItem = { value: string; label: string; accent?: boolean };
+
+function PulseStrip({ items }: { items: PulseItem[] }) {
+  return (
+    <div className="dash-pulse">
+      {items.map((it, i) => (
+        <Fragment key={it.label}>
+          {i > 0 && <span className="dash-pulse-sep">·</span>}
+          <div className="dash-pulse-item">
+            <span className={`ds-mono dash-pulse-n${it.accent ? " dash-pulse-accent" : ""}`}>
+              {it.value}
+            </span>
+            <span className="ds-mono dash-pulse-l">{it.label}</span>
+          </div>
+        </Fragment>
+      ))}
+    </div>
+  );
+}
+
+function RadarSection({
+  radar,
+  totalScored,
+  lastSweep,
+}: {
+  radar: Array<{ id: string; company: string; title: string; location: string; salary: string | null; time: string; score: number | null }>;
+  totalScored: number;
+  lastSweep: string | null | undefined;
+}) {
+  return (
+    <section>
+      <div className="dash-section-head">
+        <div>
+          <div className="ds-mono dash-overline">ON YOUR RADAR · TODAY</div>
+          <h2 className="dash-h2">The top of the inbox.</h2>
+        </div>
+        <Link href="/dashboard/jobs" className="dash-ghost-btn">
+          Open inbox
+          <ChevronRight size={14} />
+        </Link>
+      </div>
+      <div className="dash-card dash-radar-card">
+        <div className="dash-radar-head">
+          <span className="ds-mono dash-radar-count">
+            {radar.length} OF {totalScored} · SCORE &gt; 80
+          </span>
+          <span className="ds-mono dash-radar-sweep">
+            SWEPT {formatSweepTime(lastSweep)}
+          </span>
+        </div>
+        {radar.length === 0 && (
+          <div className="dash-radar-empty ds-faint">
+            No scored jobs yet. The next sweep will fill this in.
+          </div>
+        )}
+        {radar.map((j) => (
+          <RadarRow key={j.id} job={j} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function RadarRow({
+  job,
+}: {
+  job: { id: string; company: string; title: string; location: string; salary: string | null; time: string; score: number | null };
+}) {
+  const top = (job.score ?? 0) >= 80;
+  return (
+    <Link href={`/dashboard/jobs/${job.id}`} className="dash-radar-row">
+      <ScoreRing score={job.score} size={44} stroke={2} />
+      <div className="dash-radar-body">
+        <div className="dash-radar-title-row">
+          <span className="dash-radar-title">{job.title}</span>
+          {top && <span className="ds-mono dash-radar-tag">◆ top match</span>}
+        </div>
+        <div className="dash-radar-meta">
+          <span className="dash-radar-company">{job.company}</span>
+          <span className="dash-sep">·</span>
+          <span>{job.location}</span>
+          {job.salary && (
+            <>
+              <span className="dash-sep">·</span>
+              <span className="ds-mono dash-radar-salary">{job.salary}</span>
+            </>
+          )}
+          {job.time && <span className="ds-mono dash-radar-time">{job.time}</span>}
+        </div>
+      </div>
+      <ArrowUpRight size={15} className="dash-radar-arrow" />
+    </Link>
+  );
+}
+
+function ActivityFeed({
+  lastSweep,
+  topMatchCount,
+  reviewReady,
+  applicationsSent,
+}: {
+  lastSweep: string | null | undefined;
+  topMatchCount: number;
+  reviewReady: number;
+  applicationsSent: number;
+}) {
+  // Built from analytics + last-sweep timestamp. A richer feed would need a
+  // dedicated activity endpoint; this is enough to be useful today.
+  const items: Array<{ when: string; kind: string; what: string; target?: string; tone?: "accent" | "muted" }> = [];
+  if (lastSweep) {
+    items.push({
+      when: formatSweepTime(lastSweep),
+      kind: "Daily sweep",
+      what: `${topMatchCount} new at 80+`,
+      tone: "accent",
+    });
+  }
+  if (reviewReady > 0) {
+    items.push({
+      when: "today",
+      kind: "Tailored",
+      what: `${reviewReady} application${reviewReady === 1 ? "" : "s"} ready to review`,
+      tone: "accent",
+    });
+  }
+  if (applicationsSent > 0) {
+    items.push({
+      when: "this week",
+      kind: "Sent",
+      what: `${applicationsSent} application${applicationsSent === 1 ? "" : "s"} total`,
+      tone: "muted",
+    });
+  }
+  if (items.length === 0) {
+    items.push({ when: "—", kind: "Activity", what: "Nothing yet. Check back after the next sweep." });
+  }
+
+  return (
+    <section>
+      <div className="ds-mono dash-overline">RECENT ACTIVITY · 24H</div>
+      <h2 className="dash-h2">What&apos;s happened since yesterday.</h2>
+      <div className="dash-activity">
+        {items.map((it, i) => (
+          <div key={i} className="dash-activity-row">
+            <span className="ds-mono dash-activity-when">{it.when}</span>
+            <span className={`dash-activity-dot dash-activity-dot-${it.tone ?? "dim"}`} />
+            <div className="dash-activity-text">
+              <span className="dash-activity-kind">{it.kind}</span>
+              <span className="dash-activity-what">{it.what}</span>
+              {it.target && (
+                <>
+                  <span className="dash-sep">·</span>
+                  <span className="dash-activity-target">{it.target}</span>
+                </>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function WaitingCard({ reviewReady, followUps }: { reviewReady: number; followUps: number }) {
+  const total = reviewReady + followUps;
+  return (
+    <section className="dash-card">
+      <header className="dash-waiting-head">
+        <h3 className="dash-h3">Waiting on you</h3>
+        <span className="ds-mono dash-waiting-pill">{total}</span>
+      </header>
+      <div>
+        {reviewReady > 0 && (
+          <Link href="/dashboard/review" className="dash-waiting-row">
+            <span className="dash-waiting-dot dash-waiting-dot-urgent" />
+            <div className="dash-waiting-body">
+              <div className="dash-waiting-label">
+                {reviewReady === 1 ? "Review tailored application" : `${reviewReady} tailored applications`}
+              </div>
+              <div className="dash-waiting-target">in your review queue</div>
+            </div>
+            <span className="ds-mono dash-waiting-time">now</span>
+          </Link>
+        )}
+        {followUps > 0 && (
+          <Link href="/dashboard/applications" className="dash-waiting-row">
+            <span className="dash-waiting-dot dash-waiting-dot-urgent" />
+            <div className="dash-waiting-body">
+              <div className="dash-waiting-label">
+                {followUps === 1 ? "Follow up due" : `${followUps} follow-ups due`}
+              </div>
+              <div className="dash-waiting-target">applications awaiting your reply</div>
+            </div>
+            <span className="ds-mono dash-waiting-time">this week</span>
+          </Link>
+        )}
+        {total === 0 && (
+          <div className="dash-waiting-empty ds-faint">
+            Nothing waiting. Open the inbox to find your next match.
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function SweepStatusCard({ lastSweep }: { lastSweep: string | null | undefined }) {
+  return (
+    <section className="dash-card dash-sweep">
+      <div className="dash-sweep-head">
+        <span className="dash-sweep-dot" />
+        <h3 className="dash-h3">Sweep status</h3>
+      </div>
+      <div className="dash-sweep-rows">
+        <div className="dash-sweep-row">
+          <span className="dash-sweep-key">Last sweep</span>
+          <span className="ds-mono dash-sweep-val">
+            {lastSweep ? formatSweepFull(lastSweep) : "—"}
+          </span>
+        </div>
+        <div className="dash-sweep-row">
+          <span className="dash-sweep-key">Next sweep</span>
+          <span className="ds-mono dash-sweep-val dash-sweep-val-dim">06:00 UTC · daily</span>
+        </div>
+        <div className="dash-sweep-row">
+          <span className="dash-sweep-key">Sources tracked</span>
+          <span className="ds-mono dash-sweep-val">curated boards + careers pages</span>
+        </div>
+      </div>
+      <div className="dash-sweep-foot">All systems nominal. Matcher v2 calibrated.</div>
+    </section>
+  );
+}
+
+function QuickActions() {
+  const actions: Array<{ label: string; href: string; icon: React.ReactNode }> = [
+    { label: "Import a job URL", href: "/dashboard/import", icon: <LinkIcon size={15} /> },
+    { label: "Tailor an application", href: "/dashboard/review", icon: <Sparkles size={15} /> },
+    { label: "Update profile", href: "/dashboard/profile", icon: <UserIcon size={15} /> },
+    { label: "Adjust matcher weights", href: "/dashboard/profile", icon: <Sliders size={15} /> },
+  ];
+  return (
+    <section>
+      <div className="ds-mono dash-overline dash-quick-overline">QUICK ACTIONS</div>
+      <div className="dash-quick">
+        {actions.map((a) => (
+          <Link key={a.label} href={a.href} className="dash-quick-btn">
+            <span className="dash-quick-icon">{a.icon}</span>
+            <span className="dash-quick-label">{a.label}</span>
+            <ChevronRight size={13} className="dash-quick-chev" />
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/* ============================================================
+   Helpers
+   ============================================================ */
+
+function timeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return "now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return `${d}d ago`;
+}
+
+function formatSweepTime(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  const mm = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${hh}:${mm} UTC`;
+}
+
+function formatSweepFull(iso: string): string {
+  const d = new Date(iso);
+  const sweep = formatSweepTime(iso);
+  const today = new Date();
+  const sameDay = d.toDateString() === today.toDateString();
+  if (sameDay) return `${sweep} · today`;
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return `${sweep} · yesterday`;
+  return `${sweep} · ${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+}
+
+function formatNumber(n: number | null | undefined): string {
+  if (n == null) return "0";
+  return String(n);
+}
+
+function formatFirstName(name: string | null | undefined): string {
+  const raw = (name ?? "").trim();
+  if (!raw) return "";
+  if (raw.includes(" ")) {
+    const first = raw.split(/\s+/)[0];
+    return first[0].toUpperCase() + first.slice(1).toLowerCase();
+  }
+  // Single token. Treat as a name only if it's short enough to plausibly be a
+  // single name ("olalekan"), not an email local-part ("olalekanoderinlo").
+  if (raw.length <= 12 && /^[a-z]+$/i.test(raw)) {
+    return raw[0].toUpperCase() + raw.slice(1).toLowerCase();
+  }
+  return "";
+}
+
+/* ============================================================
+   Scoped CSS — uses v2 tokens via var(--…) and v1 .ds-* utility
+   classes already in design-tokens.css. Lives inline so the
+   dashboard route stays self-contained; can be extracted once
+   sibling dashboard pages move to v2.
+   ============================================================ */
+
+function DashStyle() {
+  return (
+    <style>{`
+      .dash-page { padding-top: 32px; max-width: 1280px; margin: 0 auto; padding-left: 28px; padding-right: 28px; padding-bottom: 80px; }
+      @media (max-width: 900px) { .dash-page { padding: 18px 16px 96px; } }
+
+      .dash-day {
+        font-size: 11px;
+        letter-spacing: 0.16em;
+        color: var(--fg-faint);
+        margin-bottom: 10px;
+        font-weight: 600;
+      }
+      .dash-greeting {
+        font-size: clamp(34px, 5vw, 48px);
+        letter-spacing: -0.035em;
+        line-height: 1.06;
+        text-wrap: balance;
+        color: var(--fg);
+        font-weight: 600;
+        margin: 0;
+      }
+      .dash-greeting span { color: var(--fg-muted); font-weight: 500; }
+
+      .dash-hint {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 16px;
+        font-size: 15px;
+        transition: color 120ms ease;
+        color: var(--fg-muted);
+      }
+      .dash-hint-accent { color: var(--accent); }
+      .dash-hint-warn { color: var(--fg); }
+      .dash-hint-info { color: var(--fg-muted); }
+      .dash-hint:hover { color: var(--fg); }
+      .dash-hint-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--fg-dim);
+        flex-shrink: 0;
+      }
+      .dash-hint-accent .dash-hint-dot { background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+      .dash-hint-warn .dash-hint-dot { background: var(--fg-muted); }
+
+      .dash-pulse {
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+        flex-wrap: wrap;
+        padding: 18px 0;
+        border-top: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+      }
+      .dash-pulse-sep {
+        color: var(--fg-faint);
+        font-family: var(--font-mono);
+      }
+      .dash-pulse-item { display: flex; align-items: baseline; gap: 6px; }
+      .dash-pulse-n {
+        font-size: 22px;
+        font-weight: 600;
+        letter-spacing: -0.03em;
+        color: var(--fg);
+      }
+      .dash-pulse-accent { color: var(--accent); }
+      .dash-pulse-l {
+        font-size: 10px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--fg-dim);
+      }
+
+      .dash-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+        gap: 32px;
+        margin-top: 36px;
+      }
+      @media (max-width: 900px) { .dash-grid { grid-template-columns: 1fr; gap: 28px; } }
+      .dash-left { min-width: 0; display: flex; flex-direction: column; gap: 36px; }
+      .dash-right { min-width: 0; display: flex; flex-direction: column; gap: 24px; }
+
+      .dash-section-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 6px;
+        flex-wrap: wrap;
+      }
+      .dash-overline {
+        font-size: 10px;
+        letter-spacing: 0.12em;
+        color: var(--fg-faint);
+        text-transform: uppercase;
+        font-weight: 600;
+      }
+      .dash-h2 {
+        font-size: 22px;
+        letter-spacing: -0.02em;
+        margin: 6px 0 0;
+        color: var(--fg);
+        font-weight: 600;
+        line-height: 1.2;
+      }
+      .dash-h3 {
+        font-size: 14px;
+        margin: 0;
+        color: var(--fg);
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+
+      .dash-ghost-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 0 10px;
+        height: 32px;
+        border-radius: 6px;
+        color: var(--fg-muted);
+        font-size: 13px;
+        transition: color 120ms ease, background 120ms ease;
+      }
+      .dash-ghost-btn:hover { color: var(--fg); background: var(--bg-hover); }
+
+      .dash-card {
+        background: var(--bg-elev-1);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+      .dash-radar-card { margin-top: 16px; padding: 0; overflow: hidden; }
+      .dash-radar-head {
+        padding: 12px 16px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-bottom: 1px solid var(--line-faint);
+      }
+      .dash-radar-count {
+        font-size: 10px;
+        letter-spacing: 0.1em;
+        color: var(--fg-dim);
+        text-transform: uppercase;
+      }
+      .dash-radar-sweep {
+        font-size: 11px;
+        color: var(--fg-faint);
+        letter-spacing: 0.1em;
+      }
+      .dash-radar-empty { padding: 26px 16px; font-size: 13px; }
+
+      .dash-radar-row {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        gap: 16px;
+        align-items: center;
+        padding: 16px 16px 16px 18px;
+        border-top: 1px solid var(--line-faint);
+        min-height: 72px;
+        position: relative;
+        transition: background 150ms cubic-bezier(0.32,0.72,0.32,1);
+      }
+      .dash-radar-row:first-child { border-top: 0; }
+      .dash-radar-row::before {
+        content: "";
+        position: absolute;
+        left: 0; top: 8px; bottom: 8px;
+        width: 1px;
+        background: var(--accent);
+        transform: scaleY(0);
+        transform-origin: top;
+        transition: transform 150ms cubic-bezier(0.32,0.72,0.32,1);
+      }
+      .dash-radar-row:hover { background: var(--bg-hover); }
+      .dash-radar-row:hover::before { transform: scaleY(1); }
+      .dash-radar-body { min-width: 0; }
+      .dash-radar-title-row { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+      .dash-radar-title {
+        font-weight: 600;
+        font-size: 15.5px;
+        letter-spacing: -0.01em;
+        color: var(--fg);
+      }
+      .dash-radar-tag {
+        font-size: 10px;
+        letter-spacing: 0.12em;
+        color: var(--accent);
+        text-transform: uppercase;
+      }
+      .dash-radar-meta {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 4px;
+        font-size: 13px;
+        color: var(--fg-muted);
+        flex-wrap: wrap;
+      }
+      .dash-radar-company { color: var(--fg); font-weight: 500; }
+      .dash-radar-salary { color: var(--fg); }
+      .dash-radar-time { color: var(--fg-dim); margin-left: auto; }
+      .dash-radar-arrow { color: var(--fg-faint); }
+
+      .dash-sep { color: var(--fg-faint); }
+
+      .dash-activity { margin-top: 16px; padding-top: 4px; }
+      .dash-activity-row {
+        display: grid;
+        grid-template-columns: 60px auto 1fr;
+        gap: 14px;
+        align-items: baseline;
+        padding: 10px 0;
+      }
+      .dash-activity-when {
+        font-size: 11px;
+        color: var(--fg-faint);
+        letter-spacing: 0.04em;
+      }
+      .dash-activity-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        align-self: center;
+      }
+      .dash-activity-dot-accent { background: var(--accent); }
+      .dash-activity-dot-muted { background: var(--fg-muted); }
+      .dash-activity-dot-dim { background: var(--fg-dim); }
+      .dash-activity-text { font-size: 13.5px; line-height: 1.45; }
+      .dash-activity-kind { color: var(--fg-muted); }
+      .dash-activity-what { color: var(--fg); font-weight: 500; margin-left: 6px; }
+      .dash-activity-target { color: var(--fg-muted); }
+
+      .dash-waiting-head {
+        padding: 14px 16px 12px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .dash-waiting-pill {
+        font-size: 11px;
+        color: var(--accent);
+        background: var(--accent-soft);
+        border: 1px solid var(--accent-edge);
+        padding: 2px 8px;
+        border-radius: 4px;
+      }
+      .dash-waiting-row {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        gap: 12px;
+        align-items: center;
+        padding: 12px 14px;
+        border-top: 1px solid var(--line-faint);
+        min-height: 56px;
+        position: relative;
+        transition: background 150ms cubic-bezier(0.32,0.72,0.32,1);
+      }
+      .dash-waiting-row:hover { background: var(--bg-hover); }
+      .dash-waiting-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--fg-dim);
+        flex-shrink: 0;
+      }
+      .dash-waiting-dot-urgent {
+        background: var(--accent);
+        box-shadow: 0 0 0 3px rgba(30,216,183,0.15);
+      }
+      .dash-waiting-body { min-width: 0; }
+      .dash-waiting-label {
+        font-size: 13.5px;
+        font-weight: 600;
+        letter-spacing: -0.005em;
+        color: var(--fg);
+      }
+      .dash-waiting-target {
+        font-size: 12px;
+        color: var(--fg-muted);
+        margin-top: 2px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .dash-waiting-time { font-size: 11px; color: var(--fg-dim); }
+      .dash-waiting-empty { padding: 16px 16px 22px; font-size: 13px; }
+
+      .dash-sweep { padding: 18px; }
+      .dash-sweep-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+      .dash-sweep-dot {
+        width: 8px; height: 8px;
+        border-radius: 50%;
+        background: var(--accent);
+        box-shadow: 0 0 8px var(--accent);
+      }
+      .dash-sweep-rows { display: flex; flex-direction: column; gap: 10px; }
+      .dash-sweep-row { display: flex; justify-content: space-between; font-size: 13px; gap: 10px; }
+      .dash-sweep-key { color: var(--fg-muted); }
+      .dash-sweep-val { color: var(--fg); text-align: right; }
+      .dash-sweep-val-dim { color: var(--fg-dim); }
+      .dash-sweep-foot {
+        margin-top: 14px;
+        padding-top: 12px;
+        border-top: 1px solid var(--line-faint);
+        font-size: 12px;
+        color: var(--fg-dim);
+        line-height: 1.5;
+      }
+
+      .dash-quick-overline { margin-bottom: 8px; padding: 0 2px; }
+      .dash-quick { display: flex; flex-direction: column; gap: 6px; }
+      .dash-quick-btn {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 14px;
+        background: var(--bg-elev-1);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        color: var(--fg-muted);
+        font-size: 13.5px;
+        transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+      }
+      .dash-quick-btn:hover {
+        background: var(--bg-elev-2);
+        color: var(--fg);
+        border-color: var(--line-strong);
+      }
+      .dash-quick-icon { color: var(--fg-dim); }
+      .dash-quick-label { flex: 1; }
+      .dash-quick-chev { color: var(--fg-faint); }
+    `}</style>
   );
 }

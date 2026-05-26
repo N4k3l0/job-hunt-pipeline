@@ -53,8 +53,32 @@ async def list_jobs(
     min_score: float | None = 50,
     sort_by: str = "score",
     status: str | None = None,
+    include_applied: bool = False,
 ):
-    """List jobs in the user's inbox with filters and pagination."""
+    """List jobs in the user's inbox with filters and pagination.
+
+    By default, hides jobs the user has already moved into their
+    application pipeline (status in applied / follow_up_due /
+    interviewing / offered / rejected / ghosted). The Applications
+    page calls this with ?include_applied=true to see them.
+    """
+    # Jobs the user has moved into their application pipeline. Per-user
+    # state, lives in application_tracking — distinct from Job.status.
+    APPLIED_STATUSES = (
+        "applied",
+        "follow_up_due",
+        "interviewing",
+        "offered",
+        "rejected",
+        "ghosted",
+    )
+    applied_job_ids = (
+        select(ApplicationTracking.job_id).where(
+            ApplicationTracking.user_id == user_id,
+            ApplicationTracking.status.in_(APPLIED_STATUSES),
+        )
+    )
+
     # Base query
     query = (
         select(Job, JobScore, JobSource)
@@ -63,6 +87,8 @@ async def list_jobs(
         .outerjoin(JobEntity, JobEntity.job_id == Job.id)
         .where(Job.status.notin_(["duplicate", "raw", "expired", "dismissed"]))
     )
+    if not include_applied:
+        query = query.where(Job.id.notin_(applied_job_ids))
 
     # Pull profile preferences once and run them through the shared filter
     # (same code path the dashboard's /analytics/overview uses, so the counts
@@ -238,6 +264,8 @@ async def list_jobs(
         .outerjoin(JobEntity, JobEntity.job_id == Job.id)
         .where(Job.status.notin_(["duplicate", "raw", "expired", "dismissed"]))
     )
+    if not include_applied:
+        count_base = count_base.where(Job.id.notin_(applied_job_ids))
     count_base = apply_user_filters(
         count_base,
         target_roles=apply_target_roles,
