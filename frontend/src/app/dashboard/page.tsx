@@ -405,7 +405,7 @@ function QuickActions() {
     { label: "Adjust matcher weights", href: "/dashboard/profile", icon: <Sliders size={15} /> },
   ];
   return (
-    <section>
+    <section className="dash-quick-section">
       <div className="ds-mono dash-overline dash-quick-overline">QUICK ACTIONS</div>
       <div className="dash-quick">
         {actions.map((a) => (
@@ -802,6 +802,10 @@ function DashStyle() {
       }
 
       .dash-quick-overline { margin-bottom: 8px; padding: 0 2px; }
+      /* Hide Quick Actions on mobile — when the dash collapses to a single
+         column, the four nav shortcuts become noise next to the sidebar's
+         own nav. Desktop keeps them. */
+      @media (max-width: 900px) { .dash-quick-section { display: none; } }
       .dash-quick { display: flex; flex-direction: column; gap: 6px; }
       .dash-quick-btn {
         display: flex;
