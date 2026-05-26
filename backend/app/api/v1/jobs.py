@@ -62,20 +62,16 @@ async def list_jobs(
     interviewing / offered / rejected / ghosted). The Applications
     page calls this with ?include_applied=true to see them.
     """
-    # Jobs the user has moved into their application pipeline. Per-user
-    # state, lives in application_tracking — distinct from Job.status.
-    APPLIED_STATUSES = (
-        "applied",
-        "follow_up_due",
-        "interviewing",
-        "offered",
-        "rejected",
-        "ghosted",
-    )
-    applied_job_ids = (
+    # Any job the user has moved into their application pipeline — regardless
+    # of status — should be hidden from the inbox. Previously this only
+    # filtered the 6 post-"applied" statuses, which let tailored-not-yet-
+    # applied rows (status="approved", created by /tailoring) leak through
+    # to the inbox even though they were already on the Applications page.
+    # If the user wants a tailored job back in the inbox, they delete the
+    # tracking row from /dashboard/applications.
+    pipeline_job_ids = (
         select(ApplicationTracking.job_id).where(
             ApplicationTracking.user_id == user_id,
-            ApplicationTracking.status.in_(APPLIED_STATUSES),
         )
     )
 
@@ -88,7 +84,7 @@ async def list_jobs(
         .where(Job.status.notin_(["duplicate", "raw", "expired", "dismissed"]))
     )
     if not include_applied:
-        query = query.where(Job.id.notin_(applied_job_ids))
+        query = query.where(Job.id.notin_(pipeline_job_ids))
 
     # Pull profile preferences once and run them through the shared filter
     # (same code path the dashboard's /analytics/overview uses, so the counts
@@ -265,7 +261,7 @@ async def list_jobs(
         .where(Job.status.notin_(["duplicate", "raw", "expired", "dismissed"]))
     )
     if not include_applied:
-        count_base = count_base.where(Job.id.notin_(applied_job_ids))
+        count_base = count_base.where(Job.id.notin_(pipeline_job_ids))
     count_base = apply_user_filters(
         count_base,
         target_roles=apply_target_roles,

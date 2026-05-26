@@ -51,7 +51,7 @@ export default function DashboardOverview() {
       .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
   }, [jobsData]);
 
-  const radar = scoredJobs.slice(0, 3);
+  const radar = scoredJobs.slice(0, 5);
   const topMatchCount = scoredJobs.filter((j) => (j.score ?? 0) >= 80).length;
 
   // Greeting
@@ -213,7 +213,7 @@ function RadarSection({
       <div className="dash-card dash-radar-card">
         <div className="dash-radar-head">
           <span className="ds-mono dash-radar-count">
-            {radar.length} OF {totalScored} · SCORE &gt; 80
+            {radar.length} OF {totalScored} · TOP BY SCORE
           </span>
           <span className="ds-mono dash-radar-sweep">
             SWEPT {formatSweepTime(lastSweep)}
