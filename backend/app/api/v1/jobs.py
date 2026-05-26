@@ -376,12 +376,16 @@ async def list_jobs(
                 "remote_score": score.remote_score,
                 "salary_score": score.salary_score,
                 "visa_score": score.visa_score,
-                # Pull the LLM-generated 1–2 sentence summary out of deep_score
-                # so the inbox's TopMatchCard can show it without a second
-                # round-trip. Falls back to None when deep scoring hasn't run.
+                # Pull the LLM-generated 1–2 sentence summary out of the
+                # deep_score_json blob so the inbox's TopMatchCard can show
+                # it without a second round-trip. Falls back to None when
+                # deep scoring hasn't run. (The model attribute is
+                # `deep_score_json`, NOT `deep_score` — using the wrong
+                # name previously raised AttributeError on every row and
+                # crashed the endpoint with a 500.)
                 "summary": (
-                    (score.deep_score or {}).get("summary")
-                    if isinstance(score.deep_score, dict)
+                    (score.deep_score_json or {}).get("summary")
+                    if isinstance(score.deep_score_json, dict)
                     else None
                 ),
             } if score else None,
