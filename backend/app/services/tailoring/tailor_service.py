@@ -293,7 +293,10 @@ async def generate_tailored_application(
                 ),
                 max_tokens=500,
             )
-            short_answers[q] = answer
+            # Strip "Here's the answer:" / "Let me know if..." patterns —
+            # screening answers go straight into the application form so
+            # any preamble shows up verbatim to the recruiter.
+            short_answers[q] = _strip_llm_fluff(answer)
 
     # ── Store results ─────────────────────────────────────────────────────
     keyword_matches = {

@@ -59,13 +59,19 @@ async def generate_tailored_materials(
     try:
         await report("Fetching job description")
         from app.services.discovery.firecrawl_service import scrape_url
+        import asyncio
         if (not job.raw_description or len(job.raw_description) < 500) and job.job_url:
             try:
-                full = await scrape_url(job.job_url)
+                # Hard cap on the enrichment scrape — Firecrawl's own
+                # client timeout is 60s but Vercel will SIGKILL the whole
+                # function at 60s, and we still need budget for 3 LLM
+                # calls after this. 20s lets us bail and tailor with the
+                # short description we already have instead of crashing.
+                full = await asyncio.wait_for(scrape_url(job.job_url), timeout=20.0)
                 if full and len(full) > len(job.raw_description or ""):
                     job.raw_description = full
                     await db.flush()
-            except Exception as enrich_err:
+            except (Exception, asyncio.TimeoutError) as enrich_err:
                 # Non-fatal — tailor with what we have.
                 import logging
                 logging.getLogger(__name__).warning("Description enrich failed: %s", enrich_err)

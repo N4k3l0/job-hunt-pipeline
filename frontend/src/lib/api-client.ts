@@ -23,6 +23,14 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
   };
 }
 
+// Default per-request timeout. Backs the safety net so a forgotten
+// AbortController on any mutation can't leave the UI hanging forever —
+// the apply-popup-stuck-5-minutes bug we already had to fix. Anything
+// legitimately longer than this should pass its own signal via opts.
+// 75s is a deliberate buffer over Vercel Hobby's 60s function ceiling
+// so a slow-but-completing function gets to actually return.
+const DEFAULT_TIMEOUT_MS = 75_000;
+
 async function apiRequest<T>(
   path: string,
   options: RequestInit = {}
@@ -30,20 +38,49 @@ async function apiRequest<T>(
   const authHeaders = await getAuthHeaders();
   const url = `${API_BASE}${path}`;
 
-  const response = await fetch(url, {
-    // Force a fresh fetch every time. Without this, stale browser /
-    // intermediate caches were keeping LatAm postings visible in the
-    // inbox for ~minutes after the server-side country filter dropped
-    // them. TanStack Query handles its own in-memory cache; we don't
-    // want a SECOND layer (HTTP) hiding state changes.
-    cache: "no-store",
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeaders,
-      ...options.headers,
-    },
-  });
+  // If the caller didn't pass their own AbortSignal, wire up a default
+  // timeout so a hung backend can't strand the UI. Caller's signal
+  // (when present) wins so explicit short-timeout flows like apply
+  // resolution keep their tighter budget.
+  let controller: AbortController | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let effectiveSignal: AbortSignal | undefined = options.signal ?? undefined;
+  if (!effectiveSignal) {
+    controller = new AbortController();
+    effectiveSignal = controller.signal;
+    timer = setTimeout(() => controller!.abort(), DEFAULT_TIMEOUT_MS);
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      // Force a fresh fetch every time. Without this, stale browser /
+      // intermediate caches were keeping LatAm postings visible in the
+      // inbox for ~minutes after the server-side country filter dropped
+      // them. TanStack Query handles its own in-memory cache; we don't
+      // want a SECOND layer (HTTP) hiding state changes.
+      cache: "no-store",
+      ...options,
+      signal: effectiveSignal,
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders,
+        ...options.headers,
+      },
+    });
+  } catch (e: any) {
+    // AbortError on the default-timeout path → translate to a clean
+    // error so the catch block in the calling component shows
+    // "Request took too long" instead of cryptic "Failed to fetch".
+    if (timer) clearTimeout(timer);
+    if (e?.name === "AbortError" && controller && !options.signal) {
+      const tErr = new Error(`Request timed out after ${DEFAULT_TIMEOUT_MS / 1000}s`) as Error & { name: string };
+      tErr.name = "TimeoutError";
+      throw tErr;
+    }
+    throw e;
+  }
+  if (timer) clearTimeout(timer);
 
   if (response.status === 401) {
     // Redirect to login on auth failure
@@ -131,11 +168,28 @@ export const api = {
       }
     }
 
-    const response = await fetch(`${API_BASE}${path}`, {
-      method: "POST",
-      headers: authHeaders,
-      body: formData,
-    });
+    // Same default-timeout shielding as apiRequest — resume uploads
+    // and any future file ingest should fail clearly instead of hanging.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+    let response: Response;
+    try {
+      response = await fetch(`${API_BASE}${path}`, {
+        method: "POST",
+        headers: authHeaders,
+        body: formData,
+        signal: controller.signal,
+      });
+    } catch (e: any) {
+      clearTimeout(timer);
+      if (e?.name === "AbortError") {
+        const tErr = new Error(`Upload timed out after ${DEFAULT_TIMEOUT_MS / 1000}s`) as Error & { name: string };
+        tErr.name = "TimeoutError";
+        throw tErr;
+      }
+      throw e;
+    }
+    clearTimeout(timer);
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));

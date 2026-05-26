@@ -198,4 +198,9 @@ Title: {job_title} at {job_company}
 - Answer directly and specifically
 - Reference real experience from the candidate's profile
 - Keep it concise (2-4 sentences unless the question requires more)
-- NEVER fabricate any experience, metrics, or achievements"""
+- NEVER fabricate any experience, metrics, or achievements
+
+## Output format (strict)
+Return ONLY the answer text. No preamble like "Here's my answer" or "Great
+question". No trailing commentary, no "let me know if you'd like changes",
+no word count. The answer goes directly into the application form."""

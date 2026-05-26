@@ -607,7 +607,21 @@ export default function ProfilePage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="border-2 border-dashed border-white/[0.08] rounded-lg p-8 text-center">
+              {/* Whole dashed box is clickable to open the file picker —
+                  every other upload UI on the web works this way and
+                  users were missing the "Choose file" button. */}
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={() => fileInputRef.current?.click()}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    fileInputRef.current?.click();
+                  }
+                }}
+                className="border-2 border-dashed border-white/[0.08] hover:border-white/[0.16] focus:border-white/[0.2] focus:outline-none rounded-lg p-8 text-center cursor-pointer transition-colors"
+              >
                 <Upload className="h-8 w-8 mx-auto text-muted-foreground mb-3" />
 
                 {selectedFile ? (
@@ -616,7 +630,7 @@ export default function ProfilePage() {
                   </p>
                 ) : (
                   <p className="text-sm font-medium mb-1">
-                    Click to select your resume
+                    Click anywhere here to select your resume
                   </p>
                 )}
                 <p className="text-xs text-muted-foreground mb-4">
@@ -631,15 +645,18 @@ export default function ProfilePage() {
                   onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
                 />
 
-                <div className="flex items-center justify-center gap-3 flex-wrap">
-                  <Button variant="outline" onClick={() => fileInputRef.current?.click()}>
-                    Choose file
-                  </Button>
+                {/* Stop click bubbling on inner controls so picking a
+                    label / hitting Upload doesn't re-trigger the file
+                    picker. */}
+                <div
+                  className="flex items-center justify-center gap-3 flex-wrap"
+                  onClick={(e) => e.stopPropagation()}
+                >
                   <Input
                     type="text"
                     value={versionName}
                     onChange={(e) => setVersionName(e.target.value)}
-                    placeholder="Optional label (e.g. PM-General) — defaults to filename"
+                    placeholder="Optional label (defaults to filename)"
                     className="max-w-xs"
                   />
                   <Button
@@ -758,6 +775,7 @@ export default function ProfilePage() {
                     <button
                       onClick={() => setTargetRoles(targetRoles.filter((r) => r !== role))}
                       className="ml-1 hover:text-destructive"
+                      aria-label={`Remove ${role}`}
                     >
                       <X className="h-3.5 w-3.5" />
                     </button>
@@ -800,6 +818,7 @@ export default function ProfilePage() {
                     <button
                       onClick={() => setSearchKeywords(searchKeywords.filter((k) => k !== kw))}
                       className="ml-1 hover:text-destructive"
+                      aria-label={`Remove ${kw}`}
                     >
                       <X className="h-3.5 w-3.5" />
                     </button>
