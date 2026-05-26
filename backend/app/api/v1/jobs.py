@@ -394,39 +394,73 @@ async def list_jobs(
     # the previous response.
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
 
-    # TEMP diagnostic — counts at each filter stage so we can see WHERE
-    # jobs are dropping when total=0. Remove once the empty-inbox issue
-    # is understood.
-    diag: dict = {}
-    try:
-        all_jobs_q = select(func.count()).select_from(Job).where(
-            Job.status.notin_(["duplicate", "raw", "expired", "dismissed"])
-        )
-        diag["all_active_jobs"] = (await db.execute(all_jobs_q)).scalar() or 0
-
-        user_scores_q = select(func.count()).select_from(JobScore).where(
-            JobScore.user_id == user_id
-        )
-        diag["scored_for_user"] = (await db.execute(user_scores_q)).scalar() or 0
-
-        scored_ge_50_q = select(func.count()).select_from(JobScore).where(
-            JobScore.user_id == user_id, JobScore.overall_fit >= 50
-        )
-        diag["scored_ge_50"] = (await db.execute(scored_ge_50_q)).scalar() or 0
-
-        diag["applied_count"] = len(applied_ids)
-        diag["profile_pref_countries"] = profile_pref_countries
-        diag["profile_target_roles"] = target_roles
-        diag["user_skills_count"] = len(user_skills)
-    except Exception as e:
-        diag["error"] = str(e)
-
     return {
         "jobs": jobs_out,
         "total": total,
         "page": page,
         "page_size": page_size,
-        "_diag": diag,
+    }
+
+
+@router.get("/_diag", include_in_schema=False)
+async def inbox_diag(user_id: CurrentUserId, db: DbSession):
+    """Cheap diagnostic — counts only, no joins, returns in <1s.
+    Helps explain why the inbox might be empty without running the full
+    funnel query that's been timing out.
+    """
+    from app.models.candidate import CandidateProfile as _CP
+
+    # All active jobs in the system the user could see
+    all_active = (await db.execute(
+        select(func.count()).select_from(Job).where(
+            Job.status.notin_(["duplicate", "raw", "expired", "dismissed"])
+        )
+    )).scalar() or 0
+
+    # JobScore rows for this user
+    scored = (await db.execute(
+        select(func.count()).select_from(JobScore).where(JobScore.user_id == user_id)
+    )).scalar() or 0
+
+    scored_ge_50 = (await db.execute(
+        select(func.count()).select_from(JobScore).where(
+            JobScore.user_id == user_id, JobScore.overall_fit >= 50
+        )
+    )).scalar() or 0
+
+    scored_ge_30 = (await db.execute(
+        select(func.count()).select_from(JobScore).where(
+            JobScore.user_id == user_id, JobScore.overall_fit >= 30
+        )
+    )).scalar() or 0
+
+    # Applied / pipeline counts
+    applied_total = (await db.execute(
+        select(func.count()).select_from(ApplicationTracking).where(
+            ApplicationTracking.user_id == user_id
+        )
+    )).scalar() or 0
+
+    # Profile preferences
+    profile_row = (await db.execute(
+        select(
+            _CP.target_roles,
+            _CP.preferred_countries,
+            _CP.remote_preference,
+        ).where(_CP.user_id == user_id)
+    )).first()
+
+    return {
+        "all_active_jobs": all_active,
+        "scored_for_user": scored,
+        "scored_ge_50": scored_ge_50,
+        "scored_ge_30": scored_ge_30,
+        "applied_total": applied_total,
+        "profile": {
+            "target_roles": profile_row[0] if profile_row else None,
+            "preferred_countries": profile_row[1] if profile_row else None,
+            "remote_preference": profile_row[2] if profile_row else None,
+        } if profile_row else None,
     }
 
 
