@@ -81,8 +81,9 @@ _TRAILING_RE = re.compile(
 
 
 def _strip_llm_fluff(text: str) -> str:
-    """Defensive cleanup: strip common preambles and trailing commentary
-    the model sometimes adds even when the prompt says 'only the message'.
+    """Defensive cleanup: strip common preambles, trailing commentary,
+    and stylistic LLM tells that the model sometimes adds even when
+    the prompt forbids them.
 
     Conservative — only removes lines that match well-known LLM tells.
     Real opening sentences like 'Hi {recruiter},' or 'Dear hiring team,'
@@ -96,6 +97,19 @@ def _strip_llm_fluff(text: str) -> str:
     # wrapped the message in ``` for some reason.
     cleaned = re.sub(r"^```[a-z]*\n", "", cleaned)
     cleaned = re.sub(r"\n```\s*$", "", cleaned)
+    # Strip em / en dashes - universal LLM tell that gets pointed out
+    # by real recruiters. Replace with a regular hyphen and clean up
+    # the surrounding spacing so the punctuation scans naturally.
+    # Two cases:
+    #   1. Line-leading dash (sign-offs: "— Olalekan"): drop to "- Olalekan"
+    #   2. Inline dash ("X — Y"): drop to "X - Y"
+    # `[^\S\n]` matches horizontal whitespace only — preserves blank
+    # lines between paragraphs / before signatures.
+    cleaned = re.sub(r"(?m)^[^\S\n]*[—–][^\S\n]*", "- ", cleaned)
+    cleaned = re.sub(r"[^\S\n]*[—–][^\S\n]*", " - ", cleaned)
+    # Collapse the double-spaces the replacement can leave behind.
+    cleaned = re.sub(r" {2,}", " ", cleaned)
+    cleaned = re.sub(r" +([,.;:!?])", r"\1", cleaned)
     return cleaned.strip()
 
 
@@ -219,6 +233,17 @@ async def generate_tailored_application(
         for e in tailored_resume.get("selected_experience", [])[:3]
     )
 
+    # Load the user's real display name ONCE for both cover letter +
+    # outreach. Without this the cover letter prompt previously had no
+    # name field, so the model would invent one from context (a user
+    # reported their cover letter signed off "Oluwatosin Shobukola"
+    # when that was not their name).
+    from app.models.user import User
+    user_row = (await db.execute(
+        select(User.name).where(User.id == user_id)
+    )).first()
+    candidate_name = (user_row[0] if user_row else None) or "the candidate"
+
     cover_letter_raw = await llm_client.generate(
         task_type="tailoring",
         system_prompt=SYSTEM_PROMPT,
@@ -228,6 +253,7 @@ async def generate_tailored_application(
                 job_title=job.title,
                 job_company=job.company,
                 job_requirements="; ".join(job_requirements[:10]),
+                candidate_name=candidate_name,
                 candidate_summary=tailored_resume.get("tailored_summary", ""),
                 top_experience=top_exp,
             )
@@ -239,18 +265,8 @@ async def generate_tailored_application(
     logger.info("Generating outreach for job %s", job_id)
     await _step("Drafting outreach")
 
-    # Load the user's display name for sign-off + outreach context.
-    # Previously the outreach prompt only saw a list of pre-computed
-    # "strongest matches" with no real employer / project / metric
-    # context, so the model would refuse to draft and ask for more info.
-    # Now we pass the same name + summary + top_experience the cover-
-    # letter prompt gets so the model has real material to work from.
-    from app.models.user import User
-    user_row = (await db.execute(
-        select(User.name).where(User.id == user_id)
-    )).first()
-    candidate_name = (user_row[0] if user_row else None) or "the candidate"
-
+    # candidate_name already loaded above (used for both cover letter
+    # + outreach). Same value flows to OUTREACH_PROMPT here.
     outreach_raw = await llm_client.generate(
         task_type="tailoring",
         system_prompt=SYSTEM_PROMPT,

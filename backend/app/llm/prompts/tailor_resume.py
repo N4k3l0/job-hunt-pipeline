@@ -101,7 +101,10 @@ COVER_LETTER_PROMPT = """Write a concise cover letter for this job application:
 Title: {job_title} at {job_company}
 Key Requirements: {job_requirements}
 
-## Candidate Summary
+## Candidate
+Name (use this EXACT name for the sign-off): {candidate_name}
+
+Summary:
 {candidate_summary}
 
 ## Top Matching Experience
@@ -111,10 +114,21 @@ Key Requirements: {job_requirements}
 - Write 3-4 paragraphs max
 - Reference 2-3 specific, real achievements from the candidate's experience
 - Show genuine understanding of what the company/role needs
-- Be specific, not generic — mention the company name and role
-- Professional but not stiff — conversational confidence
+- Be specific, not generic - mention the company name and role
+- Professional but not stiff - conversational confidence
 - NEVER fabricate any experience or metrics
+- NEVER invent a name for the candidate. The sign-off MUST be the
+  exact name given above. If a name appears in the resume snippets
+  that differs from the one above, IGNORE it - the name above is
+  authoritative.
 - End with a clear call to action
+
+## Style rules (strict)
+- Do NOT use em dashes (the long dash: —). Use a comma, a period,
+  parentheses, or a regular hyphen ( - ) instead.
+- Do NOT use the word "delve". Do NOT use "tapestry", "leverage",
+  "embark", "navigate the landscape" or other LLM-tell phrases.
+- Plain, direct prose. Short sentences over long ones.
 
 ## Output format (strict)
 Return ONLY the cover letter body. No preamble like "Here's a draft" or
@@ -145,12 +159,20 @@ Headline / summary: {candidate_summary}
 
 ## Instructions
 - Keep it under 300 characters (LinkedIn connection-request limit).
-- Reference ONE concrete achievement from the experience above —
+- Reference ONE concrete achievement from the experience above,
   with the real employer / project name / number that's already there.
 - Include a clear ask (brief chat about the role).
-- Professional but human tone. Sign off with the candidate's first name.
+- Professional but human tone. Sign off with the candidate's first
+  name (extracted from the Name field above - do NOT use any other
+  name even if one appears in the experience text).
 - NEVER fabricate. If a metric isn't in the profile, don't invent one;
   pick a different achievement that IS in the profile.
+
+## Style rules (strict)
+- Do NOT use em dashes (the long dash: —). Use a comma, a period,
+  or a regular hyphen ( - ) instead.
+- Do NOT use the word "delve" or other obvious LLM-tell phrases.
+- Plain, direct prose.
 
 ## Output format (strict)
 Return ONLY the message text. No preamble like "Here's a draft" or
@@ -199,6 +221,10 @@ Title: {job_title} at {job_company}
 - Reference real experience from the candidate's profile
 - Keep it concise (2-4 sentences unless the question requires more)
 - NEVER fabricate any experience, metrics, or achievements
+
+## Style rules (strict)
+- Do NOT use em dashes (—). Use commas, periods, or hyphens ( - ).
+- Plain, direct prose. No "delve", "tapestry", or LLM-tell phrases.
 
 ## Output format (strict)
 Return ONLY the answer text. No preamble like "Here's my answer" or "Great

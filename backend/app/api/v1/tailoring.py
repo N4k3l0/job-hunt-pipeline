@@ -365,10 +365,18 @@ async def regenerate_section(
         )).strip()
         app.tailored_summary = new_content
     elif body.section == "cover_letter":
+        # Authoritative name from the User row — never let the model
+        # invent a name from resume context.
+        from app.models.user import User
+        user_row = (await db.execute(
+            select(User.name).where(User.id == user_id)
+        )).first()
+        candidate_name = (user_row[0] if user_row else None) or "the candidate"
         base = COVER_LETTER_PROMPT.format(
             job_title=job.title,
             job_company=job.company,
             job_requirements="; ".join(requirements[:10]),
+            candidate_name=candidate_name,
             candidate_summary=app.tailored_summary or (profile.master_summary if profile else ""),
             top_experience=top_exp,
         )
