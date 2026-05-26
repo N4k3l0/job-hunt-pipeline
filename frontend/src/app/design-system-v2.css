@@ -36,6 +36,16 @@
   --sidebar-primary-foreground: #04140f;
   --sidebar-ring: #1ed8b7;
 
+  /* Sidebar surface/text/border tokens — shadcn's Sidebar primitive
+     references these by name and they were dark-only in globals.css.
+     Aliasing to the theme-aware --bg-chrome / --fg / --line / --bg-hover
+     lets the sidebar flip to cream when data-theme="light". */
+  --sidebar: #06080b;
+  --sidebar-foreground: #e8eaf0;
+  --sidebar-border: #1a212c;
+  --sidebar-accent: #161d27;
+  --sidebar-accent-foreground: #e8eaf0;
+
   /* Surfaces */
   --bg: #0a0e14;
   --bg-chrome: #06080b;
@@ -81,6 +91,14 @@
   --sidebar-primary: #0c9e80;
   --sidebar-primary-foreground: #ffffff;
   --sidebar-ring: #0c9e80;
+
+  /* Cream sidebar — slightly tinted off-white so the inner bg-elev-1
+     (pure #ffffff) lifts cleanly off the chrome surface. */
+  --sidebar: #efece4;
+  --sidebar-foreground: #1a1714;
+  --sidebar-border: #e2ddd1;
+  --sidebar-accent: #ece8df;
+  --sidebar-accent-foreground: #1a1714;
 
   /* Warm paper. Cream, not white. */
   --bg: #f7f5f0;
