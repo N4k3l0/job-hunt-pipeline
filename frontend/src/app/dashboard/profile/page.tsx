@@ -11,6 +11,14 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import {
   User, Upload, FileText, Plus, X, Globe, DollarSign, Search,
   Briefcase, GraduationCap, Loader2, CheckCircle2, Trash2, Circle, ArrowRight,
   Sparkles, FileSignature, Quote,
@@ -110,6 +118,48 @@ function SetupChecklist({
   );
 }
 
+// Curated ISO 3166-1 alpha-2 list — the regions a Nigeria-based AI/PM
+// candidate is most likely to target. Ordered by 'sponsorship-friendly
+// tech market' priority rather than alphabetical, so the most useful
+// picks (NL/DE/UK/IE/US) sit at the top of the dropdown.
+const COUNTRY_OPTIONS: { code: string; name: string; group: string }[] = [
+  // High-priority sponsorship destinations
+  { code: "NL", name: "Netherlands", group: "Europe" },
+  { code: "DE", name: "Germany", group: "Europe" },
+  { code: "IE", name: "Ireland", group: "Europe" },
+  { code: "GB", name: "United Kingdom", group: "Europe" },
+  { code: "US", name: "United States", group: "Americas" },
+  { code: "CA", name: "Canada", group: "Americas" },
+  // Rest of Europe
+  { code: "FR", name: "France", group: "Europe" },
+  { code: "ES", name: "Spain", group: "Europe" },
+  { code: "PT", name: "Portugal", group: "Europe" },
+  { code: "IT", name: "Italy", group: "Europe" },
+  { code: "BE", name: "Belgium", group: "Europe" },
+  { code: "LU", name: "Luxembourg", group: "Europe" },
+  { code: "AT", name: "Austria", group: "Europe" },
+  { code: "CH", name: "Switzerland", group: "Europe" },
+  { code: "SE", name: "Sweden", group: "Europe" },
+  { code: "DK", name: "Denmark", group: "Europe" },
+  { code: "NO", name: "Norway", group: "Europe" },
+  { code: "FI", name: "Finland", group: "Europe" },
+  { code: "IS", name: "Iceland", group: "Europe" },
+  { code: "PL", name: "Poland", group: "Europe" },
+  { code: "CZ", name: "Czech Republic", group: "Europe" },
+  { code: "EE", name: "Estonia", group: "Europe" },
+  { code: "LV", name: "Latvia", group: "Europe" },
+  { code: "LT", name: "Lithuania", group: "Europe" },
+  // Asia-Pacific
+  { code: "AU", name: "Australia", group: "Asia-Pacific" },
+  { code: "NZ", name: "New Zealand", group: "Asia-Pacific" },
+  { code: "SG", name: "Singapore", group: "Asia-Pacific" },
+  { code: "JP", name: "Japan", group: "Asia-Pacific" },
+  { code: "AE", name: "United Arab Emirates", group: "Asia-Pacific" },
+  // Remote-anywhere proxy
+  { code: "WW", name: "Worldwide / Remote", group: "Other" },
+];
+
+
 export default function ProfilePage() {
   // Profile data
   const { data: profile, isLoading: profileLoading } = useProfile();
@@ -146,7 +196,8 @@ export default function ProfilePage() {
   const [searchKeywords, setSearchKeywords] = useState<string[]>([]);
   const [blockedSources, setBlockedSources] = useState<string[]>([]);
   const [newRole, setNewRole] = useState("");
-  const [newCountry, setNewCountry] = useState("");
+  // newCountry / addCountry removed — country picker is now a
+  // DropdownMenu of real ISO countries (see Target Countries card).
   const [newKeyword, setNewKeyword] = useState("");
 
   // Resume upload state
@@ -247,13 +298,6 @@ export default function ProfilePage() {
     if (newRole.trim() && !targetRoles.includes(newRole.trim())) {
       setTargetRoles([...targetRoles, newRole.trim()]);
       setNewRole("");
-    }
-  }
-
-  function addCountry() {
-    if (newCountry.trim() && !countries.includes(newCountry.trim().toUpperCase())) {
-      setCountries([...countries, newCountry.trim().toUpperCase()]);
-      setNewCountry("");
     }
   }
 
@@ -521,7 +565,7 @@ export default function ProfilePage() {
                 <EmptyState
                   icon={Sparkles}
                   title="No bullets yet"
-                  description="Upload a resume on the Resumes tab — Claude extracts your strongest achievement lines and stores them here for tailoring."
+                  description="Upload a resume on the Resumes tab — we extract your strongest achievement lines and store them here for tailoring."
                 />
               ) : (
                 <div className="space-y-1.5">
@@ -608,10 +652,10 @@ export default function ProfilePage() {
                   <OperationProgress
                     active={uploadResume.isPending}
                     title="Parsing your resume"
-                    description="Claude reads the file, extracts your structured profile (work history, skills, education, bullets), then scores every job in your inbox against the fresh profile."
+                    description="We read the file, extract your structured profile (work history, skills, education, bullets), then score every job in your inbox against the fresh profile."
                     stages={[
                       { label: "Uploading the file", durationMs: 1500, tip: "Pushing the PDF / DOCX to storage." },
-                      { label: "Reading with Claude", durationMs: 9000, tip: "Pulling out work history, skills, education, and achievement bullets — never inventing anything." },
+                      { label: "Reading your resume", durationMs: 9000, tip: "Pulling out work history, skills, education, and achievement bullets — never inventing anything." },
                       { label: "Building your structured profile", durationMs: 3000, tip: "Saving each section to its own table so the tailor service can pull from them later." },
                       { label: "Scoring your inbox", durationMs: 3500, tip: "Re-scoring every job against the new profile so the inbox sort reflects your latest skills." },
                     ]}
@@ -646,7 +690,7 @@ export default function ProfilePage() {
                 <EmptyState
                   icon={FileSignature}
                   title="No resumes yet"
-                  description="Drop a PDF or DOCX above. Claude parses it into structured profile data, then uses it to tailor every application."
+                  description="Drop a PDF or DOCX above. We parse it into structured profile data, then use it to tailor every application."
                 />
               ) : (
                 <div className="space-y-2">
@@ -784,33 +828,75 @@ export default function ProfilePage() {
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="flex flex-wrap gap-2">
-                {countries.map((c) => (
-                  <Badge key={c} variant="outline" className="font-mono gap-1 pr-1.5 text-sm py-1">
-                    {c}
-                    <button
-                      onClick={() => setCountries(countries.filter((x) => x !== c))}
-                      className="ml-1 hover:text-destructive"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </Badge>
-                ))}
+                {countries.map((c) => {
+                  // Show the country NAME (not just the ISO code) so a
+                  // glance at the row is enough to tell "DE" from "DK".
+                  const meta = COUNTRY_OPTIONS.find((o) => o.code === c);
+                  return (
+                    <Badge key={c} variant="outline" className="gap-1 pr-1.5 text-sm py-1">
+                      {meta ? meta.name : c}
+                      <button
+                        onClick={() => setCountries(countries.filter((x) => x !== c))}
+                        className="ml-1 hover:text-destructive"
+                        aria-label={`Remove ${meta?.name ?? c}`}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </Badge>
+                  );
+                })}
                 {countries.length === 0 && (
                   <span className="text-sm text-muted-foreground">No countries added yet</span>
                 )}
               </div>
-              <div className="flex gap-2">
-                <Input
-                  value={newCountry}
-                  onChange={(e) => setNewCountry(e.target.value)}
-                  placeholder="Country code (e.g. US, GB, DE)"
-                  onKeyDown={(e) => e.key === "Enter" && addCountry()}
-                  className="max-w-xs"
+              {/* Dropdown of real countries instead of a free-text input.
+                  The old input + Plus button accepted any string (so
+                  typos like "U" or "USA" got stored verbatim) and
+                  often appeared broken because users didn't realise
+                  it expected a 2-letter ISO code. */}
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button variant="outline" size="sm">
+                      <Plus className="h-4 w-4" />
+                      Add country
+                    </Button>
+                  }
                 />
-                <Button variant="outline" onClick={addCountry}>
-                  <Plus className="h-4 w-4" />
-                </Button>
-              </div>
+                <DropdownMenuContent align="start" className="max-h-[320px] overflow-y-auto">
+                  {(["Europe", "Americas", "Asia-Pacific", "Other"] as const).map((group, gi) => {
+                    const items = COUNTRY_OPTIONS.filter((o) => o.group === group);
+                    return (
+                      <div key={group}>
+                        {gi > 0 && <DropdownMenuSeparator />}
+                        <DropdownMenuLabel className="text-xs text-muted-foreground">
+                          {group}
+                        </DropdownMenuLabel>
+                        {items.map((opt) => {
+                          const already = countries.includes(opt.code);
+                          return (
+                            <DropdownMenuItem
+                              key={opt.code}
+                              disabled={already}
+                              onClick={() => {
+                                if (!already) {
+                                  setCountries([...countries, opt.code]);
+                                }
+                              }}
+                              className="flex items-center justify-between gap-3"
+                            >
+                              <span>{opt.name}</span>
+                              <span className="text-xs text-muted-foreground font-mono">
+                                {already ? "added" : opt.code}
+                              </span>
+                            </DropdownMenuItem>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
             </CardContent>
           </Card>
 
@@ -978,7 +1064,7 @@ export default function ProfilePage() {
                 <OperationProgress
                   active={rescoreInbox.isPending}
                   title="Re-scoring your inbox"
-                  description="Wiping existing scores and recomputing every job against your current profile. Pure compute, no LLM calls — usually finishes in a few seconds."
+                  description="Wiping existing scores and recomputing every job against your current profile. Usually finishes in a few seconds."
                   stages={[
                     { label: "Loading your latest profile", durationMs: 800, tip: "Reading target roles, skills, work history, and preferences." },
                     { label: "Wiping old job scores", durationMs: 600, tip: "Clearing yesterday's numbers so the rerank is honest." },
@@ -1006,7 +1092,7 @@ const SAMPLE_KINDS: { value: "cover_letter" | "outreach" | "summary"; label: str
   {
     value: "cover_letter",
     label: "Cover letter",
-    placeholder: "Paste a cover letter you've written before. Claude will mimic your sentence rhythm, openers, and how you frame achievements — without copying any specific facts.",
+    placeholder: "Paste a cover letter you've written before. We'll mimic your sentence rhythm, openers, and how you frame achievements — without copying any specific facts.",
   },
   {
     value: "outreach",
@@ -1057,7 +1143,7 @@ function WritingSamplesCard() {
         <CardTitle>Your writing samples</CardTitle>
         <CardDescription>
           Paste past cover letters, outreach messages, or resume summaries here.
-          Claude reads them when generating new drafts so your applications
+          We read them when generating new drafts so your applications
           sound like <span className="text-foreground font-medium">you</span>,
           not generic AI. Optional — leave empty for default behavior.
         </CardDescription>
@@ -1080,7 +1166,7 @@ function WritingSamplesCard() {
           <Input
             value={label}
             onChange={(e) => setLabel(e.target.value)}
-            placeholder="Optional label (e.g. 'AI Engineer @ Anthropic — landed interview')"
+            placeholder="Optional label (e.g. 'AI Engineer @ Acme — landed interview')"
             className="text-sm"
           />
           <textarea
@@ -1116,7 +1202,7 @@ function WritingSamplesCard() {
           <EmptyState
             icon={Quote}
             title="No samples yet"
-            description="Drafts use the default AI voice. Paste 1–2 of your past cover letters or outreach messages above so Claude writes the next ones in your style."
+            description="Drafts use a generic voice by default. Paste 1–2 of your past cover letters or outreach messages above so future drafts match your style."
           />
         ) : (
           <div className="space-y-4">

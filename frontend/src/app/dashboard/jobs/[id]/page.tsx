@@ -320,7 +320,7 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
     <p class="sub">Skipping aggregators — landing you on the company's real apply page.</p>
     <div class="stage active" data-i="0"><div class="check"></div><span>Checking the company's ATS</span></div>
     <div class="stage" data-i="1"><div class="check"></div><span>Scanning the careers page</span></div>
-    <div class="stage" data-i="2"><div class="check"></div><span>Verifying with Claude</span></div>
+    <div class="stage" data-i="2"><div class="check"></div><span>Verifying the link</span></div>
     <div class="stage" data-i="3"><div class="check"></div><span>Opening posting</span></div>
     <div class="bar"><div class="fill" id="fill"></div></div>
     <div class="pct"><span id="pctNum">0%</span><span id="elapsed">0.0s</span></div>
@@ -334,7 +334,7 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
   var stages = [
     { from: 0,  to: 30, ms: 2000, tip: "Most postings resolve in under 3 seconds." },
     { from: 30, to: 55, ms: 2500, tip: "Aggregator pages need a render — adding ~2s." },
-    { from: 55, to: 85, ms: 5500, tip: "Claude is searching the web for the canonical link." },
+    { from: 55, to: 85, ms: 5500, tip: "Searching the web for the canonical link." },
     { from: 85, to: 96, ms: 1500, tip: "Almost there." },
   ];
   var fill = document.getElementById('fill');

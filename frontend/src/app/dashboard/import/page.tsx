@@ -237,10 +237,10 @@ export default function ImportPage() {
               <OperationProgress
                 active={importUrl.isPending}
                 title="Importing this job"
-                description="Firecrawl scrapes the page, Claude parses it into structured fields, we resolve the direct apply link, then score it against your profile."
+                description="We fetch the page, parse it into structured fields, resolve the direct apply link, then score it against your profile."
                 stages={[
-                  { label: "Fetching the page", durationMs: 5000, tip: "Firecrawl renders the URL — handles JS-heavy ATS pages that plain HTTP can't read." },
-                  { label: "Parsing with Claude", durationMs: 8000, tip: "Pulling out title, company, requirements, skills, salary, remote type." },
+                  { label: "Fetching the page", durationMs: 5000, tip: "Rendering the URL — handles JS-heavy pages plain HTTP can't read." },
+                  { label: "Parsing the posting", durationMs: 8000, tip: "Pulling out title, company, requirements, skills, salary, remote type." },
                   { label: "Resolving the apply link", durationMs: 7000, tip: "Going through aggregator redirects to find the direct posting URL." },
                   { label: "Scoring + adding to inbox", durationMs: 3000, tip: "Computing your fit so the inbox sort is meaningful right away." },
                 ]}
@@ -305,10 +305,10 @@ export default function ImportPage() {
               <OperationProgress
                 active={importText.isPending}
                 title="Importing this job"
-                description="Claude parses the text into structured fields. If you didn't paste an apply URL, we also resolve one for you so the Apply button works instantly later."
+                description="We parse the text into structured fields. If you didn't paste an apply URL, we also resolve one for you so the Apply button works instantly later."
                 stages={[
-                  { label: "Reading the text with Claude", durationMs: 6000, tip: "Pulling out title, company, requirements, skills, salary, remote type." },
-                  { label: "Resolving an apply link", durationMs: 5000, tip: "Looking up the company on Greenhouse / Lever / Ashby, plus a Claude web_search if needed." },
+                  { label: "Reading the text", durationMs: 6000, tip: "Pulling out title, company, requirements, skills, salary, remote type." },
+                  { label: "Resolving an apply link", durationMs: 5000, tip: "Looking up the company on common ATSes, plus a web search if needed." },
                   { label: "Scoring + adding to inbox", durationMs: 3000, tip: "Computing your fit so the inbox sort is meaningful right away." },
                 ]}
               />
@@ -507,7 +507,7 @@ function BookmarkletCard() {
             <li>
               <span className="text-foreground">What happens after I click it?</span>{" "}
               The bookmarklet reads the URL of the current tab, opens a new tab
-              here pre-loaded with that URL, auto-fires the import (Claude parse +
+              here pre-loaded with that URL, auto-fires the import (parse +
               apply-link resolve + scoring), and redirects you to your inbox.
             </li>
           </ul>

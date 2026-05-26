@@ -244,7 +244,7 @@ export default function JobsInboxPage() {
                 onSuccess: (data) => {
                   if (data.ingested === 0 && data.found > 0) {
                     toast.info("No new jobs found", {
-                      description: `Claude returned ${data.found} matches but they all already exist in the inbox.`,
+                      description: `Found ${data.found} matches but they all already exist in your inbox.`,
                     });
                   } else if (data.ingested > 0) {
                     toast.success(`Added ${data.ingested} new job${data.ingested === 1 ? "" : "s"}`, {
@@ -260,7 +260,7 @@ export default function JobsInboxPage() {
               });
             }}
             disabled={findMore.isPending}
-            title="Asks Claude to search the open web for remote jobs that match your profile, then ingests new matches into your inbox. Takes 30–60 seconds."
+            title="Searches the open web for jobs that match your profile, then ingests new matches into your inbox. Takes 30–60 seconds."
           >
             {findMore.isPending ? (
               <>
@@ -310,7 +310,7 @@ export default function JobsInboxPage() {
       <OperationProgress
         active={findMore.isPending}
         title="Searching the open web for new jobs"
-        description="Claude is reading your profile, querying job boards + careers pages, and verifying each match before ingest."
+        description="Reading your profile, querying job boards + careers pages, and verifying each match before ingest."
         stages={[
           { label: "Loading your profile", durationMs: 1500, tip: "Reading your target roles, skills, and remote preference." },
           { label: "Searching company careers + ATSes", durationMs: 12000, tip: "Hitting Greenhouse, Lever, Ashby, and niche boards in parallel." },
@@ -375,35 +375,9 @@ export default function JobsInboxPage() {
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                variant={sourceFilter ? "default" : "ghost"}
-                size="sm"
-                className="text-sm"
-              >
-                <Database className="h-3 w-3" />
-                {sourceFilter ? (SOURCE_COLORS[sourceFilter]?.label ?? sourceFilter) : "Source"}
-              </Button>
-            }
-          />
-          <DropdownMenuContent align="start">
-            <DropdownMenuItem onClick={() => setSourceFilter(null)}>
-              All sources
-            </DropdownMenuItem>
-            {Object.entries(SOURCE_COLORS).map(([key, meta]) => (
-              <DropdownMenuItem
-                key={key}
-                onClick={() => setSourceFilter(key)}
-                className="flex items-center gap-2"
-              >
-                <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
-                {meta.label}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {/* Source filter intentionally removed — users shouldn't filter
+            by where the listing came from. The country / role / remote
+            filters cover the dimensions they actually care about. */}
 
         {activeFilters > 0 && (
           <button
@@ -469,7 +443,6 @@ export default function JobsInboxPage() {
         <div className="space-y-1.5">
           {filtered.map((job: any) => {
             const score = job.score?.overall_fit ?? null;
-            const src = SOURCE_COLORS[job.source_name] || SOURCE_COLORS.manual;
 
             return (
               <Link
@@ -536,10 +509,12 @@ export default function JobsInboxPage() {
                         {job.salary_text}
                       </span>
                     )}
-                    <span className="inline-flex items-center gap-1">
-                      <span className={`h-1.5 w-1.5 rounded-full ${src.dot}`} />
-                      <span className="text-muted-foreground">{src.label}</span>
-                    </span>
+                    {/* Source attribution intentionally hidden — users
+                        don't need to know where the listing came from,
+                        and surfacing it (LinkedIn / Greenhouse / etc.)
+                        leaks implementation detail without adding value
+                        to the apply decision. Source still lives on
+                        the row for admin filtering. */}
                     {job.discovered_at && (
                       <span className="text-muted-foreground tabular-nums ml-auto sm:ml-0">
                         {timeAgo(job.discovered_at)}
