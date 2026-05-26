@@ -142,7 +142,12 @@ export function AppSidebar() {
           >
             J
           </span>
-          <span className="text-[16px] font-semibold tracking-tight">Job Hunt</span>
+          <span
+            className="text-[16px] font-semibold tracking-tight"
+            style={{ color: "var(--fg)" }}
+          >
+            Job Hunt
+          </span>
         </Link>
       </SidebarHeader>
       <SidebarContent>

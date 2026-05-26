@@ -39,9 +39,12 @@
   /* Sidebar surface/text/border tokens — shadcn's Sidebar primitive
      references these by name and they were dark-only in globals.css.
      Aliasing to the theme-aware --bg-chrome / --fg / --line / --bg-hover
-     lets the sidebar flip to cream when data-theme="light". */
+     lets the sidebar flip to cream when data-theme="light".
+     `--sidebar-foreground` is intentionally `--fg-muted` so nav text reads
+     medium-grey by default; active/hover items + brand bump it back to
+     `--fg` explicitly. Matches the Claude design's calm sidebar. */
   --sidebar: #06080b;
-  --sidebar-foreground: #e8eaf0;
+  --sidebar-foreground: #a0a6b3;
   --sidebar-border: #1a212c;
   --sidebar-accent: #161d27;
   --sidebar-accent-foreground: #e8eaf0;
@@ -93,9 +96,10 @@
   --sidebar-ring: #0c9e80;
 
   /* Cream sidebar — slightly tinted off-white so the inner bg-elev-1
-     (pure #ffffff) lifts cleanly off the chrome surface. */
+     (pure #ffffff) lifts cleanly off the chrome surface. Foreground is
+     muted on purpose; brand + active items override back to --fg. */
   --sidebar: #efece4;
-  --sidebar-foreground: #1a1714;
+  --sidebar-foreground: #5f5a52;
   --sidebar-border: #e2ddd1;
   --sidebar-accent: #ece8df;
   --sidebar-accent-foreground: #1a1714;
@@ -162,6 +166,12 @@ body {
   min-height: 100vh;
   overflow-x: hidden;
 }
+
+/* shadcn's <Sidebar> renders the fixed container with border-r whose color
+   falls back to currentColor (--sidebar-foreground). That paints a hard
+   vertical line between the sidebar and main column. The Claude design has
+   no such line — the chrome surface alone separates the regions. Kill it. */
+[data-slot="sidebar-container"][data-side="left"] { border-right-width: 0; }
 
 /* No focus-ring rainbow noise — single teal outline */
 :focus-visible {
