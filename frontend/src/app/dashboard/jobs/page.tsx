@@ -30,7 +30,7 @@ import { useToast } from "@/components/ui/toast";
 import { OperationProgress } from "@/components/operation-progress";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
-import { Score, ScoreHero, type ScoreVariant } from "@/components/ds/score";
+import { Score, ScoreAxis, type ScoreVariant } from "@/components/ds/score";
 
 function timeAgo(dateStr: string | null | undefined): string {
   if (!dateStr) return "";
@@ -135,10 +135,18 @@ export default function JobsInboxPage() {
     return out;
   }, [jobs, search, activeView, savedViews]);
 
-  // ── Top match (for editorial card) + rest ──────────────────────────
-  // Pull the highest-scoring job that isn't already shortlisted/dismissed.
-  const topMatch = filtered[0];
-  const rest = filtered.slice(1);
+  // ── Asymmetric layout split ────────────────────────────────────────
+  // Top of the page mirrors the Claude Design prototype:
+  //   LEFT  → TopMatchCard (highest-scoring job, with 4-axis breakdown)
+  //   RIGHT → "NEXT 5 · ALSO STRONG" panel (jobs #2–#6)
+  // Below that lives the "REST OF INBOX · N" dense list (jobs #7+).
+  // The top match only earns the editorial treatment when it scored ≥70 —
+  // a thin inbox shouldn't have a giant card pointing at a 40-score job.
+  const HERO_THRESHOLD = 70;
+  const heroEligible = !!filtered[0] && (filtered[0].score?.overall_fit ?? 0) >= HERO_THRESHOLD;
+  const topMatch = heroEligible ? filtered[0] : null;
+  const nextFive = heroEligible ? filtered.slice(1, 6) : [];
+  const rest = heroEligible ? filtered.slice(6) : filtered;
 
   // ── Optimistic shortlist / dismiss ─────────────────────────────────
   const optimisticJobAction = (
@@ -399,13 +407,13 @@ export default function JobsInboxPage() {
           </div>
         </div>
 
-        {/* ── Editorial top match + dense list ───────────────────── */}
+        {/* ── Asymmetric top row (TopMatchCard + NEXT 5) ──────────── */}
         {isLoading ? (
-          <div className="ds-card" style={{ padding: 60, textAlign: "center" }}>
+          <div className="ds-card" style={{ padding: 60, textAlign: "center", marginTop: 16 }}>
             <Loader2 className="h-6 w-6 animate-spin mx-auto ds-dim" />
           </div>
         ) : filtered.length === 0 ? (
-          <div className="ds-card" style={{ padding: 60, textAlign: "center", color: "var(--ds-fg-muted)" }}>
+          <div className="ds-card" style={{ padding: 60, textAlign: "center", marginTop: 16, color: "var(--ds-fg-muted)" }}>
             <InboxIcon className="h-7 w-7 mx-auto mb-3 ds-dim" />
             <p style={{ fontSize: 15, color: "var(--ds-fg)", marginBottom: 4 }}>
               No jobs match this view
@@ -415,149 +423,62 @@ export default function JobsInboxPage() {
             </p>
           </div>
         ) : (
-          <div className="space-y-4">
-            {topMatch && (topMatch.score?.overall_fit ?? 0) >= 70 && (
-              <Link
-                href={`/dashboard/jobs/${topMatch.id}`}
-                className="ds-editorial-card"
-                style={{ textDecoration: "none" }}
+          <div className="space-y-5">
+            {topMatch && (
+              <div
+                className="inbox-asym"
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: nextFive.length > 0
+                    ? "minmax(0, 1.4fr) minmax(0, 1fr)"
+                    : "minmax(0, 1fr)",
+                  gap: 18,
+                  marginTop: 18,
+                }}
               >
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <div className="ds-pill accent" style={{ marginBottom: 10 }}>
-                      <Sparkles className="h-3 w-3" />
-                      TOP MATCH
-                    </div>
-                    <h2 className="ds-h2" style={{ marginBottom: 6 }}>
-                      {topMatch.title}
-                    </h2>
-                    <div className="flex items-center gap-3 flex-wrap" style={{ color: "var(--ds-fg-muted)", fontSize: 13 }}>
-                      <span style={{ color: "var(--ds-fg)", fontWeight: 500 }}>{topMatch.company}</span>
-                      {topMatch.location && (
-                        <span className="inline-flex items-center gap-1">
-                          <MapPin className="h-3 w-3 ds-dim" />
-                          {topMatch.location}
-                        </span>
-                      )}
-                      {topMatch.salary_text && (
-                        <span className="ds-mono" style={{ color: "var(--ds-fg)" }}>
-                          {topMatch.salary_text}
-                        </span>
-                      )}
-                      <span className="ds-mono ds-dim">
-                        {timeAgo(topMatch.discovered_at)} ago
-                      </span>
-                    </div>
-                  </div>
-                  <ScoreHero score={topMatch.score?.overall_fit ?? 0} variant={scoreVariant} />
-                </div>
-              </Link>
+                <TopMatchCard
+                  job={topMatch}
+                  onShortlist={(j) => optimisticJobAction(j, "shortlisted", "Shortlisted", "shortlist")}
+                />
+                {nextFive.length > 0 && <NextUpPanel jobs={nextFive} />}
+              </div>
             )}
 
-            {/* Dense list — top match excluded if it became the hero */}
-            <div className="ds-card" style={{ overflow: "hidden" }}>
-              {(topMatch && (topMatch.score?.overall_fit ?? 0) >= 70 ? rest : filtered).map((job) => (
-                <Link
-                  key={job.id}
-                  href={`/dashboard/jobs/${job.id}`}
-                  className="ds-row"
+            {rest.length > 0 && (
+              <div>
+                <div
+                  className="ds-mono"
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "baseline",
+                    padding: "0 4px 10px",
+                    fontSize: 10,
+                    letterSpacing: "0.1em",
+                    color: "var(--ds-fg-dim)",
+                    textTransform: "uppercase",
+                    marginTop: topMatch ? 24 : 0,
+                  }}
                 >
-                  <Score score={job.score?.overall_fit ?? null} variant={scoreVariant} />
+                  <span>REST OF INBOX · {rest.length}</span>
+                  <span className="ds-faint">SORTED BY {sortBy.toUpperCase()}</span>
+                </div>
 
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{
-                      fontWeight: 600,
-                      fontSize: density === "dense" ? 13.5 : 14.5,
-                      letterSpacing: "-0.01em",
-                      color: "var(--ds-fg)",
-                      lineHeight: 1.25,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}>
-                      {job.title}
-                    </div>
-                    <div style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 12,
-                      marginTop: density === "dense" ? 1 : 3,
-                      flexWrap: "wrap",
-                      fontSize: density === "dense" ? 12 : 12.5,
-                      color: "var(--ds-fg-muted)",
-                    }}>
-                      <span style={{ color: "var(--ds-fg)", fontWeight: 500 }}>{job.company}</span>
-                      {job.location && (
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                          <MapPin className="h-3 w-3 opacity-70" />
-                          {job.location}
-                        </span>
-                      )}
-                      {job.salary_text && (
-                        <span className="ds-mono" style={{ color: "var(--ds-fg)" }}>{job.salary_text}</span>
-                      )}
-                      <span className="ds-mono ds-dim" style={{ marginLeft: "auto" }}>
-                        {timeAgo(job.discovered_at)}
-                      </span>
-                    </div>
-                  </div>
+                <div className="ds-card" style={{ overflow: "hidden" }}>
+                  {rest.map((job) => (
+                    <DenseRow
+                      key={job.id}
+                      job={job}
+                      density={density}
+                      scoreVariant={scoreVariant}
+                      onShortlist={(j) => optimisticJobAction(j, "shortlisted", "Shortlisted", "shortlist")}
+                      onArchive={(j) => optimisticJobAction(j, "dismissed", "Archived", "dismiss")}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
 
-                  <div
-                    className="flex items-center"
-                    onClick={(e) => e.preventDefault()}
-                  >
-                    <button
-                      type="button"
-                      aria-label="Shortlist"
-                      title="Shortlist"
-                      className="ds-tap44"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        optimisticJobAction(job, "shortlisted", "Shortlisted", "shortlist");
-                      }}
-                      style={{
-                        width: 36,
-                        height: 36,
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        color: "var(--ds-fg-muted)",
-                        borderRadius: "var(--ds-r-pill)",
-                        background: "transparent",
-                        transition: "all 120ms ease",
-                      }}
-                    >
-                      <Star className="h-4 w-4" />
-                    </button>
-                    <button
-                      type="button"
-                      aria-label="Archive"
-                      title="Archive"
-                      className="ds-tap44"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        optimisticJobAction(job, "dismissed", "Archived", "dismiss");
-                      }}
-                      style={{
-                        width: 36,
-                        height: 36,
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        color: "var(--ds-fg-muted)",
-                        borderRadius: "var(--ds-r-pill)",
-                        background: "transparent",
-                        transition: "all 120ms ease",
-                      }}
-                    >
-                      <Archive className="h-4 w-4" />
-                    </button>
-                  </div>
-                </Link>
-              ))}
-            </div>
-
-            {/* Pagination */}
             {total > 25 && (
               <div className="flex items-center justify-between" style={{ marginTop: 16 }}>
                 <span className="ds-mono ds-muted" style={{ fontSize: 12 }}>
@@ -587,7 +508,346 @@ export default function JobsInboxPage() {
             )}
           </div>
         )}
+
+        <style>{`
+          @media (max-width: 900px) {
+            .inbox-asym { grid-template-columns: 1fr !important; }
+          }
+        `}</style>
       </div>
     </div>
+  );
+}
+
+/* ============================================================
+   TopMatchCard — left side of the asymmetric grid.
+   Editorial treatment: overline, company, big title, BIG mono
+   number (no ring, per request), 4-axis breakdown, action row.
+   ============================================================ */
+function TopMatchCard({
+  job,
+  onShortlist,
+}: {
+  job: any;
+  onShortlist: (job: any) => void;
+}) {
+  const score = job.score?.overall_fit ?? 0;
+  return (
+    <Link
+      href={`/dashboard/jobs/${job.id}`}
+      className="ds-editorial-card"
+      style={{ textDecoration: "none", padding: 22, display: "block" }}
+    >
+      <div className="ds-mono" style={{ fontSize: 10, color: "var(--ds-accent)", letterSpacing: "0.12em", marginBottom: 14, textTransform: "uppercase", fontWeight: 600 }}>
+        ◆ TOP MATCH · LIVE
+      </div>
+
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 18 }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: 13, color: "var(--ds-fg-muted)", fontWeight: 500, marginBottom: 4 }}>
+            {job.company}
+          </div>
+          <h2 style={{
+            fontSize: 22,
+            fontWeight: 600,
+            letterSpacing: "-0.02em",
+            margin: 0,
+            lineHeight: 1.2,
+            color: "var(--ds-fg)",
+            textWrap: "balance" as any,
+          }}>
+            {job.title}
+          </h2>
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            flexWrap: "wrap",
+            marginTop: 10,
+            fontSize: 13,
+            color: "var(--ds-fg-muted)",
+          }}>
+            {job.location && (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                <MapPin className="h-3 w-3" />
+                {job.location}
+              </span>
+            )}
+            {job.salary_text && (
+              <span className="ds-mono" style={{ color: "var(--ds-fg)" }}>{job.salary_text}</span>
+            )}
+            <span className="ds-mono ds-dim">{timeAgo(job.discovered_at)} ago</span>
+          </div>
+        </div>
+
+        {/* Hero score — mono number, NO ring, slightly bigger than row scores. */}
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", flexShrink: 0, lineHeight: 1 }}>
+          <span
+            className="ds-mono ds-s-top"
+            style={{
+              fontSize: 48,
+              fontWeight: 600,
+              letterSpacing: "-0.04em",
+              lineHeight: 1,
+            }}
+          >
+            {Math.round(score)}
+          </span>
+          <span className="ds-mono ds-faint" style={{ fontSize: 11, marginTop: 4, letterSpacing: "0.04em" }}>
+            /100
+          </span>
+        </div>
+      </div>
+
+      {/* 4-axis breakdown — only renders if we actually have axis scores. */}
+      {job.score && (
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+          gap: 14,
+          marginTop: 18,
+          paddingTop: 16,
+          borderTop: "1px solid var(--ds-line)",
+        }}>
+          <ScoreAxis label="TITLE" value={job.score.title_score ?? 0} />
+          <ScoreAxis label="SKILLS" value={job.score.skill_score ?? 0} />
+          <ScoreAxis label="SENIORITY" value={job.score.seniority_score ?? 0} />
+          <ScoreAxis label="SALARY" value={job.score.salary_score ?? 0} />
+        </div>
+      )}
+
+      {/* Action row */}
+      <div
+        style={{ display: "flex", gap: 8, marginTop: 18 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <span
+          className="ds-btn primary"
+          style={{ pointerEvents: "none" }}
+        >
+          <Sparkles className="h-3.5 w-3.5" />
+          Open & apply
+        </span>
+        <button
+          type="button"
+          className="ds-btn"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onShortlist(job);
+          }}
+        >
+          <Star className="h-3.5 w-3.5" />
+          Shortlist
+        </button>
+      </div>
+    </Link>
+  );
+}
+
+/* ============================================================
+   NextUpPanel — right side of the asymmetric grid.
+   Mono overline + 5 compact rows. Small mono number per row,
+   not rings, so the side panel doesn't visually fight with
+   the TopMatchCard or the dense list below.
+   ============================================================ */
+function NextUpPanel({ jobs }: { jobs: any[] }) {
+  return (
+    <div className="ds-card" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+      <div style={{
+        padding: "12px 14px",
+        borderBottom: "1px solid var(--ds-line-faint)",
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+      }}>
+        <span
+          className="ds-mono"
+          style={{
+            fontSize: 10,
+            color: "var(--ds-fg-faint)",
+            letterSpacing: "0.12em",
+            textTransform: "uppercase",
+            fontWeight: 600,
+          }}
+        >
+          NEXT {jobs.length} · ALSO STRONG
+        </span>
+      </div>
+      <div style={{ flex: 1 }}>
+        {jobs.map((job) => {
+          const score = job.score?.overall_fit ?? null;
+          const top = score != null && score >= 80;
+          return (
+            <Link
+              key={job.id}
+              href={`/dashboard/jobs/${job.id}`}
+              className="ds-row"
+              style={{
+                display: "grid",
+                gridTemplateColumns: "40px 1fr auto",
+                gap: 12,
+                alignItems: "center",
+                padding: "12px 14px",
+                borderTop: "1px solid var(--ds-line-faint)",
+                textDecoration: "none",
+                minHeight: 56,
+              }}
+            >
+              <span
+                className={`ds-mono ${top ? "ds-s-top" : "ds-s-mid"}`}
+                style={{
+                  fontSize: 17,
+                  fontWeight: 600,
+                  letterSpacing: "-0.03em",
+                  textAlign: "left",
+                  lineHeight: 1,
+                }}
+              >
+                {score != null ? Math.round(score) : "—"}
+              </span>
+              <div style={{ minWidth: 0 }}>
+                <div style={{
+                  fontSize: 13.5,
+                  fontWeight: 600,
+                  color: "var(--ds-fg)",
+                  letterSpacing: "-0.005em",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}>
+                  {job.title}
+                </div>
+                <div style={{
+                  fontSize: 12,
+                  color: "var(--ds-fg-muted)",
+                  marginTop: 2,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}>
+                  {job.company}
+                  {job.salary_text && (
+                    <>
+                      <span style={{ color: "var(--ds-fg-faint)", margin: "0 6px" }}>·</span>
+                      <span className="ds-mono">{job.salary_text}</span>
+                    </>
+                  )}
+                </div>
+              </div>
+              <span className="ds-mono ds-dim" style={{ fontSize: 11 }}>
+                {timeAgo(job.discovered_at)}
+              </span>
+            </Link>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   DenseRow — the REST OF INBOX list. Uses the ring score
+   variant per the user's request (still respects the
+   scoreVariant toggle if they switch it).
+   ============================================================ */
+function DenseRow({
+  job,
+  density,
+  scoreVariant,
+  onShortlist,
+  onArchive,
+}: {
+  job: any;
+  density: "comfortable" | "dense";
+  scoreVariant: ScoreVariant;
+  onShortlist: (job: any) => void;
+  onArchive: (job: any) => void;
+}) {
+  return (
+    <Link href={`/dashboard/jobs/${job.id}`} className="ds-row">
+      <Score score={job.score?.overall_fit ?? null} variant={scoreVariant} />
+
+      <div style={{ minWidth: 0 }}>
+        <div style={{
+          fontWeight: 600,
+          fontSize: density === "dense" ? 13.5 : 14.5,
+          letterSpacing: "-0.01em",
+          color: "var(--ds-fg)",
+          lineHeight: 1.25,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}>
+          {job.title}
+        </div>
+        <div style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          marginTop: density === "dense" ? 1 : 3,
+          flexWrap: "wrap",
+          fontSize: density === "dense" ? 12 : 12.5,
+          color: "var(--ds-fg-muted)",
+        }}>
+          <span style={{ color: "var(--ds-fg)", fontWeight: 500 }}>{job.company}</span>
+          {job.location && (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+              <MapPin className="h-3 w-3 opacity-70" />
+              {job.location}
+            </span>
+          )}
+          {job.salary_text && (
+            <span className="ds-mono" style={{ color: "var(--ds-fg)" }}>{job.salary_text}</span>
+          )}
+          <span className="ds-mono ds-dim" style={{ marginLeft: "auto" }}>
+            {timeAgo(job.discovered_at)}
+          </span>
+        </div>
+      </div>
+
+      <div className="flex items-center" onClick={(e) => e.preventDefault()}>
+        <button
+          type="button"
+          aria-label="Shortlist"
+          title="Shortlist"
+          className="ds-tap44"
+          onClick={(e) => {
+            e.preventDefault();
+            onShortlist(job);
+          }}
+          style={{
+            width: 36, height: 36,
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+            color: "var(--ds-fg-muted)",
+            borderRadius: "var(--ds-r-pill)",
+            background: "transparent",
+            transition: "all 120ms ease",
+          }}
+        >
+          <Star className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          aria-label="Archive"
+          title="Archive"
+          className="ds-tap44"
+          onClick={(e) => {
+            e.preventDefault();
+            onArchive(job);
+          }}
+          style={{
+            width: 36, height: 36,
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+            color: "var(--ds-fg-muted)",
+            borderRadius: "var(--ds-r-pill)",
+            background: "transparent",
+            transition: "all 120ms ease",
+          }}
+        >
+          <Archive className="h-4 w-4" />
+        </button>
+      </div>
+    </Link>
   );
 }
