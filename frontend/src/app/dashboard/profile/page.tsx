@@ -33,6 +33,7 @@ import {
   useSampleApplications, useCreateSampleApplication, useDeleteSampleApplication,
 } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/toast";
+import { COUNTRY_OPTIONS } from "@/lib/countries";
 
 type SetupStep = {
   id: string;
@@ -118,46 +119,8 @@ function SetupChecklist({
   );
 }
 
-// Curated ISO 3166-1 alpha-2 list — the regions a Nigeria-based AI/PM
-// candidate is most likely to target. Ordered by 'sponsorship-friendly
-// tech market' priority rather than alphabetical, so the most useful
-// picks (NL/DE/UK/IE/US) sit at the top of the dropdown.
-const COUNTRY_OPTIONS: { code: string; name: string; group: string }[] = [
-  // High-priority sponsorship destinations
-  { code: "NL", name: "Netherlands", group: "Europe" },
-  { code: "DE", name: "Germany", group: "Europe" },
-  { code: "IE", name: "Ireland", group: "Europe" },
-  { code: "GB", name: "United Kingdom", group: "Europe" },
-  { code: "US", name: "United States", group: "Americas" },
-  { code: "CA", name: "Canada", group: "Americas" },
-  // Rest of Europe
-  { code: "FR", name: "France", group: "Europe" },
-  { code: "ES", name: "Spain", group: "Europe" },
-  { code: "PT", name: "Portugal", group: "Europe" },
-  { code: "IT", name: "Italy", group: "Europe" },
-  { code: "BE", name: "Belgium", group: "Europe" },
-  { code: "LU", name: "Luxembourg", group: "Europe" },
-  { code: "AT", name: "Austria", group: "Europe" },
-  { code: "CH", name: "Switzerland", group: "Europe" },
-  { code: "SE", name: "Sweden", group: "Europe" },
-  { code: "DK", name: "Denmark", group: "Europe" },
-  { code: "NO", name: "Norway", group: "Europe" },
-  { code: "FI", name: "Finland", group: "Europe" },
-  { code: "IS", name: "Iceland", group: "Europe" },
-  { code: "PL", name: "Poland", group: "Europe" },
-  { code: "CZ", name: "Czech Republic", group: "Europe" },
-  { code: "EE", name: "Estonia", group: "Europe" },
-  { code: "LV", name: "Latvia", group: "Europe" },
-  { code: "LT", name: "Lithuania", group: "Europe" },
-  // Asia-Pacific
-  { code: "AU", name: "Australia", group: "Asia-Pacific" },
-  { code: "NZ", name: "New Zealand", group: "Asia-Pacific" },
-  { code: "SG", name: "Singapore", group: "Asia-Pacific" },
-  { code: "JP", name: "Japan", group: "Asia-Pacific" },
-  { code: "AE", name: "United Arab Emirates", group: "Asia-Pacific" },
-  // Remote-anywhere proxy
-  { code: "WW", name: "Worldwide / Remote", group: "Other" },
-];
+// COUNTRY_OPTIONS imported from @/lib/countries (top of file) — shared
+// with the onboarding flow so coverage labels stay in sync.
 
 
 export default function ProfilePage() {

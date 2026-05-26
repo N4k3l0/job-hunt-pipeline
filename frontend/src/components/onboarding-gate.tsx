@@ -1,39 +1,59 @@
 "use client";
 
 /**
- * Gates the dashboard behind two prerequisites:
+ * Gates the dashboard behind three prerequisites:
  *
  *   1. The user has set their name (currently empty on Supabase invite).
  *   2. The user has uploaded at least one resume.
+ *   3. The user has picked at least one preferred country (or "Worldwide").
  *
- * Without either of those, every downstream feature is degraded — scoring
+ * Without any of those, every downstream feature is degraded — scoring
  * has no profile to match against, tailoring has nothing to draw from,
- * cover-letter drafts can't address the candidate. So instead of letting
+ * the country filter has nothing to filter against. So instead of letting
  * a new invitee land on an empty inbox and wonder why, we render a
- * step-by-step setup view until both are done. Once they are, the gate
- * gets out of the way and renders the dashboard normally.
+ * step-by-step setup view until all three are done. Once they are, the
+ * gate gets out of the way and renders the dashboard normally.
  *
  * Pure client-side check using the existing TanStack Query hooks — no
  * backend changes needed. The gate auto-unblocks the moment the queries
- * refetch after the name save / resume upload mutations.
+ * refetch after each save.
  */
 
 import { useState } from "react";
-import { useCurrentUser, useUpdateMe, useResumes, useUploadResume } from "@/hooks/use-api";
+import {
+  useCurrentUser,
+  useUpdateMe,
+  useResumes,
+  useUploadResume,
+  useProfile,
+  useUpdateProfile,
+  useCreateProfile,
+} from "@/hooks/use-api";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, CheckCircle2, FileUp, User as UserIcon, ArrowRight } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Loader2, CheckCircle2, FileUp, User as UserIcon, ArrowRight, Globe, Plus, X,
+} from "lucide-react";
 import { useToast } from "@/components/ui/toast";
+import { COUNTRY_OPTIONS } from "@/lib/countries";
 
 export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const { data: user, isLoading: userLoading } = useCurrentUser();
   const { data: resumes, isLoading: resumesLoading } = useResumes();
+  const { data: profile, isLoading: profileLoading } = useProfile();
 
   // Treat loading as 'don't render yet' rather than 'gate is open' — would
   // otherwise flash the children for a frame before swapping back.
-  if (userLoading || resumesLoading) {
+  if (userLoading || resumesLoading || profileLoading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
         <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -43,34 +63,53 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
 
   const hasName = !!(user?.name && user.name.trim().length > 0);
   const hasResume = (resumes?.length ?? 0) > 0;
+  const hasCountries = (profile?.preferred_countries?.length ?? 0) > 0;
 
-  if (hasName && hasResume) {
+  if (hasName && hasResume && hasCountries) {
     return <>{children}</>;
   }
 
-  return <OnboardingFlow hasName={hasName} hasResume={hasResume} existingName={user?.name ?? ""} />;
+  return (
+    <OnboardingFlow
+      hasName={hasName}
+      hasResume={hasResume}
+      hasCountries={hasCountries}
+      existingName={user?.name ?? ""}
+      existingCountries={profile?.preferred_countries ?? []}
+      hasProfile={!!profile}
+    />
+  );
 }
 
 
 function OnboardingFlow({
   hasName,
   hasResume,
+  hasCountries,
   existingName,
+  existingCountries,
+  hasProfile,
 }: {
   hasName: boolean;
   hasResume: boolean;
+  hasCountries: boolean;
   existingName: string;
+  existingCountries: string[];
+  hasProfile: boolean;
 }) {
   const toast = useToast();
   const updateMe = useUpdateMe();
   const uploadResume = useUploadResume();
+  const updateProfile = useUpdateProfile();
+  const createProfile = useCreateProfile();
 
   const [name, setName] = useState(existingName);
   const [file, setFile] = useState<File | null>(null);
+  const [countries, setCountries] = useState<string[]>(existingCountries);
 
-  // Active step: name first, then resume. Once name lands, the panel
-  // shifts focus to resume without a page transition.
-  const activeStep: 1 | 2 = !hasName ? 1 : 2;
+  // Active step progression: name → resume → countries. Once a step
+  // lands the panel shifts focus to the next without a page transition.
+  const activeStep: 1 | 2 | 3 = !hasName ? 1 : !hasResume ? 2 : 3;
 
   async function saveName() {
     const trimmed = name.trim();
@@ -97,11 +136,41 @@ function OnboardingFlow({
       const versionName = file.name.replace(/\.[^.]+$/, "");
       await uploadResume.mutateAsync({ file, versionName, tags: "" });
       toast.success("Resume uploaded", {
-        description: "Reading it now — your inbox will populate in about a minute.",
+        description: "Reading it now — pick your preferred countries to finish.",
       });
     } catch (e: any) {
       toast.error("Upload failed", { description: e?.message || "Try a different file." });
     }
+  }
+
+  async function saveCountries() {
+    if (countries.length === 0) {
+      toast.error("Pick at least one country", {
+        description: "Or 'Worldwide / Remote' if you don't care about location.",
+      });
+      return;
+    }
+    try {
+      const payload = { preferred_countries: countries };
+      if (hasProfile) {
+        await updateProfile.mutateAsync(payload);
+      } else {
+        // First-time setup — the resume parser creates the profile row,
+        // but on very fresh accounts the row may not exist yet.
+        await createProfile.mutateAsync(payload);
+      }
+      toast.success("All set", {
+        description: "Loading your inbox.",
+      });
+    } catch (e: any) {
+      toast.error("Couldn't save", { description: e?.message || "Try again in a moment." });
+    }
+  }
+
+  function toggleCountry(code: string) {
+    setCountries((prev) =>
+      prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code]
+    );
   }
 
   return (
@@ -117,6 +186,8 @@ function OnboardingFlow({
         <StepDot n={1} active={activeStep === 1} done={hasName} />
         <div className="h-px w-12 bg-white/[0.08]" />
         <StepDot n={2} active={activeStep === 2} done={hasResume} />
+        <div className="h-px w-12 bg-white/[0.08]" />
+        <StepDot n={3} active={activeStep === 3} done={hasCountries} />
       </div>
 
       <Card>
@@ -189,6 +260,118 @@ function OnboardingFlow({
               <><Loader2 className="h-4 w-4 animate-spin" /> Uploading…</>
             ) : (
               <>Upload &amp; continue <ArrowRight className="h-4 w-4" /></>
+            )}
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Step 3 — Preferred countries. Greyed until resume lands. */}
+      <Card className={hasResume ? "" : "opacity-60 pointer-events-none"}>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            {hasCountries ? (
+              <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+            ) : (
+              <Globe className="h-5 w-5" />
+            )}
+            Where do you want jobs from?
+          </CardTitle>
+          <CardDescription>
+            Pick one or more. Jobs from anywhere else get filtered out of
+            your inbox. Pick <span className="text-foreground">Worldwide / Remote</span> if
+            you don&apos;t mind the country as long as the role is remote.
+            You can change this anytime under Profile → Preferences.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex flex-wrap gap-2 min-h-[34px]">
+            {countries.map((code) => {
+              const meta = COUNTRY_OPTIONS.find((o) => o.code === code);
+              return (
+                <Badge key={code} variant="outline" className="gap-1 pr-1.5 text-sm py-1">
+                  {meta ? meta.name : code}
+                  <button
+                    onClick={() => toggleCountry(code)}
+                    className="ml-1 hover:text-destructive"
+                    aria-label={`Remove ${meta?.name ?? code}`}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </Badge>
+              );
+            })}
+            {countries.length === 0 && (
+              <span className="text-sm text-muted-foreground self-center">
+                No countries selected yet
+              </span>
+            )}
+          </div>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button variant="outline" size="sm" disabled={!hasResume}>
+                  <Plus className="h-4 w-4" />
+                  Add country
+                </Button>
+              }
+            />
+            <DropdownMenuContent align="start" className="max-h-[340px] overflow-y-auto w-[280px]">
+              {Object.entries(
+                COUNTRY_OPTIONS.reduce<Record<string, typeof COUNTRY_OPTIONS>>((acc, c) => {
+                  (acc[c.group] ??= []).push(c);
+                  return acc;
+                }, {})
+              ).map(([group, items]) => (
+                <div key={group} className="px-1">
+                  <div className="px-2 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                    {group}
+                  </div>
+                  {items.map((c) => {
+                    const selected = countries.includes(c.code);
+                    return (
+                      <DropdownMenuItem
+                        key={c.code}
+                        onClick={() => toggleCountry(c.code)}
+                        className="flex items-center justify-between gap-2"
+                      >
+                        <span className="flex items-center gap-2">
+                          {selected && <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />}
+                          {c.name}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground">
+                          {c.coverage === "strong" ? "well covered" : "remote-only"}
+                        </span>
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </div>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            <span className="text-foreground">well covered</span> means we
+            pull jobs directly from sources serving that country.
+            {" "}<span className="text-foreground">remote-only</span> means
+            we&apos;ll surface jobs that are remote-eligible and mention
+            the country — local-only listings may be sparse. You can paste
+            any local job URL on the Import page to add it manually.
+          </p>
+
+          <Button
+            onClick={saveCountries}
+            disabled={
+              !hasResume ||
+              updateProfile.isPending ||
+              createProfile.isPending ||
+              countries.length === 0
+            }
+          >
+            {(updateProfile.isPending || createProfile.isPending) ? (
+              <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</>
+            ) : (
+              <>Save &amp; open inbox <ArrowRight className="h-4 w-4" /></>
             )}
           </Button>
         </CardContent>

@@ -86,6 +86,32 @@ async def list_jobs(
     profile_remote_pref = profile_row[3] if profile_row else None
     profile_pref_countries = profile_row[4] if profile_row else None
 
+    # Fallback: if THIS user hasn't set preferred_countries, restrict the
+    # inbox to the union of countries other users have set ("the system's
+    # covered countries"). Keeps the inbox useful without dumping the full
+    # global catalogue on a fresh account. Skipped entirely if everyone is
+    # un-preferenced (early days of the system).
+    if not profile_pref_countries:
+        covered = await db.execute(
+            select(CandidateProfile.preferred_countries).where(
+                CandidateProfile.user_id != user_id,
+                CandidateProfile.preferred_countries.isnot(None),
+            )
+        )
+        covered_set: set[str] = set()
+        for (pref,) in covered:
+            for raw in (pref or []):
+                code = (raw or "").strip().upper()
+                if len(code) == 2 and code.isalpha():
+                    covered_set.add(code)
+        if covered_set:
+            profile_pref_countries = sorted(covered_set)
+            logger.info(
+                "User %s has no preferred_countries — falling back to system "
+                "coverage pool: %s",
+                user_id, profile_pref_countries,
+            )
+
     # Skills also feed the title filter, so a 'Python Developer' role
     # surfaces for someone whose target_roles say AI Engineer but whose
     # skills include Python.
