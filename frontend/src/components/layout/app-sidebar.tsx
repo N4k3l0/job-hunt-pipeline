@@ -248,33 +248,28 @@ function UserPill({
         </div>
       </div>
       <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            aria-label="Settings"
-            className="inline-flex items-center justify-center"
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: 6,
-              color: "var(--fg-muted)",
-              background: "transparent",
-              border: 0,
-              cursor: "pointer",
-              flexShrink: 0,
-              transition: "color 120ms ease, background 120ms ease",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "var(--bg-hover)";
-              e.currentTarget.style.color = "var(--fg)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "transparent";
-              e.currentTarget.style.color = "var(--fg-muted)";
-            }}
-          >
-            <Settings size={14} />
-          </button>
+        <DropdownMenuTrigger
+          // Base UI uses `render` (not asChild) to swap in a custom element.
+          render={
+            <button
+              type="button"
+              aria-label="Settings"
+              className="settings-cog inline-flex items-center justify-center"
+              style={{
+                width: 28,
+                height: 28,
+                borderRadius: 6,
+                color: "var(--fg-muted)",
+                background: "transparent",
+                border: 0,
+                cursor: "pointer",
+                flexShrink: 0,
+                transition: "color 120ms ease, background 120ms ease",
+              }}
+            />
+          }
+        >
+          <Settings size={14} />
         </DropdownMenuTrigger>
         <DropdownMenuContent side="top" align="end" className="w-56">
           <FeedbackDialog
@@ -286,11 +281,9 @@ function UserPill({
             }
           />
           {user?.role === "admin" && (
-            <DropdownMenuItem asChild>
-              <Link href="/dashboard/admin">
-                <Settings className="mr-2 h-4 w-4" />
-                Admin
-              </Link>
+            <DropdownMenuItem render={<Link href="/dashboard/admin" />}>
+              <Settings className="mr-2 h-4 w-4" />
+              Admin
             </DropdownMenuItem>
           )}
           <DropdownMenuSeparator />
@@ -300,6 +293,9 @@ function UserPill({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      <style jsx>{`
+        .settings-cog:hover { background: var(--bg-hover) !important; color: var(--fg) !important; }
+      `}</style>
     </div>
   );
 }
