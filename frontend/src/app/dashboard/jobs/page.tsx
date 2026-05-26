@@ -616,9 +616,19 @@ function TopMatchCard({
             e.stopPropagation();
             onShortlist(job);
           }}
+          style={
+            job.status === "shortlisted"
+              ? { color: "var(--ds-accent)", borderColor: "var(--ds-accent-edge)" }
+              : undefined
+          }
+          aria-pressed={job.status === "shortlisted"}
         >
-          <Star className="h-3.5 w-3.5" />
-          Shortlist
+          <Star
+            className="h-3.5 w-3.5"
+            fill={job.status === "shortlisted" ? "var(--ds-accent)" : "none"}
+            strokeWidth={2}
+          />
+          {job.status === "shortlisted" ? "Shortlisted" : "Shortlist"}
         </button>
       </div>
     </Link>
@@ -770,9 +780,10 @@ function DenseRow({
       <div className="flex items-center" onClick={(e) => e.preventDefault()}>
         <button
           type="button"
-          aria-label="Shortlist"
-          title="Shortlist"
+          aria-label={job.status === "shortlisted" ? "Shortlisted" : "Shortlist"}
+          title={job.status === "shortlisted" ? "Shortlisted" : "Shortlist"}
           className="ds-tap44"
+          aria-pressed={job.status === "shortlisted"}
           onClick={(e) => {
             e.preventDefault();
             onShortlist(job);
@@ -780,13 +791,17 @@ function DenseRow({
           style={{
             width: 36, height: 36,
             display: "inline-flex", alignItems: "center", justifyContent: "center",
-            color: "var(--ds-fg-muted)",
+            color: job.status === "shortlisted" ? "var(--ds-accent)" : "var(--ds-fg-muted)",
             borderRadius: "var(--ds-r-pill)",
             background: "transparent",
             transition: "all 120ms ease",
           }}
         >
-          <Star className="h-4 w-4" />
+          <Star
+            className="h-4 w-4"
+            fill={job.status === "shortlisted" ? "var(--ds-accent)" : "none"}
+            strokeWidth={2}
+          />
         </button>
         <button
           type="button"
