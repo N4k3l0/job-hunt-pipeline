@@ -14,6 +14,12 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
+} from "@/components/ui/tabs";
+import {
   Users,
   Mail,
   Shield,
@@ -247,87 +253,59 @@ export default function AdminPage() {
         </CardContent>
       </Card>
 
-      {/* Run Discovery Now */}
+      {/* All operational tooling consolidated into one tabbed panel —
+          previously 4 cards stacked on the page. Same components, just
+          shown one at a time so the page reads as
+          [Invite User · Maintenance · Users] instead of a wall of cards. */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <RefreshCw className="h-5 w-5 text-emerald-400" />
-            Run discovery now
+            <Sparkles className="h-5 w-5 text-amber-400" />
+            Maintenance &amp; diagnostics
           </CardTitle>
           <CardDescription>
-            Pulls fresh jobs from every source and re-scores everyone&apos;s
-            inbox. Same code path as the 06:00 UTC cron, but on-demand.
-            Takes ~30–45 s.
+            Run discovery on demand, top up embeddings, diagnose the
+            country filter, or clean out stale jobs. Each tab is the
+            same tooling you had before — just collapsed so the page
+            doesn&apos;t scroll forever.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-wrap items-center gap-3">
-            <Button
-              onClick={() => runDiscovery.mutate()}
-              disabled={runDiscovery.isPending}
-            >
-              {runDiscovery.isPending ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Running…
-                </>
-              ) : (
-                <>
-                  <RefreshCw className="h-4 w-4" />
-                  Run now
-                </>
-              )}
-            </Button>
-            {runDiscovery.isSuccess && runDiscovery.data && (
-              <span className="flex items-center gap-1.5 text-sm text-emerald-400">
-                <CheckCircle2 className="h-4 w-4" /> Done
-              </span>
-            )}
-            {runDiscovery.isError && (
-              <span className="flex items-center gap-1.5 text-sm text-destructive">
-                <AlertCircle className="h-4 w-4" /> Failed
-              </span>
-            )}
-          </div>
-          {runDiscovery.isSuccess && runDiscovery.data && (
-            <div className="mt-4 rounded-lg border border-white/[0.06] bg-white/[0.015] p-3 text-xs space-y-2">
-              <div>
-                <p className="font-medium text-muted-foreground mb-1">Sources</p>
-                <ul className="space-y-0.5 font-mono">
-                  {Object.entries(runDiscovery.data.results).map(([name, status]) => (
-                    <li key={name} className="flex justify-between gap-3">
-                      <span>{name}</span>
-                      <span className={status.startsWith("ok") ? "text-emerald-400" : "text-amber-400"}>
-                        {status}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div>
-                <p className="font-medium text-muted-foreground mb-1">Scoring</p>
-                <ul className="space-y-0.5 font-mono">
-                  {Object.entries(runDiscovery.data.scoring).map(([uid, status]) => (
-                    <li key={uid} className="flex justify-between gap-3">
-                      <span className="truncate">{uid.slice(0, 8)}…</span>
-                      <span className={status.startsWith("ok") ? "text-emerald-400" : "text-amber-400"}>
-                        {status}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          )}
+          <Tabs defaultValue="discovery">
+            <TabsList className="mb-4">
+              <TabsTrigger value="discovery">
+                <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                Discovery
+              </TabsTrigger>
+              <TabsTrigger value="embeddings">
+                <Sparkles className="h-3.5 w-3.5 mr-1.5" />
+                Embeddings
+              </TabsTrigger>
+              <TabsTrigger value="diagnostics">
+                <AlertCircle className="h-3.5 w-3.5 mr-1.5" />
+                Diagnostics
+              </TabsTrigger>
+              <TabsTrigger value="cleanup">
+                <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                Cleanup
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="discovery">
+              <RunDiscoveryPanel />
+            </TabsContent>
+            <TabsContent value="embeddings">
+              <EmbeddingsBackfillCard />
+            </TabsContent>
+            <TabsContent value="diagnostics">
+              <CountryFilterDebugCard />
+            </TabsContent>
+            <TabsContent value="cleanup">
+              <StaleJobsCard />
+            </TabsContent>
+          </Tabs>
         </CardContent>
       </Card>
-
-      {/* Stale Jobs Cleanup */}
-      <EmbeddingsBackfillCard />
-
-      <CountryFilterDebugCard />
-
-      <StaleJobsCard />
 
       {/* Users List */}
       <Card>
@@ -389,6 +367,78 @@ export default function AdminPage() {
  *
  * Re-runnable. Default cutoff = 30 days; user can change with the input.
  */
+function RunDiscoveryPanel() {
+  const runDiscovery = useRunDiscovery();
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-muted-foreground leading-relaxed">
+        Pulls fresh jobs from every active source and re-scores everyone&apos;s
+        inbox. Same code path as the 06:00 UTC cron, but on-demand.
+        Takes ~30–45 s.
+      </p>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button
+          onClick={() => runDiscovery.mutate()}
+          disabled={runDiscovery.isPending}
+        >
+          {runDiscovery.isPending ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Running…
+            </>
+          ) : (
+            <>
+              <RefreshCw className="h-4 w-4" />
+              Run now
+            </>
+          )}
+        </Button>
+        {runDiscovery.isSuccess && runDiscovery.data && (
+          <span className="flex items-center gap-1.5 text-sm text-emerald-400">
+            <CheckCircle2 className="h-4 w-4" /> Done
+          </span>
+        )}
+        {runDiscovery.isError && (
+          <span className="flex items-center gap-1.5 text-sm text-destructive">
+            <AlertCircle className="h-4 w-4" /> Failed
+          </span>
+        )}
+      </div>
+      {runDiscovery.isSuccess && runDiscovery.data && (
+        <div className="rounded-lg border border-white/[0.06] bg-white/[0.015] p-3 text-xs space-y-2">
+          <div>
+            <p className="font-medium text-muted-foreground mb-1">Sources</p>
+            <ul className="space-y-0.5 font-mono">
+              {Object.entries(runDiscovery.data.results).map(([name, status]) => (
+                <li key={name} className="flex justify-between gap-3">
+                  <span>{name}</span>
+                  <span className={status.startsWith("ok") ? "text-emerald-400" : "text-amber-400"}>
+                    {status}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div>
+            <p className="font-medium text-muted-foreground mb-1">Scoring</p>
+            <ul className="space-y-0.5 font-mono">
+              {Object.entries(runDiscovery.data.scoring).map(([uid, status]) => (
+                <li key={uid} className="flex justify-between gap-3">
+                  <span className="truncate">{uid.slice(0, 8)}…</span>
+                  <span className={status.startsWith("ok") ? "text-emerald-400" : "text-amber-400"}>
+                    {status}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 function StaleJobsCard() {
   const [days, setDays] = useState(30);
   const preview = useStaleJobsPreview(days);
@@ -431,21 +481,14 @@ function StaleJobsCard() {
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Trash2 className="h-5 w-5 text-amber-400" />
-          Clean up stale jobs
-        </CardTitle>
-        <CardDescription>
-          Two modes: <span className="text-foreground">Verify URLs</span>{" "}
-          actually probes each posting and only marks confirmed-dead ones
-          (404 / 410). <span className="text-foreground">Quick clean</span>{" "}
-          uses a time-based cutoff — faster but less precise. Either way,
-          jobs anyone has approved or applied to are never touched.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-6">
+    <div className="space-y-6">
+      <p className="text-sm text-muted-foreground leading-relaxed">
+        Two modes: <span className="text-foreground">Verify URLs</span>{" "}
+        actually probes each posting and only marks confirmed-dead ones
+        (404 / 410). <span className="text-foreground">Quick clean</span>{" "}
+        uses a time-based cutoff — faster but less precise. Either way,
+        jobs anyone has approved or applied to are never touched.
+      </p>
 
         {/* ── Verify URLs ────────────────────────────── */}
         <div className="space-y-3 rounded-lg border border-emerald-500/15 bg-emerald-500/[0.02] p-4">
@@ -647,8 +690,7 @@ function StaleJobsCard() {
           </div>
         </div>
 
-      </CardContent>
-    </Card>
+    </div>
   );
 }
 
@@ -701,21 +743,16 @@ function EmbeddingsBackfillCard() {
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Sparkles className="h-5 w-5 text-amber-400" />
-          Backfill semantic embeddings
-        </CardTitle>
-        <CardDescription>
-          One-shot setup for the new semantic scorer. Embeds every job in
-          your catalogue that doesn&apos;t yet have a vector — needed once
-          after the database migration runs. New jobs ingested after this
-          get embedded inline during discovery; this button only matters
-          for the historical catalogue. ~30 s for a 1 700-job catalogue.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
+    <div className="space-y-3">
+      <p className="text-sm text-muted-foreground leading-relaxed">
+        One-shot setup for the semantic scorer. Embeds every job in your
+        catalogue that doesn&apos;t yet have a vector — needed once after
+        the migration runs. New jobs ingested after this get embedded
+        inline during discovery; this button only matters for the
+        historical catalogue. Test Voyage first if Voyage is freshly
+        configured. Fix orphan descriptions if you bulk-imported before
+        the heuristic-parser fallback shipped.
+      </p>
         <div className="flex flex-wrap items-center gap-3">
           <Button onClick={runBackfill} disabled={running}>
             {running ? (
@@ -777,8 +814,7 @@ function EmbeddingsBackfillCard() {
 
         <VoyageTestButton />
         <RawDescriptionFixButton />
-      </CardContent>
-    </Card>
+    </div>
   );
 }
 
@@ -893,19 +929,12 @@ function CountryFilterDebugCard() {
   const kept = data?.rows.filter(r => r.should_be_visible) ?? [];
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Sparkles className="h-5 w-5" />
-          Country filter — diagnostic
-        </CardTitle>
-        <CardDescription>
-          Dumps your preferred_countries + the last 30 visible jobs with per-row
-          filter trace. Use when the inbox keeps showing off-target jobs after
-          you saved preferences.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
+    <div className="space-y-3">
+      <p className="text-sm text-muted-foreground leading-relaxed">
+        Dumps your preferred_countries + the last 30 visible jobs with
+        per-row filter trace. Use when the inbox keeps showing off-target
+        jobs after you saved preferences.
+      </p>
         <Button onClick={run} disabled={loading} size="sm">
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
           Run diagnostic
@@ -998,8 +1027,7 @@ function CountryFilterDebugCard() {
             )}
           </div>
         )}
-      </CardContent>
-    </Card>
+    </div>
   );
 }
 
