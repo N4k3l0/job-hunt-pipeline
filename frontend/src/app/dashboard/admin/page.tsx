@@ -355,7 +355,201 @@ export default function AdminPage() {
           )}
         </CardContent>
       </Card>
+
+      <SourceHealthCard />
     </div>
+  );
+}
+
+
+/* ============================================================
+   SourceHealthCard — one-click diagnostic that hits the backend
+   probe endpoint and renders per-source status. Used when a
+   scraper appears to be silently producing zero jobs and we
+   want to know WHY without checking Vercel logs.
+   ============================================================ */
+type SourceProbe = {
+  source: string;
+  status: "ok" | "empty" | "error" | "timeout" | "skipped";
+  count: number;
+  elapsed_s: number;
+  sample_title?: string | null;
+  reason?: string;
+  error?: string;
+};
+
+function SourceHealthCard() {
+  const [probing, setProbing] = useState(false);
+  const [results, setResults] = useState<SourceProbe[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const run = async () => {
+    setProbing(true);
+    setErr(null);
+    try {
+      const data = await api.get<{ sources: SourceProbe[] }>(
+        "/api/v1/auth/admin/debug/source-health",
+      );
+      // Sort so the broken ones (anything not 'ok') float to the top.
+      const sorted = [...(data.sources || [])].sort((a, b) => {
+        const order = { error: 0, timeout: 1, empty: 2, skipped: 3, ok: 4 } as Record<string, number>;
+        return (order[a.status] ?? 9) - (order[b.status] ?? 9);
+      });
+      setResults(sorted);
+    } catch (e: any) {
+      setErr(e?.message || "Probe failed");
+    } finally {
+      setProbing(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Sparkles className="h-4 w-4" />
+          Source health
+        </CardTitle>
+        <CardDescription>
+          Live-fires every discovery scraper with a small probe (max 2 detail
+          fetches each) and reports what came back. Use when a source has
+          stopped producing jobs to tell apart "scraper returns zero" vs
+          "scraper crashes" vs "env var missing."
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex items-center gap-2">
+          <Button onClick={run} disabled={probing}>
+            {probing ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Probing all sources…
+              </>
+            ) : (
+              <>
+                <Sparkles className="h-4 w-4" />
+                {results ? "Re-run probe" : "Run source health check"}
+              </>
+            )}
+          </Button>
+          {results && (
+            <span className="text-xs text-muted-foreground">
+              Last run hit {results.length} sources.
+              {" "}Broken first.
+            </span>
+          )}
+        </div>
+
+        {err && (
+          <p className="text-sm" style={{ color: "#ef4444" }}>
+            {err}
+          </p>
+        )}
+
+        {results && results.length > 0 && (
+          <div
+            style={{
+              border: "1px solid var(--ds-line)",
+              borderRadius: 8,
+              overflow: "hidden",
+            }}
+          >
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: "var(--ds-bg-elev-1)" }}>
+                  <th style={{ textAlign: "left", padding: "8px 12px", fontWeight: 500, color: "var(--ds-fg-muted)", borderBottom: "1px solid var(--ds-line)" }}>Source</th>
+                  <th style={{ textAlign: "left", padding: "8px 12px", fontWeight: 500, color: "var(--ds-fg-muted)", borderBottom: "1px solid var(--ds-line)" }}>Status</th>
+                  <th style={{ textAlign: "right", padding: "8px 12px", fontWeight: 500, color: "var(--ds-fg-muted)", borderBottom: "1px solid var(--ds-line)" }}>Count</th>
+                  <th style={{ textAlign: "right", padding: "8px 12px", fontWeight: 500, color: "var(--ds-fg-muted)", borderBottom: "1px solid var(--ds-line)" }}>Elapsed</th>
+                  <th style={{ textAlign: "left", padding: "8px 12px", fontWeight: 500, color: "var(--ds-fg-muted)", borderBottom: "1px solid var(--ds-line)" }}>Detail</th>
+                </tr>
+              </thead>
+              <tbody>
+                {results.map((r) => (
+                  <SourceHealthRow key={r.source} probe={r} />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function SourceHealthRow({ probe }: { probe: SourceProbe }) {
+  const dotColor =
+    probe.status === "ok" ? "var(--ds-accent)"
+    : probe.status === "empty" ? "var(--ds-fg-dim)"
+    : probe.status === "skipped" ? "var(--ds-fg-faint)"
+    : "#ef4444";
+  const detail =
+    probe.error ? probe.error
+    : probe.reason ? probe.reason
+    : probe.sample_title ? `"${probe.sample_title}"`
+    : probe.status === "empty" ? "No jobs returned"
+    : "—";
+  return (
+    <tr style={{ borderTop: "1px solid var(--ds-line-faint)" }}>
+      <td style={{ padding: "10px 12px", fontWeight: 500 }}>
+        {probe.source}
+      </td>
+      <td style={{ padding: "10px 12px" }}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <span
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: "50%",
+              background: dotColor,
+              flexShrink: 0,
+            }}
+          />
+          <span
+            className="font-mono"
+            style={{
+              fontSize: 11,
+              letterSpacing: "0.06em",
+              textTransform: "uppercase",
+              color: dotColor,
+            }}
+          >
+            {probe.status}
+          </span>
+        </span>
+      </td>
+      <td
+        className="font-mono tabular-nums"
+        style={{
+          padding: "10px 12px",
+          textAlign: "right",
+          color: probe.count > 0 ? "var(--ds-fg)" : "var(--ds-fg-dim)",
+        }}
+      >
+        {probe.count}
+      </td>
+      <td
+        className="font-mono tabular-nums"
+        style={{
+          padding: "10px 12px",
+          textAlign: "right",
+          color: "var(--ds-fg-muted)",
+        }}
+      >
+        {probe.elapsed_s.toFixed(1)}s
+      </td>
+      <td
+        style={{
+          padding: "10px 12px",
+          color: "var(--ds-fg-muted)",
+          fontSize: 12,
+          maxWidth: 340,
+          wordBreak: "break-word",
+        }}
+      >
+        {detail}
+      </td>
+    </tr>
   );
 }
 
