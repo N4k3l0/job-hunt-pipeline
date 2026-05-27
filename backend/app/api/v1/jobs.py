@@ -1,6 +1,6 @@
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from uuid import UUID
 
 import httpx
@@ -88,6 +88,10 @@ async def list_jobs(
     sort_by: str = "score",
     status: str | None = None,
     include_applied: bool = False,
+    # Filter chips set this to a short relative window so server-side
+    # filtering works across all pages. Accepts "Nh" (hours) or "Nd"
+    # (days) or "Nw" (weeks). Anything else is ignored gracefully.
+    since: str | None = None,
 ):
     """List jobs in the user's inbox with filters and pagination.
 
@@ -114,6 +118,23 @@ async def list_jobs(
     # in the SQLAlchemy-generated subquery that silently matched every
     # job. The list approach is unambiguous and fast: applied counts
     # are typically <100, well below any IN-list size concern.
+    # Parse the optional `since=` window into a cutoff datetime up front.
+    # Filter chips like "New today" use this so all pages agree.
+    since_cutoff: datetime | None = None
+    if since:
+        try:
+            unit = since[-1].lower()
+            n = int(since[:-1])
+            if unit == "h":
+                since_cutoff = datetime.now(timezone.utc) - timedelta(hours=n)
+            elif unit == "d":
+                since_cutoff = datetime.now(timezone.utc) - timedelta(days=n)
+            elif unit == "w":
+                since_cutoff = datetime.now(timezone.utc) - timedelta(weeks=n)
+        except (ValueError, IndexError):
+            # Malformed value (e.g. "yesterday") — ignore rather than 400.
+            pass
+
     applied_ids_result = await db.execute(
         select(ApplicationTracking.job_id).where(
             ApplicationTracking.user_id == user_id,
@@ -244,8 +265,18 @@ async def list_jobs(
     )
 
     # Apply filters
+    # `country` accepts a single ISO-2 code OR a comma-separated list.
+    # Frontend chips like "Europe" pass NL,DE,FR,IE,... — backend
+    # ANDs that against the user's preferred_countries pool.
+    country_codes: list[str] = []
     if country:
-        query = query.where(Job.country == country.upper())
+        country_codes = [c.strip().upper() for c in country.split(",") if c.strip()]
+    if len(country_codes) == 1:
+        query = query.where(Job.country == country_codes[0])
+    elif len(country_codes) > 1:
+        query = query.where(Job.country.in_(country_codes))
+    if since_cutoff is not None:
+        query = query.where(Job.discovered_at >= since_cutoff)
     if remote_type:
         if remote_type == "unknown":
             query = query.where(Job.remote_type == None)
@@ -324,8 +355,12 @@ async def list_jobs(
         # query and would otherwise be ANDed with the broader preference list.
         preferred_countries=(None if country else profile_pref_countries),
     )
-    if country:
-        count_base = count_base.where(Job.country == country.upper())
+    if len(country_codes) == 1:
+        count_base = count_base.where(Job.country == country_codes[0])
+    elif len(country_codes) > 1:
+        count_base = count_base.where(Job.country.in_(country_codes))
+    if since_cutoff is not None:
+        count_base = count_base.where(Job.discovered_at >= since_cutoff)
     if remote_type:
         if remote_type == "unknown":
             count_base = count_base.where(Job.remote_type == None)

@@ -150,10 +150,23 @@ function SortMenu({ value, onChange }: { value: string; onChange: (v: string) =>
   );
 }
 
+/** Each saved view drives the SERVER query, not a client-side filter.
+ *  That way switching chips actually narrows the full dataset (across
+ *  all pages), not just the 25 rows currently in the React Query cache.
+ *  Only fields relevant to the chip are set; the rest fall through to
+ *  the inbox defaults. */
+type SavedViewParams = {
+  minScore?: number;
+  status?: string;
+  country?: string;
+  remoteOnly?: boolean;
+  since?: string;
+};
+
 type SavedView = {
   id: string;
   label: string;
-  matches: (job: any) => boolean;
+  params: SavedViewParams;
 };
 
 export default function JobsInboxPage() {
@@ -163,7 +176,36 @@ export default function JobsInboxPage() {
   const [sortBy, setSortBy] = useState("score");
   const [activeView, setActiveView] = useState<string | null>(null);
 
+  // ── Saved views (server-side presets) ──────────────────────────────
+  // Each entry's params are merged into the useJobs query so the chip
+  // narrows the ENTIRE inbox, not just the 25 rows currently fetched.
+  // Labels match the Claude Design handoff exactly. Declared BEFORE
+  // useJobs so the spread below can reference viewParams.
+  const savedViews: SavedView[] = useMemo(() => [
+    { id: "top", label: "Top matches (≥80)", params: { minScore: 80 } },
+    { id: "today", label: "New today", params: { since: "24h" } },
+    {
+      id: "remote-us",
+      label: "Remote · US",
+      params: { country: "US", remoteOnly: true },
+    },
+    {
+      id: "europe",
+      label: "Europe",
+      params: { country: Array.from(EUROPE_CODES).join(",") },
+    },
+    { id: "shortlisted", label: "Shortlisted", params: { status: "shortlisted" } },
+  ], []);
+
+  const viewParams: SavedViewParams = useMemo(() => {
+    if (!activeView) return {};
+    return savedViews.find((v) => v.id === activeView)?.params ?? {};
+  }, [activeView, savedViews]);
+
   // ── Data ───────────────────────────────────────────────────────────
+  // viewParams is spread AFTER the defaults so an active chip overrides
+  // them (e.g. "Top matches" pushes minScore from 50 to 80). Page resets
+  // to 1 on chip change via the activeView effect below.
   const { data, isLoading } = useJobs({
     page,
     pageSize: 25,
@@ -171,6 +213,7 @@ export default function JobsInboxPage() {
     remoteType: null,
     sponsorship: false,
     sortBy,
+    ...viewParams,
   });
   const toast = useToast();
   const qc = useQueryClient();
@@ -194,60 +237,20 @@ export default function JobsInboxPage() {
     return `https://www.linkedin.com/jobs/search/?${params.toString()}`;
   }, [profile?.target_roles, profile?.remote_preference]);
 
-  // ── Saved views (client-side presets) ──────────────────────────────
-  // Labels match the Claude Design handoff exactly. "Founding roles"
-  // intentionally omitted per request. To add user-defined chips later,
-  // append to this list.
-  const savedViews: SavedView[] = useMemo(() => [
-    {
-      id: "top",
-      label: "Top matches (≥80)",
-      matches: (j) => (j.score?.overall_fit ?? 0) >= 80,
-    },
-    {
-      id: "today",
-      label: "New today",
-      matches: (j) => {
-        if (!j.discovered_at) return false;
-        const ageHours = (Date.now() - new Date(j.discovered_at).getTime()) / 3600000;
-        return ageHours <= 24;
-      },
-    },
-    {
-      id: "remote-us",
-      label: "Remote · US",
-      matches: (j) =>
-        j.remote_type === "full_remote" && (j.country ?? "").toUpperCase() === "US",
-    },
-    {
-      id: "europe",
-      label: "Europe",
-      matches: (j) => EUROPE_CODES.has((j.country ?? "").toUpperCase()),
-    },
-    {
-      id: "shortlisted",
-      label: "Shortlisted",
-      matches: (j) => j.status === "shortlisted",
-    },
-  ], []);
-
   // ── Filtering pipeline ─────────────────────────────────────────────
+  // Saved-view chips are server-side (see useJobs above), so this only
+  // applies the client-side search box. Search stays client-side because
+  // wiring it to a backend fuzzy query is a separate scope and matching
+  // 25 rows in JS is instant anyway.
   const filtered = useMemo(() => {
-    let out = jobs;
-    if (search) {
-      const s = search.toLowerCase();
-      out = out.filter(
-        (j) =>
-          j.title?.toLowerCase().includes(s) ||
-          j.company?.toLowerCase().includes(s),
-      );
-    }
-    if (activeView) {
-      const view = savedViews.find((v) => v.id === activeView);
-      if (view) out = out.filter(view.matches);
-    }
-    return out;
-  }, [jobs, search, activeView, savedViews]);
+    if (!search) return jobs;
+    const s = search.toLowerCase();
+    return jobs.filter(
+      (j) =>
+        j.title?.toLowerCase().includes(s) ||
+        j.company?.toLowerCase().includes(s),
+    );
+  }, [jobs, search]);
 
   // ── Asymmetric layout split ────────────────────────────────────────
   // Top of the page mirrors the Claude Design prototype:
@@ -413,12 +416,13 @@ export default function JobsInboxPage() {
               />
             </div>
 
-            {/* Saved view chips */}
+            {/* Saved view chips. Each chip change resets page=1 so the
+                user doesn't land on page 5 of an empty filtered set. */}
             <button
               type="button"
               className="inbox-chip"
               data-active={activeView === null ? "true" : "false"}
-              onClick={() => setActiveView(null)}
+              onClick={() => { setActiveView(null); setPage(1); }}
             >
               All
             </button>
@@ -428,7 +432,10 @@ export default function JobsInboxPage() {
                 type="button"
                 className="inbox-chip"
                 data-active={activeView === v.id ? "true" : "false"}
-                onClick={() => setActiveView(activeView === v.id ? null : v.id)}
+                onClick={() => {
+                  setActiveView(activeView === v.id ? null : v.id);
+                  setPage(1);
+                }}
               >
                 {v.label}
               </button>

@@ -413,12 +413,17 @@ export function useJobs(params: {
   page?: number;
   pageSize?: number;
   roleType?: string | null;
+  /** Single ISO-2 code OR comma-separated list (e.g. "US" or "NL,DE,FR"). */
   country?: string | null;
   remoteOnly?: boolean;
   remoteType?: string | null;
   sponsorship?: boolean;
   source?: string | null;
   minScore?: number | null;
+  /** Per-user job status filter (e.g. "shortlisted"). */
+  status?: string | null;
+  /** Recent-window filter as "Nh" / "Nd" / "Nw" (e.g. "24h", "7d"). */
+  since?: string | null;
   sortBy?: string;
 } = {}) {
   const searchParams = new URLSearchParams();
@@ -430,7 +435,9 @@ export function useJobs(params: {
   else if (params.remoteOnly) searchParams.set("remote_only", "true");
   if (params.sponsorship) searchParams.set("sponsorship", "true");
   if (params.source) searchParams.set("source", params.source);
-  if (params.minScore) searchParams.set("min_score", String(params.minScore));
+  if (params.minScore != null) searchParams.set("min_score", String(params.minScore));
+  if (params.status) searchParams.set("status", params.status);
+  if (params.since) searchParams.set("since", params.since);
   if (params.sortBy) searchParams.set("sort_by", params.sortBy);
 
   const qs = searchParams.toString();
