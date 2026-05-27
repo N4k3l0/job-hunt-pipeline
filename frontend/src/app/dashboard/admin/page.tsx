@@ -493,6 +493,7 @@ function TranslateTitlesCard() {
 type TranslateDescResult = {
   inspected: number;
   translated: number;
+  skipped_already_english: number;
   failed: number;
   more_to_do: boolean;
   approx_cost_usd: number;
@@ -553,7 +554,7 @@ function TranslateDescriptionsCard() {
             {running ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Translating 10…
+                Translating 15…
               </>
             ) : done ? (
               <>
@@ -563,7 +564,7 @@ function TranslateDescriptionsCard() {
             ) : (
               <>
                 <Sparkles className="h-4 w-4" />
-                {history.length === 0 ? "Run description backfill" : "Run next 10"}
+                {history.length === 0 ? "Run description backfill" : "Run next 15"}
               </>
             )}
           </Button>
@@ -595,10 +596,11 @@ function TranslateDescriptionsCard() {
           >
             Last batch — inspected <span className="font-mono">{lastResult.inspected}</span>,
             translated <span className="font-mono" style={{ color: "var(--ds-accent)" }}>{lastResult.translated}</span>,
+            already-English <span className="font-mono">{lastResult.skipped_already_english}</span>,
             failed <span className="font-mono">{lastResult.failed}</span>, cost ~$
             <span className="font-mono">{lastResult.approx_cost_usd.toFixed(3)}</span>.
             {lastResult.more_to_do
-              ? " More to go — click \"Run next 10\"."
+              ? " More to go — click \"Run next 15\"."
               : " All non-English descriptions translated."}
           </div>
         )}

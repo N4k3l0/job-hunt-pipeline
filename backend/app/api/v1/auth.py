@@ -682,65 +682,97 @@ async def admin_backfill_description_translations(
     limit: int = 10,
 ):
     """Translate full job descriptions for already-ingested non-English
-    jobs. Heavier than the title backfill — descriptions are 50-200x
-    longer, so each Haiku call takes 4-8s.
+    jobs.
 
-    Translations fire in PARALLEL via asyncio.gather (concurrency=5) so
-    the batch's wall-clock time is roughly one Haiku roundtrip, not
-    `limit` of them — earlier serial loop hit Vercel's 60s timeout
-    around batch=10. With parallelism, limit=15 finishes in ~10s.
+    Handles two cases in one pass so the user doesn't have to remember
+    a title-backfill prerequisite:
 
-    Walks jobs whose language != "en" AND raw_description_en is NULL
-    AND raw_description is not NULL. Re-runnable, idempotent.
+      (a) language is already detected as non-en → translate description
+      (b) language is NULL (legacy row, never went through the title
+          detector) → detect via title first, then translate if non-en
+
+    Jobs already tagged language="en" are skipped without a Haiku call.
+
+    Concurrency=5, batch defaults to 15 — wall-clock ~10s, safely under
+    Vercel's 60s function ceiling.
     """
     import asyncio
     from sqlalchemy import select
     from app.models.job import Job
-    from app.services.parsing.translator import translate_description_to_english
+    from app.services.parsing.translator import (
+        translate_title_to_english,
+        translate_description_to_english,
+    )
 
     translated = 0
     failed = 0
+    skipped_english = 0
+    detected_lang_only = 0
     cost_estimate_usd = 0.0
 
     rows = (await db.execute(
         select(Job).where(
-            Job.language.is_not(None),
-            Job.language != "en",
             Job.raw_description_en.is_(None),
             Job.raw_description.is_not(None),
+            # Either we already know it's non-English, or we haven't
+            # checked yet. Confidently-English rows are excluded.
+            (Job.language.is_(None)) | (Job.language != "en"),
         ).limit(limit)
     )).scalars().all()
     inspected = len(rows)
 
-    # Concurrency cap — Haiku's per-key rate limit handles 5+ concurrent
-    # comfortably, but more risks 429s on a hot account. 5 is the sweet
-    # spot: ~5x speedup over serial, well under Anthropic's limits.
     sem = asyncio.Semaphore(5)
 
-    async def translate_one(job):
+    async def process_one(job):
+        """Returns one of:
+        - "translated": description got translated, row mutated
+        - "english": detected as English, row's language updated to en
+        - "failed": detection or translation failed, row untouched
+        """
         async with sem:
-            return await translate_description_to_english(
+            # Step 1: ensure we know the language. If it's None, ask
+            # the cheap title detector (~$0.00001) before deciding
+            # whether to spend the description-translation budget.
+            if not job.language:
+                title_en, lang = await translate_title_to_english(job.title)
+                if lang is None:
+                    return "failed"
+                job.language = lang
+                # Side effect: also store the title translation if we got
+                # one. Saves a future title-backfill pass on this row.
+                if title_en:
+                    job.title_en = title_en
+
+            # Step 2: only spend on description translation when we're
+            # sure the language isn't English.
+            if job.language == "en":
+                return "english"
+
+            result = await translate_description_to_english(
                 job.raw_description, job.language,
             )
+            if result is None:
+                return "failed"
+            job.raw_description_en = result
+            return "translated"
 
-    results = await asyncio.gather(*(translate_one(j) for j in rows))
+    results = await asyncio.gather(*(process_one(j) for j in rows))
 
-    for job, result in zip(rows, results):
-        if result is None:
+    for outcome in results:
+        if outcome == "translated":
+            translated += 1
+            cost_estimate_usd += 0.0024  # description Haiku call
+        elif outcome == "english":
+            skipped_english += 1
+            cost_estimate_usd += 0.00001  # title detection only
+        elif outcome == "failed":
             failed += 1
-            continue
-        job.raw_description_en = result
-        translated += 1
-        # Rough Haiku token cost: ~$0.80/M input + ~$4/M output. Job
-        # descriptions average ~2KB ≈ 500 tokens each direction.
-        # ~$0.0024 per translation. Multiply for the report.
-        cost_estimate_usd += 0.0024
-
     await db.commit()
 
     return {
         "inspected": inspected,
         "translated": translated,
+        "skipped_already_english": skipped_english,
         "failed": failed,
         "more_to_do": inspected >= limit,
         "approx_cost_usd": round(cost_estimate_usd, 4),
