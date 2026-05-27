@@ -402,6 +402,70 @@ async def cron_backfill_visa(authorization: str | None = Header(None)):
     return {"inspected": inspected, "updated": updated}
 
 
+@router.get("/backfill-title-translations")
+async def cron_backfill_title_translations(
+    authorization: str | None = Header(None),
+    limit: int = 200,
+):
+    """Translate titles for already-ingested non-English jobs.
+
+    Runs the translator against every job whose `title_en` is NULL and
+    whose language wasn't detected as "en". Hard-caps at `limit` per
+    invocation so a single call doesn't blow the Vercel 60s timeout
+    or spam Haiku rate limits. Idempotent — re-running picks up where
+    it left off because translated rows now have title_en non-NULL.
+
+    Cost: ~$0.00001/title × limit. 200 titles = ~$0.002.
+    """
+    _verify_cron(authorization)
+
+    from sqlalchemy import select
+    from app.workers.discovery_tasks import create_worker_session
+    from app.models.job import Job
+    from app.services.parsing.translator import translate_title_to_english
+
+    translated = 0
+    skipped_already_english = 0
+    failed = 0
+    inspected = 0
+
+    async with create_worker_session()() as db:
+        # Target rows that have NOT been translated yet AND haven't been
+        # tagged as English. Both conditions matter: the second skip
+        # avoids re-asking Haiku about titles we already know are English.
+        rows = (await db.execute(
+            select(Job).where(
+                Job.title_en.is_(None),
+                (Job.language.is_(None)) | (Job.language != "en"),
+            ).limit(limit)
+        )).scalars().all()
+
+        for job in rows:
+            inspected += 1
+            title_en, lang = await translate_title_to_english(job.title)
+            if lang is None:
+                failed += 1
+                continue
+            if lang == "en" and not title_en:
+                # Already English — tag so we don't ask again next time.
+                job.language = "en"
+                skipped_already_english += 1
+                continue
+            job.title_en = title_en
+            job.language = lang
+            translated += 1
+
+        await db.commit()
+
+    return {
+        "inspected": inspected,
+        "translated": translated,
+        "skipped_already_english": skipped_already_english,
+        "failed": failed,
+        "more_to_do": inspected >= limit,
+    }
+
+
 @router.get("/rescue-dead-slugs")
 async def cron_rescue_dead_slugs(authorization: str | None = Header(None)):
     """For each entry in curated_companies.json, probe every ATS with the

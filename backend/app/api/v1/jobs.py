@@ -372,6 +372,11 @@ async def list_jobs(
             "id": str(job.id),
             "company": job.company,
             "title": job.title,
+            # English translation of `title` for non-English postings.
+            # NULL on already-English jobs; frontend does
+            # `title_en || title` so the display is always English when
+            # the translator caught it.
+            "title_en": job.title_en,
             "location": job.location,
             "country": job.country,
             "remote_type": job.remote_type,
@@ -522,6 +527,7 @@ async def get_job(job_id: UUID, user_id: CurrentUserId, db: DbSession):
         "id": str(job.id),
         "company": job.company,
         "title": job.title,
+        "title_en": job.title_en,
         "location": job.location,
         "country": job.country,
         "remote_type": job.remote_type,

@@ -49,6 +49,12 @@ class Job(Base):
     )
     company: Mapped[str] = mapped_column(String(500))
     title: Mapped[str] = mapped_column(String(500))
+    # English translation of `title`, populated at ingest time by the
+    # translator helper when the original title isn't already English.
+    # Left NULL for English-source jobs so the frontend can `title_en
+    # || title` without bloat. Same shape would apply to a future
+    # description_en if we ever need translated descriptions in-app.
+    title_en: Mapped[str | None] = mapped_column(String(500))
     location: Mapped[str | None] = mapped_column(String(500))
     country: Mapped[str | None] = mapped_column(String(10))  # ISO code
     remote_type: Mapped[str | None] = mapped_column(String(50))  # full_remote, hybrid, onsite

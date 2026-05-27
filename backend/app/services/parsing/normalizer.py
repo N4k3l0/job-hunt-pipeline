@@ -400,12 +400,23 @@ async def normalize_and_store_job(
         except (ValueError, TypeError):
             pass
 
+    # Translate non-English titles so the inbox stays English-first.
+    # Returns (None, "en") for already-English titles so we skip the
+    # column write and avoid storing a duplicate. Failure-mode returns
+    # (None, None) and ingest continues with title_en = NULL — never
+    # blocks the job from landing in the inbox just because Haiku
+    # rate-limited or errored.
+    from app.services.parsing.translator import translate_title_to_english
+    title_en, detected_lang = await translate_title_to_english(title)
+
     # Create job record
     job = Job(
         external_id=external_id,
         source_id=source.id,
         company=company,
         title=title,
+        title_en=title_en,
+        language=detected_lang,
         location=location,
         country=country,
         remote_type=remote_type,

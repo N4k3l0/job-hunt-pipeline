@@ -40,7 +40,9 @@ export default function DashboardOverview() {
     const list = (jobsData?.jobs ?? []).map((j: any) => ({
       id: j.id as string,
       company: j.company as string,
-      title: j.title as string,
+      // Prefer the English translation when the source was non-English.
+      // title_en is NULL on already-English jobs.
+      title: (j.title_en || j.title) as string,
       location: (j.location ?? "—") as string,
       salary: j.salary_text as string | null,
       time: j.discovered_at ? timeAgo(j.discovered_at) : "",

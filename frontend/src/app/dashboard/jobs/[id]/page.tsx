@@ -598,7 +598,9 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
             <div className="ds-muted" style={{ fontSize: 14, fontWeight: 500, letterSpacing: "-0.005em" }}>
               {job.company}
             </div>
-            <h1 className="ds-h1" style={{ marginTop: 4, textWrap: "balance" }}>{job.title}</h1>
+            <h1 className="ds-h1" style={{ marginTop: 4, textWrap: "balance" }}>
+              {(job as any).title_en || job.title}
+            </h1>
             <div className="flex flex-wrap" style={{ gap: 8, marginTop: 12 }}>
               {job.location && (
                 <span className="ds-pill">

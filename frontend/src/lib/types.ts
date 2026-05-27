@@ -3,6 +3,10 @@ export interface Job {
   id: string;
   company: string;
   title: string;
+  /** English translation of `title` when the source posting wasn't
+   *  English. NULL on already-English jobs — render as `title_en ||
+   *  title` so the display is always English when the translator caught it. */
+  title_en?: string | null;
   location: string | null;
   country: string | null;
   remote_type: string | null;

@@ -662,7 +662,7 @@ function TopMatchCard({
             color: "var(--ds-fg)",
             textWrap: "balance" as any,
           }}>
-            {job.title}
+            {job.title_en || job.title}
           </h2>
           <div style={{
             display: "flex",
@@ -840,7 +840,7 @@ function NextUpPanel({ jobs }: { jobs: any[] }) {
                 textOverflow: "ellipsis",
                 whiteSpace: "nowrap",
               }}>
-                {job.title}
+                {job.title_en || job.title}
               </div>
               <div style={{
                 fontSize: 12,
@@ -898,7 +898,7 @@ function DenseRow({
           textOverflow: "ellipsis",
           whiteSpace: "nowrap",
         }}>
-          {job.title}
+          {job.title_en || job.title}
         </div>
         <div style={{
           display: "flex",
