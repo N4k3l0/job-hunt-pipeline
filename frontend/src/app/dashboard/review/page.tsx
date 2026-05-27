@@ -831,38 +831,21 @@ export default function ReviewQueuePage() {
         )}
       </div>
 
-      {/* Tabs for each pending item */}
-      {items.length > 1 && (
-        <div className="flex gap-2 overflow-x-auto pb-2">
-          {items.map((item: any) => {
-            const itemStatus = item.approval_status;
-            const active = review.id === item.id;
-            return (
-              <button
-                key={item.id}
-                onClick={() => setSelectedId(item.id)}
-                className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                  active
-                    ? itemStatus === "failed"
-                      ? "bg-red-500/10 text-red-400 border border-red-500/20"
-                      : itemStatus === "generating"
-                        ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
-                        : "bg-amber-500/10 text-amber-400 border border-amber-500/20"
-                    : "bg-white/[0.03] text-muted-foreground hover:bg-white/[0.06]"
-                }`}
-              >
-                {itemStatus === "generating" && <Loader2 className="h-3 w-3 animate-spin" />}
-                {itemStatus === "failed" && <AlertCircle className="h-3 w-3 text-red-400" />}
-                <span>
-                  {item.job?.title
-                    ? `${item.job.title.slice(0, 30)}${item.job.title.length > 30 ? "..." : ""}`
-                    : item.job_id?.slice(0, 8)}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      )}
+      {/* 2-col layout from the Claude design: scrollable item list on the
+          left (300px), editor on the right (1fr). Stacks at lg breakpoint. */}
+      <div className="rev-grid">
+        <aside className="rev-list">
+          {items.map((item: any) => (
+            <ReviewListItem
+              key={item.id}
+              item={item}
+              active={review.id === item.id}
+              onClick={() => setSelectedId(item.id)}
+            />
+          ))}
+        </aside>
+
+        <section className="rev-editor space-y-4 min-w-0">
 
       {/* Job Header Card — meta wraps cleanly on mobile, action stays visible */}
       <Card className="border-amber-500/20">
@@ -970,7 +953,7 @@ export default function ReviewQueuePage() {
       )}
 
       {isReady && (
-      <div className="grid gap-4 lg:grid-cols-2 items-start">
+      <div className="grid gap-4 xl:grid-cols-2 items-start">
         {/* Left: Keywords + Fit */}
         <Card>
           <CardHeader>
@@ -1129,6 +1112,188 @@ export default function ReviewQueuePage() {
         </div>
       </div>
       )}
+
+        </section>
+      </div>
+
+      <style jsx>{`
+        .rev-grid {
+          display: grid;
+          grid-template-columns: 300px minmax(0, 1fr);
+          gap: 18px;
+          align-items: start;
+        }
+        @media (max-width: 900px) {
+          .rev-grid { grid-template-columns: 1fr; }
+        }
+        .rev-list {
+          background: var(--ds-bg-elev-1);
+          border: 1px solid var(--ds-line);
+          border-radius: 8px;
+          padding: 0;
+          align-self: start;
+          max-height: calc(100vh - 220px);
+          overflow: auto;
+          position: sticky;
+          top: 16px;
+        }
+        @media (max-width: 900px) {
+          .rev-list {
+            position: static;
+            max-height: 280px;
+          }
+        }
+        .rev-editor { min-width: 0; }
+      `}</style>
     </div>
   );
+}
+
+/* ============================================================
+   ReviewListItem — left-sidebar entry per pending application.
+   Status dot + title + company + score chip + updated-at. Click
+   selects this item for the editor on the right.
+   ============================================================ */
+function ReviewListItem({
+  item,
+  active,
+  onClick,
+}: {
+  item: any;
+  active: boolean;
+  onClick: () => void;
+}) {
+  const status: string = item.approval_status;
+  const statusColor =
+    status === "ready" ? "var(--ds-accent)"
+    : status === "approved" ? "var(--ds-fg-muted)"
+    : status === "generating" ? "var(--ds-fg-dim)"
+    : status === "failed" ? "#ef4444"
+    : "var(--ds-fg-faint)";
+  const statusLabel =
+    status === "ready" ? "ready"
+    : status === "approved" ? "approved"
+    : status === "generating" ? "generating"
+    : status === "failed" ? "failed"
+    : status;
+  const score = item.job?.score?.overall_fit ?? null;
+  const updatedAt = item.updated_at || item.created_at;
+  const updatedAgo = updatedAt ? timeAgoShort(updatedAt) : "";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      style={{
+        display: "block",
+        width: "100%",
+        textAlign: "left",
+        padding: "12px 14px",
+        background: active ? "var(--ds-bg-elev-2)" : "transparent",
+        borderLeft: active ? "2px solid var(--ds-accent)" : "2px solid transparent",
+        borderBottom: "1px solid var(--ds-line-faint)",
+        cursor: "pointer",
+        minHeight: 56,
+        transition: "background 120ms ease",
+        color: "var(--ds-fg)",
+      }}
+      onMouseEnter={(e) => {
+        if (!active) e.currentTarget.style.background = "var(--ds-bg-hover)";
+      }}
+      onMouseLeave={(e) => {
+        if (!active) e.currentTarget.style.background = "transparent";
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {item.job?.title || "Untitled Job"}
+          </div>
+          <div
+            style={{
+              fontSize: 12,
+              color: "var(--ds-fg-muted)",
+              marginTop: 2,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {item.job?.company || "—"}
+          </div>
+        </div>
+        {score != null && (
+          <span
+            className="ds-mono"
+            style={{
+              fontSize: 12,
+              fontWeight: 600,
+              color: score >= 80 ? "var(--ds-accent)" : "var(--ds-fg-muted)",
+              flexShrink: 0,
+            }}
+          >
+            {Math.round(score)}
+          </span>
+        )}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
+        <span
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: "50%",
+            background: statusColor,
+            boxShadow:
+              status === "generating"
+                ? "0 0 0 3px rgba(160,166,179,0.12)"
+                : "none",
+            flexShrink: 0,
+          }}
+        />
+        <span
+          className="ds-mono"
+          style={{
+            fontSize: 10,
+            letterSpacing: "0.08em",
+            textTransform: "uppercase",
+            color: statusColor,
+          }}
+        >
+          {statusLabel}
+        </span>
+        {updatedAgo && (
+          <span
+            className="ds-mono"
+            style={{
+              fontSize: 11,
+              color: "var(--ds-fg-dim)",
+              marginLeft: "auto",
+            }}
+          >
+            {updatedAgo}
+          </span>
+        )}
+      </div>
+    </button>
+  );
+}
+
+function timeAgoShort(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return "now";
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d}d`;
+  return `${Math.floor(d / 7)}w`;
 }
