@@ -358,6 +358,7 @@ export default function AdminPage() {
 
       <SourceHealthCard />
       <TranslateTitlesCard />
+      <TranslateDescriptionsCard />
     </div>
   );
 }
@@ -476,6 +477,127 @@ function TranslateTitlesCard() {
             {lastResult.more_to_do
               ? " There are more to translate — click \"Run next 30\"."
               : " Catalogue is fully translated."}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+
+/* ============================================================
+   TranslateDescriptionsCard — same shape as TranslateTitlesCard,
+   but for the full JD body. Heavier per call (~$0.0024 each, 2-5s
+   per Haiku roundtrip) so default batch is 10 instead of 30.
+   ============================================================ */
+type TranslateDescResult = {
+  inspected: number;
+  translated: number;
+  failed: number;
+  more_to_do: boolean;
+  approx_cost_usd: number;
+};
+
+function TranslateDescriptionsCard() {
+  const [running, setRunning] = useState(false);
+  const [history, setHistory] = useState<TranslateDescResult[]>([]);
+  const [err, setErr] = useState<string | null>(null);
+
+  const cumulative = history.reduce(
+    (acc, r) => ({
+      translated: acc.translated + r.translated,
+      failed: acc.failed + r.failed,
+      cost: acc.cost + r.approx_cost_usd,
+    }),
+    { translated: 0, failed: 0, cost: 0 },
+  );
+
+  const run = async () => {
+    setRunning(true);
+    setErr(null);
+    try {
+      const result = await api.post<TranslateDescResult>(
+        "/api/v1/auth/admin/backfill-description-translations?limit=10",
+      );
+      setHistory((h) => [...h, result]);
+    } catch (e: any) {
+      setErr(e?.message || "Backfill failed");
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const lastResult = history[history.length - 1];
+  const done = lastResult && !lastResult.more_to_do;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Sparkles className="h-4 w-4" />
+          Translate non-English descriptions
+        </CardTitle>
+        <CardDescription>
+          Translates the full JD body for non-English jobs (German,
+          Dutch, French, etc.) to English via Anthropic Haiku.
+          Heavier than titles: ~$0.0024 per description, 2-5s per call.
+          Batches of 10 to stay under the 60s function timeout. New
+          jobs ingested from today onwards are translated automatically.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button onClick={run} disabled={running}>
+            {running ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Translating 10…
+              </>
+            ) : done ? (
+              <>
+                <CheckCircle2 className="h-4 w-4" />
+                All done
+              </>
+            ) : (
+              <>
+                <Sparkles className="h-4 w-4" />
+                {history.length === 0 ? "Run description backfill" : "Run next 10"}
+              </>
+            )}
+          </Button>
+          {history.length > 0 && (
+            <span className="text-xs text-muted-foreground">
+              Session total: <span className="font-mono">{cumulative.translated}</span> translated ·{" "}
+              <span className="font-mono">{cumulative.failed}</span> failed · ~$
+              <span className="font-mono">{cumulative.cost.toFixed(3)}</span>
+            </span>
+          )}
+        </div>
+
+        {err && (
+          <p className="text-sm" style={{ color: "#ef4444" }}>
+            {err}
+          </p>
+        )}
+
+        {lastResult && (
+          <div
+            style={{
+              fontSize: 12,
+              color: "var(--ds-fg-muted)",
+              padding: "8px 10px",
+              background: "var(--ds-bg-elev-1)",
+              border: "1px solid var(--ds-line)",
+              borderRadius: 6,
+            }}
+          >
+            Last batch — inspected <span className="font-mono">{lastResult.inspected}</span>,
+            translated <span className="font-mono" style={{ color: "var(--ds-accent)" }}>{lastResult.translated}</span>,
+            failed <span className="font-mono">{lastResult.failed}</span>, cost ~$
+            <span className="font-mono">{lastResult.approx_cost_usd.toFixed(3)}</span>.
+            {lastResult.more_to_do
+              ? " More to go — click \"Run next 10\"."
+              : " All non-English descriptions translated."}
           </div>
         )}
       </CardContent>

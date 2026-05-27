@@ -675,6 +675,65 @@ async def admin_backfill_title_translations(
     }
 
 
+@router.post("/admin/backfill-description-translations")
+async def admin_backfill_description_translations(
+    admin: AdminUser,
+    db: DbSession,
+    limit: int = 10,
+):
+    """Translate full job descriptions for already-ingested non-English
+    jobs. Heavier than the title backfill — descriptions are 50-200x
+    longer, so each Haiku call takes 2-5s and costs ~$0.005. Default
+    limit=10 keeps a single click well under the Vercel 60s timeout
+    and ~$0.05 per click.
+
+    Walks jobs whose language != "en" AND raw_description_en is NULL
+    AND raw_description is not NULL. Re-runnable, idempotent.
+    """
+    from sqlalchemy import select
+    from app.models.job import Job
+    from app.services.parsing.translator import translate_description_to_english
+
+    translated = 0
+    failed = 0
+    inspected = 0
+    cost_estimate_usd = 0.0
+
+    rows = (await db.execute(
+        select(Job).where(
+            Job.language.is_not(None),
+            Job.language != "en",
+            Job.raw_description_en.is_(None),
+            Job.raw_description.is_not(None),
+        ).limit(limit)
+    )).scalars().all()
+
+    for job in rows:
+        inspected += 1
+        result = await translate_description_to_english(
+            job.raw_description, job.language,
+        )
+        if result is None:
+            failed += 1
+            continue
+        job.raw_description_en = result
+        translated += 1
+        # Rough Haiku token cost: ~$0.80/M input + ~$4/M output. Job
+        # descriptions average ~2KB ≈ 500 tokens each direction.
+        # ~$0.0024 per translation. Multiply for the report.
+        cost_estimate_usd += 0.0024
+
+    await db.commit()
+
+    return {
+        "inspected": inspected,
+        "translated": translated,
+        "failed": failed,
+        "more_to_do": inspected >= limit,
+        "approx_cost_usd": round(cost_estimate_usd, 4),
+    }
+
+
 @router.post("/admin/fix/scrub-asset-apply-urls")
 async def admin_scrub_asset_apply_urls(admin: AdminUser, db: DbSession):
     """Wipe Job.apply_url for any row where the cached value points at a

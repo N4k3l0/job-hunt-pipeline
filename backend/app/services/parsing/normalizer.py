@@ -406,8 +406,29 @@ async def normalize_and_store_job(
     # (None, None) and ingest continues with title_en = NULL — never
     # blocks the job from landing in the inbox just because Haiku
     # rate-limited or errored.
-    from app.services.parsing.translator import translate_title_to_english
+    from app.services.parsing.translator import (
+        translate_title_to_english,
+        translate_description_to_english,
+    )
     title_en, detected_lang = await translate_title_to_english(title)
+
+    # Computed once because raw_description's source value is reused
+    # by both the column write and the description-translation call.
+    raw_description_value = (
+        parsed_data.get("description_summary")
+        or (raw_content[:4000] if raw_content else None)
+    )
+
+    # Only translate the description when the title detection found a
+    # non-English language. Saves the (longer, more expensive) Haiku
+    # call on the ~70% of jobs that are already English. If detection
+    # failed (detected_lang is None) we also skip — better to keep the
+    # original than guess.
+    raw_description_en = None
+    if detected_lang and detected_lang != "en":
+        raw_description_en = await translate_description_to_english(
+            raw_description_value, detected_lang,
+        )
 
     # Create job record
     job = Job(
@@ -433,10 +454,8 @@ async def normalize_and_store_job(
         # Without this fallback, heuristic-parsed jobs stored raw_description=NULL,
         # never got embedded, fell back to rule-based scoring with empty
         # entity arrays, scored near zero, and got hidden by min_score=50.
-        raw_description=(
-            parsed_data.get("description_summary")
-            or (raw_content[:4000] if raw_content else None)
-        ),
+        raw_description=raw_description_value,
+        raw_description_en=raw_description_en,
         raw_content=raw_content,
         employment_type=parsed_data.get("employment_type"),
         seniority=parsed_data.get("seniority"),

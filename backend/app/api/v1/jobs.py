@@ -393,11 +393,12 @@ async def list_jobs(
             "status": job.status,
             "discovered_at": job.discovered_at.isoformat() if job.discovered_at else None,
             "expires_at": job.expires_at.isoformat() if job.expires_at else None,
-            # First ~240 chars of the raw JD, HTML-stripped + word-boundary
-            # trimmed. The TopMatchCard renders this as a fallback when the
-            # LLM-generated summary (only computed for high-priority jobs)
-            # isn't available, so the card never sits empty.
-            "excerpt": _make_excerpt(job.raw_description),
+            # First ~240 chars of the JD, HTML-stripped + word-boundary
+            # trimmed. Prefer the English translation when the source was
+            # non-English so the inbox card body stays readable; falls
+            # back to raw_description on already-English (or untranslated)
+            # rows. Empty string ends up None via _make_excerpt.
+            "excerpt": _make_excerpt(job.raw_description_en or job.raw_description),
             "score": {
                 "role_path": score.role_path,
                 "overall_fit": score.overall_fit,
@@ -543,6 +544,10 @@ async def get_job(job_id: UUID, user_id: CurrentUserId, db: DbSession):
         "source_name": job.source.name if job.source else "manual",
         "status": job.status,
         "raw_description": job.raw_description,
+        # English translation when source was non-English. Frontend
+        # renders `raw_description_en || raw_description` so the body
+        # reads in English when we caught it.
+        "raw_description_en": job.raw_description_en,
         "discovered_at": job.discovered_at.isoformat() if job.discovered_at else None,
         "expires_at": job.expires_at.isoformat() if job.expires_at else None,
         "entities": {

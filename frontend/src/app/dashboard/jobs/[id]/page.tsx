@@ -812,23 +812,53 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
             ]}
           />
 
-          {/* About the role + Requirements */}
+          {/* About the role + Requirements — prefer the English
+              translation when the source posting was in another
+              language. Falls back to the original raw_description on
+              already-English jobs (and on jobs where translation
+              failed). Surfaces a small badge so the reader knows when
+              they're looking at a translation. */}
           <section>
             <h3 className="ds-h3">About the role</h3>
-            {job.raw_description ? (
-              <div
-                className="prose prose-invert prose-sm max-w-none"
-                style={{
-                  marginTop: 12, color: "var(--ds-fg-muted)",
-                  fontSize: 14, lineHeight: 1.7, maxWidth: "65ch",
-                }}
-                dangerouslySetInnerHTML={{ __html: job.raw_description }}
-              />
-            ) : (
-              <p className="ds-muted" style={{ fontSize: 13, marginTop: 12 }}>
-                No description available.
-              </p>
-            )}
+            {(() => {
+              const translated = (job as any).raw_description_en as string | null | undefined;
+              const original = job.raw_description;
+              const body = translated || original;
+              if (!body) {
+                return (
+                  <p className="ds-muted" style={{ fontSize: 13, marginTop: 12 }}>
+                    No description available.
+                  </p>
+                );
+              }
+              return (
+                <>
+                  {translated && (
+                    <div
+                      className="ds-mono"
+                      style={{
+                        marginTop: 10,
+                        fontSize: 11,
+                        letterSpacing: "0.08em",
+                        textTransform: "uppercase",
+                        color: "var(--ds-fg-muted)",
+                      }}
+                      title="The original posting was in another language. Showing an English translation."
+                    >
+                      · Translated to English
+                    </div>
+                  )}
+                  <div
+                    className="prose prose-invert prose-sm max-w-none"
+                    style={{
+                      marginTop: 12, color: "var(--ds-fg-muted)",
+                      fontSize: 14, lineHeight: 1.7, maxWidth: "65ch",
+                    }}
+                    dangerouslySetInnerHTML={{ __html: body }}
+                  />
+                </>
+              );
+            })()}
           </section>
 
           {entities && ((entities.requirements?.length ?? 0) > 0 || (entities.skills?.length ?? 0) > 0) && (

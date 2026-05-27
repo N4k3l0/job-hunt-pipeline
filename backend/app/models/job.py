@@ -65,6 +65,12 @@ class Job(Base):
     salary_max: Mapped[int | None] = mapped_column(Integer)
     salary_currency: Mapped[str | None] = mapped_column(String(10))
     raw_description: Mapped[str | None] = mapped_column(Text)
+    # English translation of `raw_description`, populated for non-English
+    # jobs at ingest by the translator helper. NULL on already-English
+    # jobs so the column doesn't double storage for the majority. Job
+    # Detail page renders `raw_description_en || raw_description`; the
+    # inbox excerpt is also derived from this when present.
+    raw_description_en: Mapped[str | None] = mapped_column(Text)
     raw_content: Mapped[str | None] = mapped_column(Text)  # Raw Firecrawl/API output
     employment_type: Mapped[str | None] = mapped_column(String(50))  # full_time, part_time, contract
     seniority: Mapped[str | None] = mapped_column(String(50))  # entry, mid, senior, lead, director, vp

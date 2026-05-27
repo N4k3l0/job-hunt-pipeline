@@ -106,3 +106,83 @@ async def translate_title_to_english(title: str) -> Tuple[str | None, str | None
         return (None, language or "en")
 
     return (translated, language)
+
+
+_DESCRIPTION_PROMPT = """\
+You are translating a job description for an English-language job board.
+
+Translate the description below into clear, natural English.
+
+Rules:
+- Preserve the original structure (paragraphs, bullet points, line breaks).
+- Keep brand names, company names, acronyms, and technical terms unchanged
+  (Python, SAP, AWS, React, GraphQL, Kubernetes, etc.).
+- Don't add or remove content. Don't summarise. Don't add a preamble or
+  closing remark.
+- If the description is already entirely in English, return it unchanged.
+- Return ONLY the translated text. No commentary.
+
+Description:
+{description}
+"""
+
+# Cap input size to keep Haiku response time predictable and avoid
+# blowing the per-ingest budget on a single mega-description. Anything
+# longer gets truncated; the translated version is still better than
+# the German original for triage.
+DESCRIPTION_INPUT_CAP = 8000
+
+
+async def translate_description_to_english(
+    description: str | None,
+    source_language: str | None,
+) -> str | None:
+    """Translate a long job description to English.
+
+    Returns the translated text, or None when:
+    - the input is empty / whitespace
+    - source_language is already "en" (caller should skip the call)
+    - Haiku fails / returns empty
+    - the translation came back identical to the input (already English)
+
+    Caller stores the return value on `Job.raw_description_en` and the
+    frontend renders `raw_description_en || raw_description` so a None
+    result simply falls through to the original.
+    """
+    if not description or not description.strip():
+        return None
+    if source_language == "en":
+        return None
+
+    text = description.strip()[:DESCRIPTION_INPUT_CAP]
+
+    try:
+        response = await llm_client.client.messages.create(
+            model="claude-haiku-4-5",
+            # Output cap roughly mirrors the input cap — translations
+            # are usually similar length to the source, plus a little
+            # headroom for languages that expand (e.g. German → English
+            # often grows by ~5%).
+            max_tokens=4000,
+            messages=[{
+                "role": "user",
+                "content": _DESCRIPTION_PROMPT.format(description=text),
+            }],
+        )
+        translated = "".join(
+            getattr(block, "text", "")
+            for block in response.content
+            if getattr(block, "type", "") == "text"
+        ).strip()
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            "description translation failed (source_lang=%s, len=%d): %s",
+            source_language, len(text), e,
+        )
+        return None
+
+    if not translated:
+        return None
+    if translated.lower() == text.lower():
+        return None
+    return translated
