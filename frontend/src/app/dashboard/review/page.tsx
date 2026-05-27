@@ -2,18 +2,14 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import {
-  Card, CardContent, CardHeader, CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Separator } from "@/components/ui/separator";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
-  CheckCircle2, XCircle, FileText, Mail, MessageSquare, Download,
-  AlertCircle, Loader2, ExternalLink, MapPin, Building2, Globe, Copy, Check, Send,
-  RefreshCw, Sparkles, Wand2, Search, Linkedin, AtSign, Quote,
+  CheckCircle2, XCircle, Download,
+  AlertCircle, Loader2, ExternalLink, Copy, Check, Send,
+  RefreshCw, Sparkles, Search, Linkedin, AtSign, Quote,
 } from "lucide-react";
 import { TailoredBulletsPanel } from "@/components/tailored-bullets-panel";
 import { OperationProgress } from "@/components/operation-progress";
@@ -62,9 +58,11 @@ const TAILORING_STEPS = [
 type EditableField = "tailored_summary" | "cover_letter" | "recruiter_message";
 
 function confidenceTone(c: string | null | undefined) {
-  if (c === "high") return "text-emerald-400 border-emerald-500/30 bg-emerald-500/5";
-  if (c === "medium") return "text-amber-400 border-amber-500/30 bg-amber-500/5";
-  return "text-muted-foreground border-white/[0.08]";
+  // All three states use accent in v2 — we just adjust intensity. Avoids
+  // the green/amber/grey traffic-light that the design system bans.
+  if (c === "high") return "text-[var(--ds-accent)] border-[var(--ds-accent-edge)] bg-[var(--ds-accent-soft)]";
+  if (c === "medium") return "text-[var(--ds-fg)] border-[var(--ds-line-strong)] bg-[var(--ds-bg-elev-2)]";
+  return "text-[var(--ds-fg-muted)] border-[var(--ds-line)]";
 }
 
 function ContactPanel({
@@ -112,7 +110,15 @@ function ContactPanel({
   };
 
   return (
-    <div className="rounded-xl border border-white/[0.06] bg-white/[0.015] p-4 mb-4">
+    <div
+      style={{
+        background: "var(--ds-bg-elev-2)",
+        border: "1px solid var(--ds-line)",
+        borderRadius: 8,
+        padding: 16,
+        marginBottom: 16,
+      }}
+    >
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <p className="text-xs uppercase tracking-wider text-muted-foreground mb-1">
@@ -184,7 +190,8 @@ function ContactPanel({
                 href={contact.linkedin_url}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-2 text-blue-400 hover:text-blue-300 min-w-0"
+                className="inline-flex items-center gap-2 min-w-0"
+                style={{ color: "var(--ds-accent)" }}
               >
                 <Linkedin className="h-3.5 w-3.5 shrink-0" />
                 <span className="truncate">{contact.linkedin_url.replace(/^https?:\/\//, "")}</span>
@@ -272,122 +279,503 @@ function ContactPanel({
   );
 }
 
+type TabKey = "summary" | "bullets" | "cover" | "outreach";
+
 function EditableMaterials({
   review,
   draft,
   onChange,
-  onSave,
-  onDiscard,
+  onAutoSave,
   onCopy,
   copied,
-  saving,
+  onApprove,
+  approved,
+  approving,
   onRegenerate,
 }: {
   review: any;
   draft?: { tailored_summary?: string; cover_letter?: string; recruiter_message?: string };
   onChange: (field: EditableField, value: string) => void;
-  onSave: () => void;
-  onDiscard: () => void;
+  onAutoSave: () => void;
   onCopy: (text: string, label: string) => void;
   copied: string | null;
-  saving: boolean;
+  onApprove: () => void;
+  approved: boolean;
+  approving: boolean;
   onRegenerate: (section: RegeneratableSection, guidance?: string) => Promise<void>;
 }) {
-  const dirty = draft !== undefined;
-  const value = (field: EditableField, fallback: string | null) =>
+  const [tab, setTab] = useState<TabKey>("summary");
+  const v = (field: EditableField, fallback: string | null) =>
     draft?.[field] ?? fallback ?? "";
 
-  const fields: {
-    key: EditableField; label: string; tab: string; placeholder: string; usage: string;
-  }[] = [
-    {
-      key: "tailored_summary", label: "Summary", tab: "summary",
-      placeholder: "No tailored summary generated yet.",
-      usage: "The 2–3 sentence opener for the top of your CV. Paste it into your resume's Professional Summary section.",
-    },
-    {
-      key: "cover_letter", label: "Cover", tab: "cover",
-      placeholder: "No cover letter generated yet.",
-      usage: "Paste into the cover-letter text box on the application form. If they ask for an attachment, use Print / PDF.",
-    },
-    {
-      key: "recruiter_message", label: "Outreach", tab: "outreach",
-      placeholder: "No outreach message generated yet.",
-      usage: "Send via LinkedIn (or email) to the hiring manager AFTER you've submitted the application. The 'Find decision maker' button below pulls the right person.",
-    },
+  const attribution = (() => {
+    const model = review.model_used || "claude-sonnet";
+    const tokens = review.tokens_used;
+    const seconds = review.generation_time_seconds;
+    const parts = [`Generated by ${model}`];
+    if (seconds) parts.push(`${Math.round(seconds)}s`);
+    if (tokens) parts.push(`${tokens.toLocaleString()} tokens`);
+    return parts.join(" · ");
+  })();
+
+  const tabs: { key: TabKey; label: string; count?: number }[] = [
+    { key: "summary", label: "Summary" },
+    { key: "bullets", label: "Bullets" },
+    { key: "cover", label: "Cover letter" },
+    { key: "outreach", label: "Outreach" },
   ];
 
   return (
-    <Tabs defaultValue="summary">
-      <TabsList className="w-full">
-        <TabsTrigger value="summary" className="flex-1"><FileText className="h-3.5 w-3.5 mr-1.5" />Summary</TabsTrigger>
-        <TabsTrigger value="bullets" className="flex-1"><Wand2 className="h-3.5 w-3.5 mr-1.5" />Bullets</TabsTrigger>
-        <TabsTrigger value="cover" className="flex-1"><Mail className="h-3.5 w-3.5 mr-1.5" />Cover</TabsTrigger>
-        <TabsTrigger value="outreach" className="flex-1"><MessageSquare className="h-3.5 w-3.5 mr-1.5" />Outreach</TabsTrigger>
-      </TabsList>
-      <TabsContent value="bullets">
-        <p className="text-xs text-muted-foreground mb-3 px-1 leading-relaxed">
-          Each bullet from your resume bank, re-ranked + rewritten for THIS job. Goes into the
-          Experience section of your CV — pick the top 3–6 by relevance and copy.
-        </p>
-        {review.job_id && <TailoredBulletsPanel jobId={review.job_id} />}
-      </TabsContent>
-      {fields.map((f) => {
-        const v = value(f.key, review[f.key]);
-        return (
-          <TabsContent key={f.tab} value={f.tab}>
-            <p className="text-xs text-muted-foreground mb-2 px-1 leading-relaxed">
-              {f.usage}
-            </p>
-            {f.tab === "outreach" && review.job_id && (
+    <div>
+      {/* Tab strip — design pattern: thin underline rail, active gets a 1px
+          accent underline. No icons, no full-width flex-1 stretch. */}
+      <div className="rev-tabs" role="tablist">
+        {tabs.map((t) => (
+          <button
+            key={t.key}
+            role="tab"
+            type="button"
+            aria-selected={tab === t.key}
+            data-active={tab === t.key}
+            onClick={() => setTab(t.key)}
+            className="rev-tab"
+          >
+            {t.label}
+            {t.count != null && (
+              <span
+                className="ds-mono"
+                style={{ marginLeft: 6, color: "var(--ds-fg-faint)", fontSize: 12 }}
+              >
+                · {t.count}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {tab === "summary" && (
+        <TabBody
+          label="Tailored summary"
+          hint="First-person paragraph that opens your resume."
+          value={v("tailored_summary", review.tailored_summary)}
+          placeholder="No tailored summary generated yet."
+          field="tailored_summary"
+          section="tailored_summary"
+          onChange={onChange}
+          onAutoSave={onAutoSave}
+          onCopy={onCopy}
+          copied={copied}
+          onApprove={onApprove}
+          approved={approved}
+          approving={approving}
+          onRegenerate={onRegenerate}
+          attribution={attribution}
+        />
+      )}
+
+      {tab === "bullets" && (
+        <BulletsTab
+          jobId={review.job_id}
+          approved={approved}
+          approving={approving}
+          onApprove={onApprove}
+          attribution={attribution}
+        />
+      )}
+
+      {tab === "cover" && (
+        <TabBody
+          label="Cover letter"
+          hint="Four short paragraphs, tone-matched to the company's voice."
+          value={v("cover_letter", review.cover_letter)}
+          placeholder="No cover letter generated yet."
+          field="cover_letter"
+          section="cover_letter"
+          onChange={onChange}
+          onAutoSave={onAutoSave}
+          onCopy={onCopy}
+          copied={copied}
+          onApprove={onApprove}
+          approved={approved}
+          approving={approving}
+          onRegenerate={onRegenerate}
+          attribution={attribution}
+        />
+      )}
+
+      {tab === "outreach" && (
+        <>
+          {review.job_id && (
+            <div style={{ marginTop: 18 }}>
               <ContactPanel
                 jobId={review.job_id}
-                outreachMessage={value("recruiter_message", review.recruiter_message)}
+                outreachMessage={v("recruiter_message", review.recruiter_message)}
               />
+            </div>
+          )}
+          <TabBody
+            label="Outreach DM"
+            hint="Shorter — for LinkedIn or a warm intro reply."
+            value={v("recruiter_message", review.recruiter_message)}
+            placeholder="No outreach message generated yet."
+            field="recruiter_message"
+            section="recruiter_message"
+            onChange={onChange}
+            onAutoSave={onAutoSave}
+            onCopy={onCopy}
+            copied={copied}
+            onApprove={onApprove}
+            approved={approved}
+            approving={approving}
+            onRegenerate={onRegenerate}
+            attribution={attribution}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+function TabBody({
+  label,
+  hint,
+  value,
+  placeholder,
+  field,
+  section,
+  onChange,
+  onAutoSave,
+  onCopy,
+  copied,
+  onApprove,
+  approved,
+  approving,
+  onRegenerate,
+  attribution,
+}: {
+  label: string;
+  hint: string;
+  value: string;
+  placeholder: string;
+  field: EditableField;
+  section: RegeneratableSection;
+  onChange: (field: EditableField, value: string) => void;
+  onAutoSave: () => void;
+  onCopy: (text: string, label: string) => void;
+  copied: string | null;
+  onApprove: () => void;
+  approved: boolean;
+  approving: boolean;
+  onRegenerate: (section: RegeneratableSection, guidance?: string) => Promise<void>;
+  attribution: string;
+}) {
+  // First word of the label, lowercased, drives the per-tab button copy.
+  // "Tailored summary" -> "summary", "Cover letter" -> "cover", etc.
+  const shortLabel = label.split(" ").slice(-1)[0].toLowerCase();
+  const copyKey = `tab-${field}`;
+  return (
+    <div className="rev-tabbody" style={{ marginTop: 18 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <h2 className="ds-h2" style={{ fontSize: 17, lineHeight: 1.3 }}>{label}</h2>
+          <p style={{ fontSize: 13, color: "var(--ds-fg-muted)", marginTop: 4 }}>{hint}</p>
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          <RegenerateControl section={section} onSubmit={onRegenerate} />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onCopy(value, copyKey)}
+            disabled={!value}
+          >
+            {copied === copyKey ? (
+              <Check className="h-3.5 w-3.5" style={{ color: "var(--ds-accent)" }} />
+            ) : (
+              <Copy className="h-3.5 w-3.5" />
             )}
-            <Card>
-              <CardContent className="pt-4 space-y-2">
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <span className="text-xs uppercase tracking-wider text-muted-foreground">
-                    {dirty && draft?.[f.key] !== undefined ? "Edited" : "Editable"}
+            {copied === copyKey ? "Copied" : "Copy"}
+          </Button>
+        </div>
+      </div>
+
+      <div
+        style={{
+          marginTop: 16,
+          padding: 22,
+          background: "var(--ds-bg-elev-1)",
+          border: "1px solid var(--ds-line)",
+          borderRadius: 8,
+        }}
+      >
+        <textarea
+          value={value}
+          onChange={(e) => onChange(field, e.target.value)}
+          onBlur={onAutoSave}
+          placeholder={placeholder}
+          spellCheck
+          style={{
+            display: "block",
+            width: "100%",
+            maxWidth: "65ch",
+            minHeight: 280,
+            resize: "vertical",
+            background: "transparent",
+            color: "var(--ds-fg)",
+            border: 0,
+            outline: 0,
+            fontSize: 15,
+            lineHeight: 1.7,
+            fontFamily: "var(--ds-font-sans)",
+            whiteSpace: "pre-line",
+            padding: 0,
+          }}
+        />
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          marginTop: 14,
+          flexWrap: "wrap",
+        }}
+      >
+        <Button onClick={onApprove} disabled={approved || approving}>
+          {approving ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Check className="h-3.5 w-3.5" />
+          )}
+          {approved ? "Approved" : `Approve ${shortLabel}`}
+        </Button>
+        <span style={{ flex: 1 }} />
+        <span
+          className="ds-mono"
+          style={{ color: "var(--ds-fg-dim)", fontSize: 11 }}
+        >
+          {attribution}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function BulletsTab({
+  jobId,
+  approved,
+  approving,
+  onApprove,
+  attribution,
+}: {
+  jobId: string | null;
+  approved: boolean;
+  approving: boolean;
+  onApprove: () => void;
+  attribution: string;
+}) {
+  return (
+    <div className="rev-tabbody" style={{ marginTop: 18 }}>
+      <div>
+        <h2 className="ds-h2" style={{ fontSize: 17, lineHeight: 1.3 }}>Tailored resume bullets</h2>
+        <p style={{ fontSize: 13, color: "var(--ds-fg-muted)", marginTop: 4 }}>
+          Each bullet from your resume bank, re-ranked + rewritten for this role. Goes into the
+          Experience section of your CV — pick the top 3–6 by relevance and copy.
+        </p>
+      </div>
+      <div
+        style={{
+          marginTop: 16,
+          padding: 22,
+          background: "var(--ds-bg-elev-1)",
+          border: "1px solid var(--ds-line)",
+          borderRadius: 8,
+        }}
+      >
+        {jobId ? <TailoredBulletsPanel jobId={jobId} /> : null}
+      </div>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          marginTop: 14,
+          flexWrap: "wrap",
+        }}
+      >
+        <Button onClick={onApprove} disabled={approved || approving}>
+          {approving ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Check className="h-3.5 w-3.5" />
+          )}
+          {approved ? "Approved" : "Approve bullets"}
+        </Button>
+        <span style={{ flex: 1 }} />
+        <span
+          className="ds-mono"
+          style={{ color: "var(--ds-fg-dim)", fontSize: 11 }}
+        >
+          {attribution}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function AnalysisChips({ review }: { review: any }) {
+  const [open, setOpen] = useState(false);
+  const matched = review.keyword_matches?.matched ?? [];
+  const unmatched = review.keyword_matches?.unmatched ?? [];
+  const strengths = review.validation_notes?.strongest_matches ?? [];
+  const gaps = review.validation_notes?.gaps ?? [];
+  if (matched.length + unmatched.length + strengths.length + gaps.length === 0) {
+    return null;
+  }
+  return (
+    <div style={{ marginTop: 6 }}>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 10,
+          padding: "6px 10px",
+          background: "var(--ds-bg-elev-1)",
+          border: "1px solid var(--ds-line)",
+          borderRadius: 6,
+          color: "var(--ds-fg-muted)",
+          fontSize: 12,
+          cursor: "pointer",
+          transition: "background 120ms ease",
+        }}
+      >
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+          <CheckCircle2 className="h-3 w-3" style={{ color: "var(--ds-accent)" }} />
+          <span className="ds-mono" style={{ color: "var(--ds-fg)" }}>
+            {matched.length}
+          </span>
+          <span>matched</span>
+        </span>
+        {unmatched.length > 0 && (
+          <>
+            <span style={{ color: "var(--ds-fg-faint)" }}>·</span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+              <AlertCircle className="h-3 w-3" style={{ color: "var(--ds-fg-dim)" }} />
+              <span className="ds-mono" style={{ color: "var(--ds-fg)" }}>
+                {unmatched.length}
+              </span>
+              <span>gaps</span>
+            </span>
+          </>
+        )}
+        <span style={{ color: "var(--ds-fg-faint)", marginLeft: 4 }}>
+          {open ? "Hide" : "Show"}
+        </span>
+      </button>
+      {open && (
+        <div
+          style={{
+            marginTop: 10,
+            padding: 14,
+            background: "var(--ds-bg-elev-1)",
+            border: "1px solid var(--ds-line)",
+            borderRadius: 8,
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            gap: 16,
+          }}
+        >
+          {matched.length > 0 && (
+            <div>
+              <div className="ds-mono" style={{ fontSize: 10, letterSpacing: "0.1em", color: "var(--ds-fg-faint)", textTransform: "uppercase", marginBottom: 6 }}>
+                Matched keywords
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                {matched.map((kw: string) => (
+                  <span
+                    key={kw}
+                    style={{
+                      fontSize: 11,
+                      padding: "2px 8px",
+                      borderRadius: 4,
+                      background: "var(--ds-accent-soft)",
+                      border: "1px solid var(--ds-accent-edge)",
+                      color: "var(--ds-accent)",
+                    }}
+                  >
+                    {kw}
                   </span>
-                  <div className="flex items-center gap-1 ml-auto">
-                    <RegenerateControl
-                      section={f.key}
-                      onSubmit={onRegenerate}
-                    />
-                    {dirty && (
-                      <>
-                        <Button variant="ghost" size="sm" onClick={onDiscard} disabled={saving}>
-                          Discard
-                        </Button>
-                        <Button size="sm" onClick={onSave} disabled={saving}>
-                          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-                          Save edits
-                        </Button>
-                      </>
-                    )}
-                    {!dirty && (
-                      <Button variant="ghost" size="sm" onClick={() => onCopy(v, f.tab)}>
-                        {copied === f.tab ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
-                        {copied === f.tab ? "Copied" : "Copy"}
-                      </Button>
-                    )}
-                  </div>
-                </div>
-                <textarea
-                  value={v}
-                  onChange={(e) => onChange(f.key, e.target.value)}
-                  placeholder={f.placeholder}
-                  spellCheck
-                  className="block w-full min-h-[280px] resize-y rounded-lg bg-white/[0.02] border border-white/[0.04] focus:border-amber-500/30 focus:outline-none p-4 text-sm leading-relaxed font-sans whitespace-pre-line transition-colors"
-                />
-              </CardContent>
-            </Card>
-          </TabsContent>
-        );
-      })}
-    </Tabs>
+                ))}
+              </div>
+            </div>
+          )}
+          {unmatched.length > 0 && (
+            <div>
+              <div className="ds-mono" style={{ fontSize: 10, letterSpacing: "0.1em", color: "var(--ds-fg-faint)", textTransform: "uppercase", marginBottom: 6 }}>
+                Gaps
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                {unmatched.map((kw: string) => (
+                  <span
+                    key={kw}
+                    style={{
+                      fontSize: 11,
+                      padding: "2px 8px",
+                      borderRadius: 4,
+                      background: "var(--ds-bg-elev-2)",
+                      border: "1px dashed var(--ds-line-strong)",
+                      color: "var(--ds-fg-muted)",
+                      textDecoration: "line-through",
+                      textDecorationColor: "var(--ds-fg-dim)",
+                    }}
+                  >
+                    {kw}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          {strengths.length > 0 && (
+            <div>
+              <div className="ds-mono" style={{ fontSize: 10, letterSpacing: "0.1em", color: "var(--ds-fg-faint)", textTransform: "uppercase", marginBottom: 6 }}>
+                Strengths
+              </div>
+              <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 4 }}>
+                {strengths.map((s: string) => (
+                  <li key={s} style={{ fontSize: 12, color: "var(--ds-fg-muted)", lineHeight: 1.45 }}>
+                    {s}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {gaps.length > 0 && (
+            <div>
+              <div className="ds-mono" style={{ fontSize: 10, letterSpacing: "0.1em", color: "var(--ds-fg-faint)", textTransform: "uppercase", marginBottom: 6 }}>
+                Watch-outs
+              </div>
+              <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 4 }}>
+                {gaps.map((g: string) => (
+                  <li key={g} style={{ fontSize: 12, color: "var(--ds-fg-muted)", lineHeight: 1.45 }}>
+                    {g}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -424,15 +812,31 @@ function RegenerateControl({
 
   if (!open) {
     return (
-      <Button variant="ghost" size="sm" onClick={() => setOpen(true)}>
-        <Wand2 className="h-3.5 w-3.5" />
-        Regenerate
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => setOpen(true)}
+        style={{ color: "var(--ds-fg-muted)" }}
+      >
+        <Sparkles className="h-3.5 w-3.5" />
+        Regenerate with notes…
       </Button>
     );
   }
 
   return (
-    <div className="flex items-center gap-1.5 rounded-md border border-amber-500/20 bg-amber-500/[0.04] pl-2 pr-1 py-1">
+    <div
+      className="flex items-center gap-1.5"
+      style={{
+        border: "1px solid var(--ds-accent-edge)",
+        background: "var(--ds-accent-soft)",
+        borderRadius: 6,
+        paddingLeft: 8,
+        paddingRight: 4,
+        paddingTop: 4,
+        paddingBottom: 4,
+      }}
+    >
       <input
         autoFocus
         type="text"
@@ -447,7 +851,14 @@ function RegenerateControl({
         }}
         placeholder={placeholder}
         disabled={busy}
-        className="bg-transparent text-sm placeholder:text-muted-foreground focus:outline-none w-56 sm:w-64"
+        style={{
+          background: "transparent",
+          fontSize: 13,
+          color: "var(--ds-fg)",
+          border: 0,
+          outline: 0,
+          width: 256,
+        }}
       />
       <Button
         variant="ghost"
@@ -457,12 +868,13 @@ function RegenerateControl({
           setGuidance("");
         }}
         disabled={busy}
+        style={{ color: "var(--ds-fg-muted)" }}
       >
         Cancel
       </Button>
       <Button size="xs" onClick={() => fire(true)} disabled={busy}>
-        {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3" />}
-        {guidance.trim() ? "Regenerate" : "Regenerate"}
+        {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+        Regenerate
       </Button>
     </div>
   );
@@ -471,37 +883,49 @@ function RegenerateControl({
 function ProgressTimeline({ currentStep }: { currentStep: string | null }) {
   const idx = currentStep ? TAILORING_STEPS.indexOf(currentStep) : -1;
   return (
-    <ul className="space-y-2">
+    <ul style={{ display: "flex", flexDirection: "column", gap: 8, margin: 0, padding: 0, listStyle: "none" }}>
       {TAILORING_STEPS.map((step, i) => {
         const done = idx > i;
         const active = idx === i;
-        // "Answering screening questions" is conditional — show it dim when skipped.
         const optional = step === "Answering screening questions";
+        const dotStyle: React.CSSProperties = {
+          width: 8,
+          height: 8,
+          borderRadius: "50%",
+          background: active
+            ? "var(--ds-accent)"
+            : done
+              ? "var(--ds-accent)"
+              : "var(--ds-line)",
+          boxShadow: active ? "0 0 8px var(--ds-accent)" : "none",
+          flexShrink: 0,
+        };
+        const labelColor = active
+          ? "var(--ds-fg)"
+          : done
+            ? "var(--ds-fg-muted)"
+            : optional
+              ? "var(--ds-fg-faint)"
+              : "var(--ds-fg-dim)";
         return (
-          <li key={step} className="flex items-center gap-2.5 text-sm">
+          <li key={step} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 14 }}>
+            <span style={dotStyle} />
             <span
-              className={
-                active
-                  ? "h-2 w-2 rounded-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]"
-                  : done
-                    ? "h-2 w-2 rounded-full bg-emerald-400"
-                    : "h-2 w-2 rounded-full bg-white/10"
-              }
-            />
-            <span
-              className={
-                active
-                  ? "text-foreground font-medium"
-                  : done
-                    ? "text-muted-foreground line-through decoration-emerald-500/30"
-                    : optional
-                      ? "text-muted-foreground/40"
-                      : "text-muted-foreground/60"
-              }
+              style={{
+                color: labelColor,
+                fontWeight: active ? 500 : 400,
+                textDecoration: done ? "line-through" : "none",
+                textDecorationColor: done ? "var(--ds-accent-edge)" : undefined,
+              }}
             >
               {step}
             </span>
-            {active && <Loader2 className="h-3 w-3 animate-spin text-amber-400" />}
+            {active && (
+              <Loader2
+                className="h-3 w-3 animate-spin"
+                style={{ color: "var(--ds-accent)" }}
+              />
+            )}
           </li>
         );
       })}
@@ -790,46 +1214,77 @@ export default function ReviewQueuePage() {
     { ready: 0, generating: 0, failed: 0 },
   );
 
+  const totalCount = counts.ready + counts.generating + counts.failed;
   return (
     <div className="space-y-4 ds-page-fade">
-      <div className="flex items-end justify-between gap-3">
-        <div>
-          <h1 className="ds-h1">
-            Review Queue
-            {(counts.ready + counts.generating + counts.failed) > 0 && (
-              <span className="ds-mono ds-faint" style={{ fontSize: 18, fontWeight: 500, marginLeft: 8 }}>
-                · {counts.ready + counts.generating + counts.failed}
+      {/* Page header — design pattern: h1 with mono accent count, single
+          lede line, single right-aligned CTA. Counts breakdown + Clear
+          failed live in the list-item dots, not in the header. */}
+      <header
+        style={{
+          display: "flex",
+          alignItems: "flex-end",
+          justifyContent: "space-between",
+          gap: 16,
+          flexWrap: "wrap",
+          marginBottom: 16,
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <h1
+            className="ds-h1"
+            style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}
+          >
+            <span>Review queue</span>
+            {totalCount > 0 && (
+              <span
+                className="ds-mono"
+                style={{
+                  fontSize: 22,
+                  fontWeight: 600,
+                  color: "var(--ds-accent)",
+                  letterSpacing: "-0.02em",
+                }}
+              >
+                {totalCount}
               </span>
             )}
           </h1>
-          <p className="ds-muted" style={{ fontSize: 13, marginTop: 6 }}>
-            {counts.ready > 0 && <span className="ds-mono">{counts.ready} ready</span>}
-            {counts.generating > 0 && (
-              <span className={counts.ready > 0 ? "ml-3" : ""} style={{ color: "var(--ds-fg-muted)" }}>
-                <Loader2 className="inline h-3 w-3 animate-spin mr-1" style={{ color: "var(--ds-accent)" }} />
-                <span className="ds-mono">{counts.generating}</span> generating
-              </span>
-            )}
-            {counts.failed > 0 && (
-              <span className="ml-3 text-red-400 ds-mono">
-                {counts.failed} failed
-              </span>
-            )}
+          <p
+            style={{
+              fontSize: 13,
+              color: "var(--ds-fg-muted)",
+              marginTop: 6,
+              maxWidth: "65ch",
+            }}
+          >
+            Tailored applications waiting on you. Approve, regenerate, or send.
           </p>
         </div>
-        {counts.failed > 0 && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {counts.failed > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleClearFailed}
+              style={{ color: "var(--ds-fg-muted)" }}
+              title="Discard all failed tailoring rows"
+            >
+              <XCircle className="h-3.5 w-3.5" />
+              Clear {counts.failed} failed
+            </Button>
+          )}
           <Button
-            variant="ghost"
+            variant="outline"
             size="sm"
-            onClick={handleClearFailed}
-            className="text-muted-foreground hover:text-red-400"
-            title="Discard all failed tailoring rows"
+            nativeButton={false}
+            render={<Link href="/dashboard/jobs" />}
           >
-            <XCircle className="h-3.5 w-3.5" />
-            Clear {counts.failed} failed
+            <Sparkles className="h-3.5 w-3.5" />
+            Tailor another job
           </Button>
-        )}
-      </div>
+        </div>
+      </header>
 
       {/* 2-col layout from the Claude design: scrollable item list on the
           left (300px), editor on the right (1fr). Stacks at lg breakpoint. */}
@@ -847,182 +1302,189 @@ export default function ReviewQueuePage() {
 
         <section className="rev-editor space-y-4 min-w-0">
 
-      {/* Job Header Card — meta wraps cleanly on mobile, action stays visible */}
-      <Card className="border-amber-500/20">
-        <CardContent className="py-4 space-y-3">
-          <div className="flex items-start justify-between gap-3">
-            <h2 className="text-lg sm:text-xl font-semibold leading-snug min-w-0">{review.job?.title || "Untitled Job"}</h2>
-            {review.job?.job_url && (
-              <Button variant="outline" size="sm" nativeButton={false} className="shrink-0"
-                render={<a href={review.job.job_url} target="_blank" rel="noopener" />}>
-                <ExternalLink className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">View posting</span>
-              </Button>
-            )}
+      {/* Job sub-header — design pattern: small muted company line, h2
+          title, ghost "View posting" button right-aligned. No Card
+          wrapper, no badges, no location chip (the inbox row already
+          surfaced those). Status + score live on the list-item dot. */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div
+            style={{
+              fontSize: 12,
+              color: "var(--ds-fg-muted)",
+              fontWeight: 500,
+            }}
+          >
+            {review.job?.company || "Unknown company"}
           </div>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
-            <span className="flex items-center gap-1">
-              <Building2 className="h-3.5 w-3.5" />
-              {review.job?.company || "Unknown"}
-            </span>
-            {review.job?.location && (
-              <span className="flex items-center gap-1">
-                <MapPin className="h-3.5 w-3.5" />
-                {review.job.location}
-              </span>
-            )}
-            {review.job?.remote_type && review.job.remote_type !== "unknown" && (
-              <Badge variant="secondary" className="text-xs bg-emerald-500/10 text-emerald-400">
-                <Globe className="h-3 w-3 mr-0.5" />
-                {review.job.remote_type === "full_remote" ? "Remote"
-                  : review.job.remote_type === "hybrid" ? "Hybrid"
-                  : review.job.remote_type === "onsite" ? "On-site"
-                  : review.job.remote_type}
-              </Badge>
-            )}
-            {review.job?.salary_text && (
-              <span className="text-emerald-400 font-medium">{review.job.salary_text}</span>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+          <h2
+            className="ds-h2"
+            style={{
+              fontSize: 22,
+              fontWeight: 600,
+              letterSpacing: "-0.02em",
+              lineHeight: 1.2,
+              marginTop: 2,
+              textWrap: "balance" as any,
+            }}
+          >
+            {review.job?.title || "Untitled Job"}
+          </h2>
+        </div>
+        {review.job?.job_url && (
+          <Button
+            variant="ghost"
+            size="sm"
+            nativeButton={false}
+            render={<a href={review.job.job_url} target="_blank" rel="noopener" />}
+            style={{ color: "var(--ds-fg-muted)" }}
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            View posting
+          </Button>
+        )}
+      </div>
+
+      {/* Application analysis — collapsed to a one-line chip strip so the
+          insight is present without dominating the editor. The full
+          matched/unmatched lists were valuable but rivaled the title
+          card. Click to expand if you want the breakdown. */}
+      {isReady && (review.keyword_matches || review.validation_notes) && (
+        <AnalysisChips review={review} />
+      )}
 
       {isGenerating && (
-        <Card className="border-amber-500/20 bg-gradient-to-br from-amber-500/[0.03] to-transparent">
-          <CardHeader>
-            <CardTitle className="text-sm flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-amber-400" />
+        <div
+          style={{
+            background: "var(--ds-bg-elev-1)",
+            border: "1px solid var(--ds-accent-edge)",
+            borderRadius: 8,
+            padding: 22,
+            marginTop: 18,
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              marginBottom: 14,
+            }}
+          >
+            <Sparkles
+              className="h-4 w-4"
+              style={{ color: "var(--ds-accent)" }}
+            />
+            <h3 className="ds-h3" style={{ fontSize: 14, fontWeight: 600 }}>
               Tailoring in progress
-              <span className="ml-auto flex items-center gap-3">
-                <ElapsedTime since={review.created_at} />
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  onClick={() => handleDelete(review)}
-                  className="text-muted-foreground hover:text-red-400"
-                >
-                  <XCircle className="h-3 w-3" />
-                  Cancel
-                </Button>
-              </span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ProgressTimeline currentStep={review.progress_step} />
-            <p className="text-sm text-muted-foreground mt-4 leading-relaxed">
-              Tailoring usually takes 30 to 60 seconds. You can leave this page —
-              the toast on completion will bring you back.
-            </p>
-          </CardContent>
-        </Card>
+            </h3>
+            <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12 }}>
+              <ElapsedTime since={review.created_at} />
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={() => handleDelete(review)}
+                style={{ color: "var(--ds-fg-muted)" }}
+              >
+                <XCircle className="h-3 w-3" />
+                Cancel
+              </Button>
+            </span>
+          </div>
+          <ProgressTimeline currentStep={review.progress_step} />
+          <p
+            style={{
+              fontSize: 13,
+              color: "var(--ds-fg-muted)",
+              marginTop: 16,
+              lineHeight: 1.55,
+            }}
+          >
+            Tailoring usually takes 30 to 60 seconds. You can leave this page —
+            the toast on completion will bring you back.
+          </p>
+        </div>
       )}
 
       {isFailed && (
-        <Card className="border-red-500/20 bg-gradient-to-br from-red-500/[0.03] to-transparent">
-          <CardHeader>
-            <CardTitle className="text-sm flex items-center gap-2 text-red-400">
-              <AlertCircle className="h-4 w-4" />
+        <div
+          style={{
+            background: "var(--ds-bg-elev-1)",
+            border: "1px solid #4a1a1a",
+            borderRadius: 8,
+            padding: 22,
+            marginTop: 18,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+            <AlertCircle className="h-4 w-4" style={{ color: "#ef4444" }} />
+            <h3 className="ds-h3" style={{ fontSize: 14, fontWeight: 600, color: "#ef4444" }}>
               Tailoring failed
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="rounded-lg bg-red-500/[0.04] border border-red-500/10 p-3 text-sm text-red-300/90 font-mono whitespace-pre-wrap break-words">
-              {review.progress_step || "Unknown error"}
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => handleDelete(review)}
-                className="text-muted-foreground"
-              >
-                <XCircle className="h-3.5 w-3.5" />
-                Discard
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => handleRetry(review)}
-                disabled={generate.isPending}
-              >
-                {generate.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                Try again
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+            </h3>
+          </div>
+          <div
+            className="ds-mono"
+            style={{
+              background: "var(--ds-bg-elev-2)",
+              border: "1px solid var(--ds-line)",
+              borderRadius: 6,
+              padding: 12,
+              fontSize: 12.5,
+              color: "var(--ds-fg-muted)",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+              marginBottom: 14,
+            }}
+          >
+            {review.progress_step || "Unknown error"}
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => handleDelete(review)}
+              style={{ color: "var(--ds-fg-muted)" }}
+            >
+              <XCircle className="h-3.5 w-3.5" />
+              Discard
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => handleRetry(review)}
+              disabled={generate.isPending}
+            >
+              {generate.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3.5 w-3.5" />
+              )}
+              Try again
+            </Button>
+          </div>
+        </div>
       )}
 
-      {isReady && (
-      <div className="grid gap-4 xl:grid-cols-2 items-start">
-        {/* Left: Keywords + Fit */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">Application Analysis</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {review.keyword_matches && (
-              <>
-                <div>
-                  <span className="text-xs text-muted-foreground">Matched keywords:</span>
-                  <div className="flex flex-wrap gap-1 mt-1">
-                    {(review.keyword_matches.matched || []).map((kw: string) => (
-                      <Badge key={kw} variant="secondary" className="text-xs bg-emerald-500/10 text-emerald-400">{kw}</Badge>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <span className="text-xs text-muted-foreground">Gaps:</span>
-                  <div className="flex flex-wrap gap-1 mt-1">
-                    {(review.keyword_matches.unmatched || []).map((kw: string) => (
-                      <Badge key={kw} variant="secondary" className="text-xs bg-amber-500/10 text-amber-400">{kw}</Badge>
-                    ))}
-                  </div>
-                </div>
-              </>
-            )}
-            {review.validation_notes && (
-              <>
-                <Separator />
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <div className="flex items-center gap-1.5 mb-1.5">
-                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
-                      <span className="text-xs font-medium">Strengths</span>
-                    </div>
-                    <ul className="space-y-1">
-                      {(review.validation_notes.strongest_matches || []).map((s: string) => (
-                        <li key={s} className="text-xs text-muted-foreground">{s}</li>
-                      ))}
-                    </ul>
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-1.5 mb-1.5">
-                      <AlertCircle className="h-3.5 w-3.5 text-amber-400" />
-                      <span className="text-xs font-medium">Gaps</span>
-                    </div>
-                    <ul className="space-y-1">
-                      {(review.validation_notes.gaps || []).map((g: string) => (
-                        <li key={g} className="text-xs text-muted-foreground">{g}</li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
-              </>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Right: Tailored Materials */}
-        <div className="space-y-4">
+      {(isReady || status === "approved") && (
+        <>
           <EditableMaterials
             review={review}
             draft={drafts[review.id]}
             onChange={(field, value) => updateDraft(review.id, field, value)}
-            onSave={() => handleSaveDraft(review)}
-            onDiscard={() => clearDraft(review.id)}
+            onAutoSave={() => {
+              if (drafts[review.id]) handleSaveDraft(review);
+            }}
             onCopy={copyText}
             copied={copied}
-            saving={updateTailored.isPending}
+            onApprove={() => handleApprove(review)}
+            approved={status === "approved"}
+            approving={approve.isPending}
             onRegenerate={(section, guidance) => {
               return new Promise<void>((resolve, reject) => {
                 regenerate.mutate(
@@ -1055,62 +1517,60 @@ export default function ReviewQueuePage() {
             }}
           />
 
-          {/* Actions — wrap on narrow widths so the primary 'Open & Apply'
-              button is never clipped off the right edge. */}
-          <Card>
-            <CardContent className="flex flex-wrap items-center gap-2 py-3 sm:justify-between">
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" nativeButton={false}
-                  render={<Link href={`/dashboard/review/${review.id}/print`} target="_blank" />}>
-                  <Download className="h-3.5 w-3.5" /> Print / PDF
-                </Button>
-              </div>
-              <div className="flex flex-wrap gap-2 ml-auto">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleDelete(review)}
-                  className="text-red-400 hover:text-red-300 hover:border-red-500/30"
-                >
-                  <XCircle className="h-3.5 w-3.5" />
-                  Discard
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleApprove(review)}
-                  disabled={approve.isPending}
-                >
-                  {approve.isPending ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <CheckCircle2 className="h-3.5 w-3.5" />
-                  )}
-                  Approve
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleOpenPosting(review)}
-                  disabled={!review.job_id}
-                  title="Opens the company's posting. Doesn't change your application status."
-                >
-                  <ExternalLink className="h-3.5 w-3.5" />
-                  Open posting
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={() => handleMarkApplied(review)}
-                  title="Click this AFTER you've actually submitted the application."
-                >
-                  <Send className="h-3.5 w-3.5" />
-                  I applied
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+          {/* Smaller footer row — per-tab Approve handles the approval gate,
+              this row carries the destructive + apply-flow actions only. */}
+          <div
+            className="jd-actions"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              flexWrap: "wrap",
+              marginTop: 16,
+              paddingTop: 14,
+              borderTop: "1px solid var(--ds-line)",
+            }}
+          >
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => handleDelete(review)}
+              style={{ color: "var(--ds-fg-muted)" }}
+            >
+              <XCircle className="h-3.5 w-3.5" />
+              Discard
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              nativeButton={false}
+              render={<Link href={`/dashboard/review/${review.id}/print`} target="_blank" />}
+              style={{ color: "var(--ds-fg-muted)" }}
+            >
+              <Download className="h-3.5 w-3.5" />
+              Print / PDF
+            </Button>
+            <span style={{ flex: 1 }} />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleOpenPosting(review)}
+              disabled={!review.job_id}
+              title="Opens the company's posting. Doesn't change your application status."
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              Open posting
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => handleMarkApplied(review)}
+              title="Click this AFTER you've actually submitted the application."
+            >
+              <Send className="h-3.5 w-3.5" />
+              I applied
+            </Button>
+          </div>
+        </>
       )}
 
         </section>
@@ -1144,6 +1604,39 @@ export default function ReviewQueuePage() {
           }
         }
         .rev-editor { min-width: 0; }
+
+        /* Tab strip — design pattern: thin underline rail spanning the
+           editor, active tab gets a 1px accent underline. No icons,
+           no filled background pill. */
+        .rev-tabs {
+          display: inline-flex;
+          gap: 0;
+          border-bottom: 1px solid var(--ds-line);
+          margin-top: 18px;
+        }
+        .rev-tab {
+          position: relative;
+          padding: 12px 16px;
+          font-size: 14px;
+          color: var(--ds-fg-muted);
+          background: transparent;
+          border: 0;
+          cursor: pointer;
+          transition: color 120ms ease;
+          display: inline-flex;
+          align-items: center;
+        }
+        .rev-tab:hover { color: var(--ds-fg); }
+        .rev-tab[data-active="true"] { color: var(--ds-fg); font-weight: 500; }
+        .rev-tab[data-active="true"]::after {
+          content: "";
+          position: absolute;
+          left: 8px;
+          right: 8px;
+          bottom: -1px;
+          height: 1px;
+          background: var(--ds-accent);
+        }
       `}</style>
     </div>
   );
