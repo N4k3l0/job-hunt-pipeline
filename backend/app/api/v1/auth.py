@@ -683,20 +683,23 @@ async def admin_backfill_description_translations(
 ):
     """Translate full job descriptions for already-ingested non-English
     jobs. Heavier than the title backfill — descriptions are 50-200x
-    longer, so each Haiku call takes 2-5s and costs ~$0.005. Default
-    limit=10 keeps a single click well under the Vercel 60s timeout
-    and ~$0.05 per click.
+    longer, so each Haiku call takes 4-8s.
+
+    Translations fire in PARALLEL via asyncio.gather (concurrency=5) so
+    the batch's wall-clock time is roughly one Haiku roundtrip, not
+    `limit` of them — earlier serial loop hit Vercel's 60s timeout
+    around batch=10. With parallelism, limit=15 finishes in ~10s.
 
     Walks jobs whose language != "en" AND raw_description_en is NULL
     AND raw_description is not NULL. Re-runnable, idempotent.
     """
+    import asyncio
     from sqlalchemy import select
     from app.models.job import Job
     from app.services.parsing.translator import translate_description_to_english
 
     translated = 0
     failed = 0
-    inspected = 0
     cost_estimate_usd = 0.0
 
     rows = (await db.execute(
@@ -707,12 +710,22 @@ async def admin_backfill_description_translations(
             Job.raw_description.is_not(None),
         ).limit(limit)
     )).scalars().all()
+    inspected = len(rows)
 
-    for job in rows:
-        inspected += 1
-        result = await translate_description_to_english(
-            job.raw_description, job.language,
-        )
+    # Concurrency cap — Haiku's per-key rate limit handles 5+ concurrent
+    # comfortably, but more risks 429s on a hot account. 5 is the sweet
+    # spot: ~5x speedup over serial, well under Anthropic's limits.
+    sem = asyncio.Semaphore(5)
+
+    async def translate_one(job):
+        async with sem:
+            return await translate_description_to_english(
+                job.raw_description, job.language,
+            )
+
+    results = await asyncio.gather(*(translate_one(j) for j in rows))
+
+    for job, result in zip(rows, results):
         if result is None:
             failed += 1
             continue

@@ -517,7 +517,9 @@ function TranslateDescriptionsCard() {
     setErr(null);
     try {
       const result = await api.post<TranslateDescResult>(
-        "/api/v1/auth/admin/backfill-description-translations?limit=10",
+        // limit=15 with concurrency-5 parallelism on the backend lands
+        // in ~10s wall-clock — well under Vercel's 60s function cap.
+        "/api/v1/auth/admin/backfill-description-translations?limit=15",
       );
       setHistory((h) => [...h, result]);
     } catch (e: any) {
