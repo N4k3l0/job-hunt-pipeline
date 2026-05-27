@@ -180,57 +180,12 @@ async def list_jobs(
     profile_remote_pref = profile_row[3] if profile_row else None
     profile_pref_countries = profile_row[4] if profile_row else None
 
-    # Fallback: if the user hasn't set preferred_countries yet, use the
-    # union of every other user's preferences as their default filter.
-    # This is the "system's covered countries" — what we've already
-    # decided to actively look for. Avoids dropping a brand-new user
-    # into an inbox full of Brazil/India-restricted jobs they can't act
-    # on. They can still change to specific countries any time.
-    if not profile_pref_countries:
-        from app.models.candidate import CandidateProfile as _CP
-        covered = await db.execute(
-            select(_CP.preferred_countries).where(
-                _CP.user_id != user_id,
-                _CP.preferred_countries.is_not(None),
-            )
-        )
-        union: set[str] = set()
-        for (countries_list,) in covered.all():
-            if countries_list:
-                for c in countries_list:
-                    if c:
-                        union.add(c.strip().upper())
-        # Empty fallback (brand-new system, no users yet) → keep None so
-        # apply_user_filters runs without the country filter. New systems
-        # start permissive.
-        if union:
-            profile_pref_countries = sorted(union)
-
-    # Fallback: if THIS user hasn't set preferred_countries, restrict the
-    # inbox to the union of countries other users have set ("the system's
-    # covered countries"). Keeps the inbox useful without dumping the full
-    # global catalogue on a fresh account. Skipped entirely if everyone is
-    # un-preferenced (early days of the system).
-    if not profile_pref_countries:
-        covered = await db.execute(
-            select(CandidateProfile.preferred_countries).where(
-                CandidateProfile.user_id != user_id,
-                CandidateProfile.preferred_countries.isnot(None),
-            )
-        )
-        covered_set: set[str] = set()
-        for (pref,) in covered:
-            for raw in (pref or []):
-                code = (raw or "").strip().upper()
-                if len(code) == 2 and code.isalpha():
-                    covered_set.add(code)
-        if covered_set:
-            profile_pref_countries = sorted(covered_set)
-            logger.info(
-                "User %s has no preferred_countries — falling back to system "
-                "coverage pool: %s",
-                user_id, profile_pref_countries,
-            )
+    # Empty / null preferred_countries means WORLDWIDE — no country filter
+    # applied at all. The user opted out of geo gating; show them every
+    # match regardless of where it sits. (Previously this fell back to
+    # the union of every other user's preferences as a safety net, but
+    # that made the inbox depend on what other users had set, which was
+    # invisible to the new user and felt arbitrary.)
 
     # Skills also feed the title filter, so a 'Python Developer' role
     # surfaces for someone whose target_roles say AI Engineer but whose
