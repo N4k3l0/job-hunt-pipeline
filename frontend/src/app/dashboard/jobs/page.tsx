@@ -667,10 +667,12 @@ function TopMatchCard({
         </div>
       </div>
 
-      {/* LLM-generated summary — falls back gracefully when deep scoring
-          hasn't run yet. Max-width keeps it readable inside the asymmetric
-          column without rivaling the title. */}
-      {job.score?.summary && (
+      {/* Body copy — prefer the LLM-generated summary (only runs for
+          high-priority jobs, so usually absent), fall back to the JD
+          excerpt the backend ships with every inbox row. Keeps the card
+          from sitting empty between title and breakdown when deep
+          scoring hasn't fired. */}
+      {(job.score?.summary || job.excerpt) && (
         <p style={{
           fontSize: 14,
           lineHeight: 1.55,
@@ -679,7 +681,7 @@ function TopMatchCard({
           maxWidth: "80ch",
           textWrap: "pretty" as any,
         }}>
-          {job.score.summary}
+          {job.score?.summary || job.excerpt}
         </p>
       )}
 

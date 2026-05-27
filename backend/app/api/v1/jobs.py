@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -18,6 +19,39 @@ from app.services.discovery.ats_resolver import find_direct_apply, is_ats_url, _
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+# Pre-compiled patterns for the excerpt builder. HTML tags + leading bullets
+# get cleaned, then whitespace gets collapsed. Order matters: strip tags
+# before collapsing whitespace so we don't preserve newlines inside elements.
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_BULLET_RE = re.compile(r"^[\s\-•·*▪◦∙]+", re.MULTILINE)
+_WHITESPACE_RE = re.compile(r"\s+")
+EXCERPT_CHARS = 240
+
+
+def _make_excerpt(raw: str | None) -> str | None:
+    """Produce a short clean excerpt for the inbox card.
+
+    Strips HTML/markdown bullets, collapses whitespace, trims to ~240
+    chars on the nearest word boundary, and appends an ellipsis. Returns
+    None for empty input so the frontend can fall back to the LLM
+    summary (or render nothing).
+    """
+    if not raw:
+        return None
+    text = _HTML_TAG_RE.sub(" ", raw)
+    text = _BULLET_RE.sub("", text)
+    text = _WHITESPACE_RE.sub(" ", text).strip()
+    if not text:
+        return None
+    if len(text) <= EXCERPT_CHARS:
+        return text
+    # Trim back to the previous space so we don't cut mid-word.
+    cut = text.rfind(" ", 0, EXCERPT_CHARS)
+    if cut < 0:
+        cut = EXCERPT_CHARS
+    return text[:cut].rstrip(",.;:") + "…"
 
 
 class JobImportURL(BaseModel):
@@ -364,6 +398,11 @@ async def list_jobs(
             "status": job.status,
             "discovered_at": job.discovered_at.isoformat() if job.discovered_at else None,
             "expires_at": job.expires_at.isoformat() if job.expires_at else None,
+            # First ~240 chars of the raw JD, HTML-stripped + word-boundary
+            # trimmed. The TopMatchCard renders this as a fallback when the
+            # LLM-generated summary (only computed for high-priority jobs)
+            # isn't available, so the card never sits empty.
+            "excerpt": _make_excerpt(job.raw_description),
             "score": {
                 "role_path": score.role_path,
                 "overall_fit": score.overall_fit,
