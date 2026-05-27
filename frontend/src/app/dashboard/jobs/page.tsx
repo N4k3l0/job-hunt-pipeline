@@ -518,30 +518,37 @@ export default function JobsInboxPage() {
               </div>
             )}
 
-            {total > 25 && (
+            {/* Pagination — only when there's more than one page AND
+                something is actually visible. Single-page inboxes (or
+                empty-after-filter states) hide the whole row. Individual
+                Prev/Next also hide when they'd go nowhere, so page 1
+                shows only Next and the last page shows only Prev. */}
+            {totalPages > 1 && filtered.length > 0 && (
               <div className="flex items-center justify-between" style={{ marginTop: 16 }}>
                 <span className="ds-mono ds-muted" style={{ fontSize: 12 }}>
                   Page {page} of {totalPages} · {total} total
                 </span>
                 <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    className="ds-btn sm"
-                    disabled={page <= 1}
-                    onClick={() => setPage((p) => p - 1)}
-                  >
-                    <ChevronLeft className="h-3.5 w-3.5" />
-                    Prev
-                  </button>
-                  <button
-                    type="button"
-                    className="ds-btn sm"
-                    disabled={page >= totalPages}
-                    onClick={() => setPage((p) => p + 1)}
-                  >
-                    Next
-                    <ChevronRight className="h-3.5 w-3.5" />
-                  </button>
+                  {page > 1 && (
+                    <button
+                      type="button"
+                      className="ds-btn sm"
+                      onClick={() => setPage((p) => p - 1)}
+                    >
+                      <ChevronLeft className="h-3.5 w-3.5" />
+                      Prev
+                    </button>
+                  )}
+                  {page < totalPages && (
+                    <button
+                      type="button"
+                      className="ds-btn sm"
+                      onClick={() => setPage((p) => p + 1)}
+                    >
+                      Next
+                      <ChevronRight className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
             )}
