@@ -553,14 +553,13 @@ async def admin_source_health(admin: AdminUser):
         return await fetch_jobs(keywords={"ai", "engineer"})
     probes.append(("workingnomads", _probe_workingnomads, None))
 
-    async def _probe_arcdev():
-        from app.services.discovery.arcdev_service import fetch_jobs
-        # Probe with a generic engineering role so the diagnostic still
-        # shows liveness even if no real user roles map to Arc yet.
-        return await fetch_jobs(
-            user_roles=["AI Engineer"], max_detail_fetches=2,
-        )
-    probes.append(("arcdev", _probe_arcdev, "firecrawl_api_key"))
+    # Arc.dev disabled from probe (and removed from cron in this push).
+    # Verified 2026-05: /remote-jobs/<category> pages render only links
+    # to other categories — individual job postings are JS-loaded via
+    # a client-side query, so Firecrawl's static-render snapshot has
+    # zero job-detail URLs to extract. Burns Firecrawl credits for no
+    # return. Drop in /discover-slow as a manual escape hatch if Arc
+    # ever brings back static job listings.
 
     async def _probe_wellfound():
         from app.services.discovery.wellfound_service import fetch_jobs

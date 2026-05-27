@@ -29,15 +29,18 @@ from app.services.discovery.eligibility import matches_keywords
 
 logger = logging.getLogger(__name__)
 
-UNDUTCHABLES_LISTING_URL = "https://www.undutchables.nl/job-vacancies/"
+# Verified 2026-05: site moved from /job-vacancies/ to /vacancies/.
+# Both www. and apex serve, but apex skips the 301 redirect that
+# Firecrawl sometimes drops the body on. Use apex directly.
+UNDUTCHABLES_LISTING_URL = "https://undutchables.nl/vacancies"
 
 # Listing markdown contains links like:
-#   [Some Job Title](https://www.undutchables.nl/vacancy/<slug>/)
-# We accept both `/vacancy/` and `/job-vacancies/<slug>` shapes since the
-# site has used both over time and a future redesign shouldn't silently
-# starve the scraper.
+#   [Some Job Title](https://undutchables.nl/vacancies/<slug>)
+# We accept the legacy /vacancy/, /vacatures/, and /job-vacancies/
+# variants too in case Firecrawl is rendering a snapshot or the site
+# revives them — any historical match still surfaces the job.
 JOB_LINK_RE = re.compile(
-    r"\[([^\]]+)\]\((https://www\.undutchables\.nl/(?:vacancy|vacatures|job-vacancies)/[a-z0-9\-_/]+)\)",
+    r"\[([^\]]+)\]\((https?://(?:www\.)?undutchables\.nl/(?:vacancies|vacancy|vacatures|job-vacancies)/[a-z0-9\-_/]+)\)",
     re.I,
 )
 
