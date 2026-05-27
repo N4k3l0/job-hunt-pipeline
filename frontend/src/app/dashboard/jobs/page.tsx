@@ -125,7 +125,14 @@ function SortMenu({ value, onChange }: { value: string; onChange: (v: string) =>
           return (
             <DropdownMenuItem
               key={v}
+              // Belt-and-suspenders — Base UI fires onSelect via its
+              // own keyboard/click handler, BUT some browser/version
+              // combos have been seen where the menu closes without
+              // firing it. Adding onClick guarantees the value change
+              // lands either way. setState bails on identical values
+              // so the duplicate call is free.
               onSelect={() => onChange(v)}
+              onClick={() => onChange(v)}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -449,7 +456,17 @@ export default function JobsInboxPage() {
             ))}
 
             <div className="ml-auto flex items-center gap-2">
-              <SortMenu value={sortBy} onChange={setSortBy} />
+              {/* Sort change also resets to page 1 — otherwise the user
+                  flips to "date" while on page 5 and sees page 5 of
+                  the date-sorted set, which often looks "the same" as
+                  before and made the dropdown feel broken. */}
+              <SortMenu
+                value={sortBy}
+                onChange={(v) => {
+                  setSortBy(v);
+                  setPage(1);
+                }}
+              />
             </div>
           </div>
         </div>
