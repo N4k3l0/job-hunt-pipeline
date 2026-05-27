@@ -136,12 +136,23 @@ async def fetch_jobs(
         except Exception as e:
             logger.warning("Arc.dev listing scrape failed for %s: %s", category, e)
             continue
+        matches_before = len(candidates)
         for title, url in JOB_LINK_RE.findall(md):
             cleaned = url.split("?")[0].split("#")[0].rstrip("/")
             if cleaned in seen or cleaned in skip_urls:
                 continue
             seen.add(cleaned)
             candidates.append((title.strip(), cleaned))
+        # Diagnostic: when the regex finds zero candidates, log a slice of
+        # the markdown so we can see what the page actually returned. The
+        # alternative is shipping blind and re-deploying every time we
+        # guess at a selector.
+        if len(candidates) == matches_before:
+            preview = (md or "")[:600].replace("\n", " ")
+            logger.warning(
+                "Arc.dev: 0 candidates from %s (markdown length=%d). Preview: %s",
+                category, len(md or ""), preview,
+            )
 
     logger.info("Arc.dev: %d unique candidate listings across %d categories (%s)",
                 len(candidates), len(categories), categories)

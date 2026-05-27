@@ -538,10 +538,10 @@ async def admin_source_health(admin: AdminUser):
         return await fetch_jobs(keywords={"ai", "engineer"})
     probes.append(("dailyremote", _probe_dailyremote, "firecrawl_api_key"))
 
-    async def _probe_crossover():
-        from app.services.discovery.crossover_service import fetch_jobs
-        return await fetch_jobs(keywords={"ai", "engineer"}, max_detail_fetches=2)
-    probes.append(("crossover", _probe_crossover, "firecrawl_api_key"))
+    # Crossover removed from probe + cron: verified 2026-05 that
+    # crossover.com/jobs is now a JS-rendered SPA — raw HTML has zero
+    # job links. Firecrawl might render it correctly but unverified.
+    # Lives in /discover-slow as a manual escape hatch.
 
     async def _probe_undutchables():
         from app.services.discovery.undutchables_service import fetch_jobs
@@ -590,8 +590,14 @@ async def admin_source_health(admin: AdminUser):
         if env_key and not getattr(cfg, env_key, None):
             return {"source": name, "status": "skipped", "reason": f"env var {env_key} not set", "count": 0, "elapsed_s": 0.0}
         started = time.monotonic()
+        # 35s — was 20s, but Firecrawl-backed scrapers (wellfound, arcdev,
+        # myjobmag, undutchables, dailyremote) can legitimately take 25+s
+        # to render their listing pages. 20s caused false-positive
+        # "timeout" rows; 35s leaves enough headroom while still capping
+        # the overall probe.
+        SOURCE_PROBE_TIMEOUT = 35.0
         try:
-            jobs = await asyncio.wait_for(fn(), timeout=20.0)
+            jobs = await asyncio.wait_for(fn(), timeout=SOURCE_PROBE_TIMEOUT)
             elapsed = time.monotonic() - started
             return {
                 "source": name,
@@ -601,7 +607,7 @@ async def admin_source_health(admin: AdminUser):
                 "sample_title": (jobs[0].get("title") if jobs else None),
             }
         except asyncio.TimeoutError:
-            return {"source": name, "status": "timeout", "count": 0, "elapsed_s": 20.0}
+            return {"source": name, "status": "timeout", "count": 0, "elapsed_s": SOURCE_PROBE_TIMEOUT}
         except Exception as e:  # noqa: BLE001
             return {
                 "source": name,

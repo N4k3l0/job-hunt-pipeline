@@ -91,6 +91,14 @@ async def fetch_jobs(
         "Undutchables: %d unique candidate listings on landing page",
         len(candidates),
     )
+    if not candidates:
+        # Diagnostic: log a slice of the markdown so we can see what
+        # Firecrawl actually returned when the regex fails to match.
+        preview = (listing_markdown or "")[:600].replace("\n", " ")
+        logger.warning(
+            "Undutchables: regex matched 0 listings (markdown length=%d). Preview: %s",
+            len(listing_markdown or ""), preview,
+        )
 
     # Pre-filter by keywords *before* spending Firecrawl credits.
     if keywords:

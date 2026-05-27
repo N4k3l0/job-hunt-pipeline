@@ -33,10 +33,12 @@ MYJOBMAG_LISTING_URLS = (
     "https://www.myjobmag.com/jobs-by-field/it-telecoms",
 )
 
-# Markdown link patterns. MyJobMag uses /job-vacancy/<numeric>/<slug>
-# or /jobs/<id> depending on the section.
+# Markdown link patterns. MyJobMag's current URL scheme is
+# /job/<slug> (singular). Older sections may still use the
+# /job-vacancy/<id>/<slug> or /jobs/<id> patterns — keep both so
+# legacy URLs surface too. Verified 2026-05 via raw HTML probe.
 JOB_LINK_RE = re.compile(
-    r"\[([^\]]+)\]\((https://www\.myjobmag\.com/(?:job-vacancy|jobs)/\d+[/\-\w]*)\)",
+    r"\[([^\]]+)\]\((https?://(?:www\.)?myjobmag\.com/(?:job|job-vacancy|jobs)/[\w\-]+(?:/[\w\-]+)?)\)",
     re.I,
 )
 

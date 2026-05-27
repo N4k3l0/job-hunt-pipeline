@@ -125,12 +125,21 @@ async def fetch_jobs(
         except Exception as e:
             logger.warning("Wellfound listing scrape failed for %s: %s", role, e)
             continue
+        matches_before = len(candidates)
         for title, url in JOB_LINK_RE.findall(md):
             cleaned = url.split("?")[0].split("#")[0].rstrip("/")
             if cleaned in seen or cleaned in skip_urls:
                 continue
             seen.add(cleaned)
             candidates.append((title.strip(), cleaned))
+        if len(candidates) == matches_before:
+            # Diagnostic when the regex finds nothing — log a markdown
+            # preview so we can see what the page rendered.
+            preview = (md or "")[:600].replace("\n", " ")
+            logger.warning(
+                "Wellfound: 0 candidates from /role/r/%s (markdown length=%d). Preview: %s",
+                role, len(md or ""), preview,
+            )
 
     logger.info("Wellfound: %d unique candidate listings across %d roles (%s)",
                 len(candidates), len(roles_to_visit), roles_to_visit)
