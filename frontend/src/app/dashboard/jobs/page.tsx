@@ -343,7 +343,14 @@ export default function JobsInboxPage() {
               Inbox
               {" "}
               <span className="ds-mono ds-faint" style={{ fontSize: 18, fontWeight: 500, letterSpacing: "-0.02em" }}>
-                · {total} {filtered.length !== total ? `· ${filtered.length} matching` : ""}
+                · {total}
+                {/* Only surface the "matching" suffix when a client-side
+                    chip or search query has actually trimmed the visible
+                    list. Pagination alone doesn't count — page-size
+                    cropping isn't a "filter" the user picked. */}
+                {(activeView || search) && filtered.length !== jobs.length && (
+                  <> · {filtered.length} matching</>
+                )}
               </span>
             </h1>
             <p className="ds-muted" style={{ fontSize: 13, marginTop: 4 }}>
