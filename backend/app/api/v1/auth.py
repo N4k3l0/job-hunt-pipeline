@@ -620,6 +620,61 @@ async def admin_source_health(admin: AdminUser):
     return {"sources": results}
 
 
+@router.post("/admin/backfill-title-translations")
+async def admin_backfill_title_translations(
+    admin: AdminUser,
+    db: DbSession,
+    limit: int = 30,
+):
+    """Admin-button equivalent of the cron backfill: walks jobs whose
+    title_en is NULL and language != "en", translates with Haiku, writes
+    back. Hard-caps at `limit` per call so a single click never blows
+    the Vercel 60s timeout. Re-runnable — translated rows have title_en
+    non-NULL so they're skipped on the next pass.
+
+    Cost: ~$0.00001/title × limit. Default 30 jobs ≈ $0.0003.
+    """
+    from sqlalchemy import select
+    from app.models.job import Job
+    from app.services.parsing.translator import translate_title_to_english
+
+    translated = 0
+    skipped_already_english = 0
+    failed = 0
+    inspected = 0
+
+    rows = (await db.execute(
+        select(Job).where(
+            Job.title_en.is_(None),
+            (Job.language.is_(None)) | (Job.language != "en"),
+        ).limit(limit)
+    )).scalars().all()
+
+    for job in rows:
+        inspected += 1
+        title_en, lang = await translate_title_to_english(job.title)
+        if lang is None:
+            failed += 1
+            continue
+        if lang == "en" and not title_en:
+            job.language = "en"
+            skipped_already_english += 1
+            continue
+        job.title_en = title_en
+        job.language = lang
+        translated += 1
+
+    await db.commit()
+
+    return {
+        "inspected": inspected,
+        "translated": translated,
+        "skipped_already_english": skipped_already_english,
+        "failed": failed,
+        "more_to_do": inspected >= limit,
+    }
+
+
 @router.post("/admin/fix/scrub-asset-apply-urls")
 async def admin_scrub_asset_apply_urls(admin: AdminUser, db: DbSession):
     """Wipe Job.apply_url for any row where the cached value points at a

@@ -357,7 +357,129 @@ export default function AdminPage() {
       </Card>
 
       <SourceHealthCard />
+      <TranslateTitlesCard />
     </div>
+  );
+}
+
+
+/* ============================================================
+   TranslateTitlesCard — one-click backfill of English translations
+   for existing non-English job titles. Burns ~$0.00001 per title
+   via Anthropic Haiku. Re-run until "more to do" goes false.
+   ============================================================ */
+type TranslateResult = {
+  inspected: number;
+  translated: number;
+  skipped_already_english: number;
+  failed: number;
+  more_to_do: boolean;
+};
+
+function TranslateTitlesCard() {
+  const [running, setRunning] = useState(false);
+  const [history, setHistory] = useState<TranslateResult[]>([]);
+  const [err, setErr] = useState<string | null>(null);
+
+  const cumulative = history.reduce(
+    (acc, r) => ({
+      translated: acc.translated + r.translated,
+      skipped: acc.skipped + r.skipped_already_english,
+      failed: acc.failed + r.failed,
+    }),
+    { translated: 0, skipped: 0, failed: 0 },
+  );
+
+  const run = async () => {
+    setRunning(true);
+    setErr(null);
+    try {
+      const result = await api.post<TranslateResult>(
+        "/api/v1/auth/admin/backfill-title-translations?limit=30",
+      );
+      setHistory((h) => [...h, result]);
+    } catch (e: any) {
+      setErr(e?.message || "Backfill failed");
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const lastResult = history[history.length - 1];
+  const done = lastResult && !lastResult.more_to_do;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Sparkles className="h-4 w-4" />
+          Translate non-English titles
+        </CardTitle>
+        <CardDescription>
+          Translates titles for existing German / Dutch / etc. jobs to
+          English using Anthropic Haiku (~$0.00001 per title). New jobs
+          are translated automatically at ingest — this card is just for
+          the historical catalogue. Runs in batches of 30 to stay under
+          the 60-second Vercel timeout. Click again until "all done."
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button onClick={run} disabled={running}>
+            {running ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Translating 30…
+              </>
+            ) : done ? (
+              <>
+                <CheckCircle2 className="h-4 w-4" />
+                All done
+              </>
+            ) : (
+              <>
+                <Sparkles className="h-4 w-4" />
+                {history.length === 0 ? "Run translation backfill" : "Run next 30"}
+              </>
+            )}
+          </Button>
+          {history.length > 0 && (
+            <span className="text-xs text-muted-foreground">
+              Session total: <span className="font-mono">{cumulative.translated}</span> translated ·{" "}
+              <span className="font-mono">{cumulative.skipped}</span> already English ·{" "}
+              <span className="font-mono">{cumulative.failed}</span> failed
+            </span>
+          )}
+        </div>
+
+        {err && (
+          <p className="text-sm" style={{ color: "#ef4444" }}>
+            {err}
+          </p>
+        )}
+
+        {lastResult && (
+          <div
+            style={{
+              fontSize: 12,
+              color: "var(--ds-fg-muted)",
+              padding: "8px 10px",
+              background: "var(--ds-bg-elev-1)",
+              border: "1px solid var(--ds-line)",
+              borderRadius: 6,
+            }}
+          >
+            Last batch — inspected <span className="font-mono">{lastResult.inspected}</span>,
+            translated <span className="font-mono" style={{ color: "var(--ds-accent)" }}>{lastResult.translated}</span>,
+            already-English <span className="font-mono">{lastResult.skipped_already_english}</span>,
+            failed <span className="font-mono">{lastResult.failed}</span>.
+            {lastResult.more_to_do
+              ? " There are more to translate — click \"Run next 30\"."
+              : " Catalogue is fully translated."}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
