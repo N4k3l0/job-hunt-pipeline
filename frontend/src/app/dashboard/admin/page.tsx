@@ -358,6 +358,7 @@ export default function AdminPage() {
 
       <SourceHealthCard />
       <TranslateTitlesCard />
+      <BackfillCountriesCard />
       <TranslateDescriptionsCard />
     </div>
   );
@@ -602,6 +603,130 @@ function TranslateDescriptionsCard() {
             {lastResult.more_to_do
               ? " More to go — click \"Run next 15\"."
               : " All non-English descriptions translated."}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+
+/* ============================================================
+   BackfillCountriesCard — one-click country resolution for legacy
+   jobs whose Job.country is NULL but whose Job.location names a
+   known country or city. Fixes geo_score=7/15 (47%) on jobs that
+   should be 15/15 in a user's preferred country.
+   ============================================================ */
+type BackfillCountriesResult = {
+  inspected: number;
+  updated: number;
+  no_match: number;
+  by_country: Record<string, number>;
+  more_to_do: boolean;
+};
+
+function BackfillCountriesCard() {
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<BackfillCountriesResult | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const run = async () => {
+    setRunning(true);
+    setErr(null);
+    try {
+      const data = await api.post<BackfillCountriesResult>(
+        "/api/v1/auth/admin/backfill-job-countries?limit=500",
+      );
+      setResult(data);
+    } catch (e: any) {
+      setErr(e?.message || "Backfill failed");
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Sparkles className="h-4 w-4" />
+          Backfill missing job countries
+        </CardTitle>
+        <CardDescription>
+          Walks jobs whose country is NULL but whose location string names a
+          known city or country ("Frankfurt am Main" → DE, "Bengaluru, India"
+          → IN), and writes the ISO code back. Fixes the case where a job
+          clearly in a user's preferred country still scores 7/15 (47%) on
+          geo because the country field was never populated. Pure SQL —
+          no LLM cost. Re-run until "no more to do."
+          <span className="block mt-2 text-xs text-muted-foreground">
+            After this completes, each user should click <span className="font-mono">Rescore inbox</span> on
+            their profile so the new geo values flow into existing JobScore rows.
+          </span>
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button onClick={run} disabled={running}>
+            {running ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Walking 500 jobs…
+              </>
+            ) : result && !result.more_to_do ? (
+              <>
+                <CheckCircle2 className="h-4 w-4" />
+                All historical rows resolved
+              </>
+            ) : (
+              <>
+                <Sparkles className="h-4 w-4" />
+                {result ? "Run next batch" : "Run country backfill"}
+              </>
+            )}
+          </Button>
+        </div>
+
+        {err && (
+          <p className="text-sm" style={{ color: "#ef4444" }}>{err}</p>
+        )}
+
+        {result && (
+          <div
+            style={{
+              fontSize: 12,
+              color: "var(--ds-fg-muted)",
+              padding: "10px 12px",
+              background: "var(--ds-bg-elev-1)",
+              border: "1px solid var(--ds-line)",
+              borderRadius: 6,
+            }}
+          >
+            <div className="mb-2">
+              Inspected <span className="font-mono">{result.inspected}</span>,
+              resolved <span className="font-mono" style={{ color: "var(--ds-accent)" }}>{result.updated}</span>,
+              no match <span className="font-mono">{result.no_match}</span>.
+              {result.more_to_do ? " Click again for the next batch." : " Done — all historical rows resolved."}
+            </div>
+            {Object.keys(result.by_country).length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {Object.entries(result.by_country).map(([code, n]) => (
+                  <span
+                    key={code}
+                    className="font-mono"
+                    style={{
+                      fontSize: 11,
+                      padding: "2px 6px",
+                      background: "var(--ds-accent-soft)",
+                      color: "var(--ds-accent)",
+                      borderRadius: 4,
+                    }}
+                  >
+                    {code} · {n}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </CardContent>

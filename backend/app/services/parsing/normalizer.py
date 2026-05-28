@@ -296,6 +296,43 @@ def extract_city(location: str | None) -> str | None:
     return first
 
 
+def derive_country_from_location(location: str | None) -> str | None:
+    """Best-effort country resolution from a free-text location string.
+
+    Many scrapers leave Job.country NULL but stuff a city or city+region
+    into Job.location (e.g. "Frankfurt am Main", "Bengaluru, India"). The
+    geo scorer reads job_country directly and falls back to the neutral
+    7/15 bin when it's NULL — which gives 47% on the breakdown even for
+    a job that's clearly in a preferred country.
+
+    Resolution order, first hit wins:
+      1. CITY_TO_COUNTRY substring match — "Frankfurt am Main" → DE.
+      2. COUNTRY_MAP substring match — "Remote in Germany" → DE.
+
+    Both maps are filtered to entries ≥4 chars so short aliases like
+    "UK" / "USA" / "UAE" don't false-match on substrings ("UKraine",
+    "USAge"). Word-boundary check is via str.lower() + a simple
+    " {name} " contained-in test after padding the location, which
+    avoids regex overhead in this hot ingest path.
+    """
+    if not location:
+        return None
+    padded = f" {location.lower()} "
+    # CITY_TO_COUNTRY first — usually higher signal (cities are specific).
+    for name, code in CITY_TO_COUNTRY.items():
+        if len(name) < 4:
+            continue
+        if f" {name} " in padded or padded.lstrip().startswith(f"{name},") or padded.lstrip().startswith(f"{name} "):
+            return code
+    # COUNTRY_MAP as a fallback.
+    for name, code in COUNTRY_MAP.items():
+        if len(name) < 4:
+            continue
+        if f" {name} " in padded or padded.lstrip().startswith(f"{name},") or padded.lstrip().startswith(f"{name} "):
+            return code
+    return None
+
+
 # Known tracking / session params that shouldn't differentiate the same job URL.
 _TRACKING_PARAMS: frozenset[str] = frozenset({
     "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
@@ -374,6 +411,12 @@ async def normalize_and_store_job(
     title = parsed_data.get("title", "Unknown")
     location = parsed_data.get("location")
     country = normalize_country(parsed_data.get("country"))
+    # Fallback: many scrapers leave country NULL but pack a city or
+    # country name into the location string ("Frankfurt am Main",
+    # "Remote in Germany"). Derive an ISO code so the geo scorer
+    # doesn't fall into the neutral 7/15 bin for clearly-located jobs.
+    if not country:
+        country = derive_country_from_location(location)
     city = extract_city(location)
 
     # Compute canonical hash

@@ -779,6 +779,58 @@ async def admin_backfill_description_translations(
     }
 
 
+@router.post("/admin/backfill-job-countries")
+async def admin_backfill_job_countries(admin: AdminUser, db: DbSession, limit: int = 500):
+    """One-shot backfill for jobs whose country is NULL but whose location
+    text obviously names a country or known city ("Frankfurt am Main",
+    "Bengaluru, India", "Remote in Germany").
+
+    The normalizer was extended to do this on every new ingest, but
+    historical rows were normalized before the fallback existed and
+    still show country = NULL — which makes the geo scorer fall into
+    the neutral 7/15 bin instead of the 15/15 preferred-country match.
+
+    Pure SQL + Python — no LLM calls — so even 500 rows finish well
+    under the Vercel 60s timeout. Re-runnable; idempotent.
+
+    NOTE: Backfilling country does NOT rescore. Run /api/v1/candidates/
+    rescore once per user after this completes to see new geo_score
+    values reflected in the inbox.
+    """
+    from sqlalchemy import select
+    from app.models.job import Job
+    from app.services.parsing.normalizer import derive_country_from_location
+
+    rows = (await db.execute(
+        select(Job).where(
+            Job.country.is_(None),
+            Job.location.is_not(None),
+        ).limit(limit)
+    )).scalars().all()
+
+    updated = 0
+    no_match = 0
+    by_country: dict[str, int] = {}
+    for job in rows:
+        code = derive_country_from_location(job.location)
+        if not code:
+            no_match += 1
+            continue
+        job.country = code
+        updated += 1
+        by_country[code] = by_country.get(code, 0) + 1
+
+    await db.commit()
+
+    return {
+        "inspected": len(rows),
+        "updated": updated,
+        "no_match": no_match,
+        "by_country": dict(sorted(by_country.items(), key=lambda kv: -kv[1])),
+        "more_to_do": len(rows) >= limit,
+    }
+
+
 @router.post("/admin/fix/scrub-asset-apply-urls")
 async def admin_scrub_asset_apply_urls(admin: AdminUser, db: DbSession):
     """Wipe Job.apply_url for any row where the cached value points at a
