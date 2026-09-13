@@ -4,6 +4,7 @@ import re
 from app.services.scoring.pm_scorer import score_pm_path
 from app.services.scoring.ai_automation_scorer import score_ai_automation_path
 from app.services.scoring.geo_scorer import score_geography
+from app.services.jobs_filter import country_filter_codes
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +86,7 @@ def compute_job_score(
         job_remote_type=job_data.get("remote_type"),
         job_sponsorship=job_entities.get("sponsorship_available"),
         job_visa_notes=job_entities.get("visa_notes"),
-        preferred_countries=profile.get("preferred_countries", []),
+        preferred_countries=country_filter_codes(profile.get("preferred_countries")) or [],
         visa_statuses=profile.get("visa_statuses", {}),
         remote_preference=profile.get("remote_preference", "any"),
     )
@@ -181,7 +182,10 @@ def compute_job_score(
     from app.services.scoring.embedder import cosine_similarity
     profile_vec = profile.get("embedding")
     job_vec = job_entities.get("embedding")
-    if profile_vec is not None and job_vec is not None:
+    # pgvector returns numpy arrays, which raise on truthiness checks —
+    # always compare against None.
+    semantic_mode = profile_vec is not None and job_vec is not None
+    if semantic_mode:
         cos = cosine_similarity(profile_vec, job_vec)
         # Voyage cosine ranges typically 0.4–0.85 for real pairs. Stretch
         # that into the 0-80 band so the spread between 'unrelated' and
@@ -235,7 +239,7 @@ def compute_job_score(
         "reasoning": {
             "path_used": role_path,
             "intents": sorted(intents),
-            "scoring_mode": "semantic" if profile_vec and job_vec else "rule-based",
+            "scoring_mode": "semantic" if semantic_mode else "rule-based",
             "semantic_cosine": round(semantic_score, 4) if semantic_score else None,
             "rule_overall": round(rule_overall, 1) if path_scores else None,
             **(path_scores.get("reasoning", {}) if path_scores else {}),

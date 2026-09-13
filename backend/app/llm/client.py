@@ -11,18 +11,57 @@ from app.core.config import get_settings
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-# Model selection per task type. Sonnet 4.6 for parsing + scoring
-# (mechanical, cost-sensitive); Opus 4.7 for tailoring + outreach
+# Model selection per task type. Sonnet for parsing, scoring and web
+# search (mechanical, cost-sensitive); Opus for tailoring and outreach
 # (creative, accuracy-sensitive).
 MODELS = {
-    "parsing": "claude-sonnet-4-6",
-    "scoring": "claude-sonnet-4-6",
-    "tailoring": "claude-opus-4-7",
+    "parsing": "claude-sonnet-5",
+    "scoring": "claude-sonnet-5",
+    "search": "claude-sonnet-5",
+    "tailoring": "claude-opus-5",
 }
+
+# Sonnet 5 and Opus 5 think by default. Every call runs inside a Vercel
+# request capped at 60s, so extraction runs at low effort and writing at
+# medium rather than the API default of high.
+EFFORT = {
+    "parsing": "low",
+    "scoring": "medium",
+    "search": "low",
+    "tailoring": "medium",
+}
+
+# Thinking counts toward max_tokens. Callers size max_tokens for the
+# answer alone, so this is added on top.
+THINKING_HEADROOM_TOKENS = 4000
+
+# Opus 5's safety classifiers can decline a request. fallbacks="default"
+# re-runs a declined request on Anthropic's recommended fallback model
+# inside the same call instead of returning the refusal.
+FALLBACK_BETA = "server-side-fallback-2026-07-01"
+FALLBACK_MODELS = frozenset({"claude-opus-5"})
+
+# Below Vercel's 60s function limit, so a hung call surfaces as an error
+# the route can handle instead of the function being killed.
+REQUEST_TIMEOUT_SECONDS = 45.0
+
+
+class LLMRefusalError(RuntimeError):
+    """The model (and any fallback) declined the request."""
+
+
+def model_for(task_type: str) -> str:
+    return MODELS.get(task_type, MODELS["parsing"])
+
+
+def effort_for(task_type: str) -> str:
+    return EFFORT.get(task_type, "medium")
 
 
 class LLMClient:
-    """Wrapper around Claude API with retry logic and cost tracking.
+    """Wrapper around the Claude API: per-task model and effort, refusal
+    handling, and token logging. Retries on 408/409/429/5xx and connection
+    errors come from the SDK (max_retries).
 
     The underlying anthropic.AsyncAnthropic client is built lazily on
     first use so importing this module is cheap. Saves ~500ms cold-start
@@ -31,13 +70,15 @@ class LLMClient:
 
     def __init__(self):
         self._client = None
-        self._anthropic_module = None
 
     def _client_lazy(self):
         if self._client is None:
             import anthropic
-            self._anthropic_module = anthropic
-            self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+            self._client = anthropic.AsyncAnthropic(
+                api_key=settings.anthropic_api_key,
+                timeout=REQUEST_TIMEOUT_SECONDS,
+                max_retries=2,
+            )
         return self._client
 
     @property
@@ -45,12 +86,36 @@ class LLMClient:
         # Backwards-compat for any caller still touching .client directly.
         return self._client_lazy()
 
-    @staticmethod
-    def _accepts_temperature(model: str) -> bool:
-        """Opus 4.7 deprecated the `temperature` parameter — passing it
-        now returns 400 invalid_request_error. Sonnet 4.6 + Haiku still
-        accept it. Centralise the check so callers don't need to know."""
-        return "opus-4-7" not in model
+    async def _create(self, task_type: str, **kwargs: Any):
+        model = model_for(task_type)
+        kwargs.update(
+            model=model,
+            max_tokens=kwargs["max_tokens"] + THINKING_HEADROOM_TOKENS,
+            output_config={"effort": effort_for(task_type)},
+        )
+        client = self._client_lazy()
+        if model in FALLBACK_MODELS:
+            response = await client.beta.messages.create(
+                **kwargs, betas=[FALLBACK_BETA], fallbacks="default"
+            )
+        else:
+            response = await client.messages.create(**kwargs)
+
+        usage = response.usage
+        logger.info(
+            "LLM call: task=%s model=%s served_by=%s input_tokens=%d output_tokens=%d stop=%s",
+            task_type, model, response.model, usage.input_tokens,
+            usage.output_tokens, response.stop_reason,
+        )
+
+        if response.stop_reason == "refusal":
+            details = getattr(response, "stop_details", None)
+            category = getattr(details, "category", None)
+            raise LLMRefusalError(
+                f"Claude declined the {task_type} request"
+                + (f" (category: {category})" if category else "")
+            )
+        return response
 
     async def generate(
         self,
@@ -58,43 +123,19 @@ class LLMClient:
         system_prompt: str,
         user_prompt: str,
         max_tokens: int = 4096,
-        temperature: float = 0.0,
     ) -> str:
         """Generate a text response from Claude."""
-        model = MODELS.get(task_type, MODELS["parsing"])
-
-        kwargs: dict[str, Any] = dict(
-            model=model,
+        response = await self._create(
+            task_type,
             max_tokens=max_tokens,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
         )
-        if self._accepts_temperature(model):
-            kwargs["temperature"] = temperature
-
-        try:
-            response = await self.client.messages.create(**kwargs)
-
-            usage = response.usage
-            logger.info(
-                "LLM call: task=%s model=%s input_tokens=%d output_tokens=%d",
-                task_type, model, usage.input_tokens, usage.output_tokens,
-            )
-
-            return response.content[0].text
-
-        except Exception as e:
-            # `anthropic` is imported lazily, so we can't catch its exception
-            # types directly at the top level. Use the cached module reference
-            # to distinguish rate limits from generic API errors for logging.
-            anthropic = self._anthropic_module
-            if anthropic is not None and isinstance(e, anthropic.RateLimitError):
-                logger.warning("Rate limited on %s, will retry", task_type)
-            elif anthropic is not None and isinstance(e, anthropic.APIError):
-                logger.error("Claude API error: %s", e)
-            else:
-                logger.error("Unexpected LLM error: %s", e)
-            raise
+        # Thinking blocks come before the text, so join the text blocks
+        # rather than reading content[0].
+        return "".join(
+            block.text for block in response.content if block.type == "text"
+        )
 
     async def generate_structured(
         self,
@@ -114,25 +155,13 @@ class LLMClient:
         require a structured tool response. Override via the parameter
         if a caller really wants opt-in behavior.
         """
-        model = MODELS.get(task_type, MODELS["parsing"])
-
-        kwargs: dict[str, Any] = dict(
-            model=model,
+        response = await self._create(
+            task_type,
             max_tokens=max_tokens,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
             tools=tools,
             tool_choice=tool_choice or {"type": "any"},
-        )
-        if self._accepts_temperature(model):
-            kwargs["temperature"] = 0.0
-
-        response = await self.client.messages.create(**kwargs)
-
-        usage = response.usage
-        logger.info(
-            "LLM structured call: task=%s model=%s input_tokens=%d output_tokens=%d",
-            task_type, model, usage.input_tokens, usage.output_tokens,
         )
 
         for block in response.content:
@@ -140,15 +169,17 @@ class LLMClient:
                 return block.input
 
         # Fallback: no tool_use block in the response. With tool_choice=any
-        # this shouldn't happen, but be defensive — pull the first text
-        # block if present, else surface a clear error rather than crashing
-        # on a missing attribute.
-        for block in response.content:
-            if getattr(block, "type", None) == "text" and getattr(block, "text", None):
-                return {"text": block.text}
+        # this shouldn't happen, but be defensive — pull the text if
+        # present, else surface a clear error rather than crashing on a
+        # missing attribute.
+        text = "".join(
+            block.text for block in response.content if block.type == "text"
+        )
+        if text:
+            return {"text": text}
         raise RuntimeError(
             "LLM returned no tool_use or text content. "
-            f"stop_reason={getattr(response, 'stop_reason', '?')}"
+            f"stop_reason={response.stop_reason}"
         )
 
 

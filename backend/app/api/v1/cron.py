@@ -826,29 +826,51 @@ async def cron_debug_supabase_user(
 @router.get("/debug-llm")
 async def cron_debug_llm(authorization: str | None = Header(None)):
     """Tiny ping to the LLM client: does the current Anthropic key + model
-    ID round-trip end to end? Used to confirm Generate/Regenerate isn't
-    failing because of stale model IDs or a bad API key."""
+    ID round-trip end to end, for both plain text and forced tool use?
+    Used to confirm Generate/Regenerate and parsing aren't failing because
+    of stale model IDs, request-shape changes, or a bad API key."""
     _verify_cron(authorization)
     from app.llm.client import llm_client, MODELS
     import time
     out: dict = {"models_in_use": MODELS}
-    for task in ("scoring", "tailoring"):
+    echo_tool = {
+        "name": "record_word",
+        "description": "Record a single word.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"word": {"type": "string"}},
+            "required": ["word"],
+        },
+    }
+    checks = [
+        ("scoring", "text"), ("tailoring", "text"),
+        ("parsing", "tool"), ("tailoring", "tool"),
+    ]
+    for task, kind in checks:
         started = time.monotonic()
         try:
-            text = await llm_client.generate(
-                task_type=task,
-                system_prompt="You are a single-word echo bot.",
-                user_prompt="Reply with exactly the word OK and nothing else.",
-                max_tokens=12,
-                temperature=0.0,
-            )
-            out[task] = {
+            if kind == "text":
+                reply = await llm_client.generate(
+                    task_type=task,
+                    system_prompt="You are a single-word echo bot.",
+                    user_prompt="Reply with exactly the word OK and nothing else.",
+                    max_tokens=12,
+                )
+            else:
+                reply = await llm_client.generate_structured(
+                    task_type=task,
+                    system_prompt="You record words.",
+                    user_prompt="Record the word OK.",
+                    tools=[echo_tool],
+                    max_tokens=50,
+                )
+            out[f"{task}_{kind}"] = {
                 "ok": True,
                 "elapsed_s": round(time.monotonic() - started, 2),
-                "reply": (text or "").strip()[:40],
+                "reply": str(reply).strip()[:40],
             }
         except Exception as e:  # noqa: BLE001
-            out[task] = {
+            out[f"{task}_{kind}"] = {
                 "ok": False,
                 "elapsed_s": round(time.monotonic() - started, 2),
                 "error_type": type(e).__name__,

@@ -215,13 +215,24 @@ async def approve_application(
     app.approved_at = datetime.now(timezone.utc)
 
     from app.models.tracking import ApplicationTracking
-    tracking = ApplicationTracking(
-        job_id=app.job_id,
-        user_id=user_id,
-        tailored_application_id=app.id,
-        status="approved",
-    )
-    db.add(tracking)
+    # Reuse the user's existing tracking row (e.g. they pressed "I applied"
+    # before approving) so a job never ends up with two rows per user.
+    tracking = (await db.execute(
+        select(ApplicationTracking).where(
+            ApplicationTracking.job_id == app.job_id,
+            ApplicationTracking.user_id == user_id,
+        ).order_by(ApplicationTracking.updated_at.desc()).limit(1)
+    )).scalar_one_or_none()
+    if tracking is None:
+        tracking = ApplicationTracking(
+            job_id=app.job_id,
+            user_id=user_id,
+            tailored_application_id=app.id,
+            status="approved",
+        )
+        db.add(tracking)
+    else:
+        tracking.tailored_application_id = app.id
 
     await db.commit()
     await db.refresh(app)
@@ -334,6 +345,12 @@ async def regenerate_section(
         if body.guidance and body.guidance.strip()
         else ""
     )
+    # Current models don't accept `temperature`, which used to make
+    # re-rolls differ; ask for variety in the prompt instead.
+    guidance_block += (
+        "This replaces a draft the candidate asked to redo, so vary the "
+        "phrasing and structure rather than playing it safe.\n"
+    )
 
     # Build "top experience" string from the existing tailored resume so the
     # regenerated section stays consistent with what the user already has.
@@ -355,13 +372,11 @@ async def regenerate_section(
             top_experience=top_exp,
             guidance_block=guidance_block,
         )
-        # Slightly higher temp on regenerate so re-rolls actually differ.
         new_content = (await llm_client.generate(
             task_type="tailoring",
             system_prompt=SYSTEM_PROMPT,
             user_prompt=prompt,
             max_tokens=400,
-            temperature=0.6,
         )).strip()
         app.tailored_summary = new_content
     elif body.section == "cover_letter":
@@ -386,7 +401,6 @@ async def regenerate_section(
             system_prompt=SYSTEM_PROMPT,
             user_prompt=prompt,
             max_tokens=1200,
-            temperature=0.6,
         ))
         app.cover_letter = new_content
     else:  # recruiter_message
@@ -418,7 +432,6 @@ async def regenerate_section(
             system_prompt=SYSTEM_PROMPT,
             user_prompt=prompt,
             max_tokens=500,
-            temperature=0.6,
         ))
         app.recruiter_message = new_content
 

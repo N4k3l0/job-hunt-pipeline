@@ -6,15 +6,23 @@ from uuid import UUID
 import httpx
 from fastapi import APIRouter, Query, HTTPException, Response
 from pydantic import BaseModel
-from sqlalchemy import select, func, and_, not_, exists
+from sqlalchemy import select, func, and_, or_, not_, exists
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUserId, DbSession
 from app.models.job import Job, JobContact, JobEntity, JobSource
+from app.models.job_state import UserJobState
 from app.models.scoring import JobScore
 from app.models.candidate import CandidateProfile
 from app.models.tracking import ApplicationTracking
 from app.services.discovery.ats_resolver import find_direct_apply, is_ats_url, _is_aggregator
+from app.services.jobs_filter import country_filter_codes
+from app.services.job_state import (
+    APPLIED_TRACKING_STATUSES,
+    USER_JOB_STATUSES,
+    effective_status,
+    set_user_job_state,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -104,14 +112,6 @@ async def list_jobs(
     # only post-"applied" statuses. Tailored-but-not-yet-applied rows
     # (status="approved", created by /tailoring) stay visible so the
     # user can keep iterating from the draft.
-    APPLIED_STATUSES = (
-        "applied",
-        "follow_up_due",
-        "interviewing",
-        "offered",
-        "rejected",
-        "ghosted",
-    )
     # Eagerly fetch the small list of applied job IDs and use a plain
     # IN-list filter. Earlier attempts with NOT IN (subquery) and
     # NOT EXISTS were emptying the inbox — likely a correlation issue
@@ -138,22 +138,37 @@ async def list_jobs(
     applied_ids_result = await db.execute(
         select(ApplicationTracking.job_id).where(
             ApplicationTracking.user_id == user_id,
-            ApplicationTracking.status.in_(APPLIED_STATUSES),
+            ApplicationTracking.status.in_(APPLIED_TRACKING_STATUSES),
         )
     )
     applied_ids = [row[0] for row in applied_ids_result.all()]
+    applied_id_set = set(applied_ids)
     logger.info(
         "Inbox pipeline filter: user=%s applied_count=%d include_applied=%s",
         user_id, len(applied_ids), include_applied,
     )
 
+    # Shortlist/dismiss are per-user (user_job_states). Dismissed jobs stay
+    # hidden unless the caller asks for them explicitly with ?status=.
+    user_state_join = and_(UserJobState.job_id == Job.id, UserJobState.user_id == user_id)
+    if status in USER_JOB_STATUSES:
+        status_clause = UserJobState.status == status
+    else:
+        status_clause = or_(
+            UserJobState.status.is_(None), UserJobState.status != "dismissed"
+        )
+        if status:
+            status_clause = and_(status_clause, Job.status == status)
+
     # Base query
     query = (
-        select(Job, JobScore, JobSource)
+        select(Job, JobScore, JobSource, UserJobState.status)
         .outerjoin(JobScore, and_(JobScore.job_id == Job.id, JobScore.user_id == user_id))
         .outerjoin(JobSource, JobSource.id == Job.source_id)
         .outerjoin(JobEntity, JobEntity.job_id == Job.id)
+        .outerjoin(UserJobState, user_state_join)
         .where(Job.status.notin_(["duplicate", "raw", "expired", "dismissed"]))
+        .where(status_clause)
     )
     if not include_applied and applied_ids:
         query = query.where(Job.id.notin_(applied_ids))
@@ -161,7 +176,6 @@ async def list_jobs(
     # Pull profile preferences once and run them through the shared filter
     # (same code path the dashboard's /analytics/overview uses, so the counts
     # always agree).
-    from sqlalchemy import or_  # still used by role_type override below
     from app.services.jobs_filter import apply_user_filters
     from app.models.candidate import CandidateSkill
     profile_result = await db.execute(
@@ -286,8 +300,6 @@ async def list_jobs(
             keywords = [f"%{role_type}%"]
 
         query = query.where(or_(*[func.lower(Job.title).like(kw) for kw in keywords]))
-    if status:
-        query = query.where(Job.status == status)
 
     # Count total — apply identical filter chain through the shared helper.
     count_base = (
@@ -295,7 +307,9 @@ async def list_jobs(
         .outerjoin(JobScore, and_(JobScore.job_id == Job.id, JobScore.user_id == user_id))
         .outerjoin(JobSource, JobSource.id == Job.source_id)
         .outerjoin(JobEntity, JobEntity.job_id == Job.id)
+        .outerjoin(UserJobState, user_state_join)
         .where(Job.status.notin_(["duplicate", "raw", "expired", "dismissed"]))
+        .where(status_clause)
     )
     if not include_applied and applied_ids:
         count_base = count_base.where(Job.id.notin_(applied_ids))
@@ -339,8 +353,6 @@ async def list_jobs(
         )
     if role_type:
         count_base = count_base.where(or_(*[func.lower(Job.title).like(kw) for kw in keywords]))
-    if status:
-        count_base = count_base.where(Job.status == status)
     total_result = await db.execute(count_base)
     total = total_result.scalar() or 0
 
@@ -367,6 +379,7 @@ async def list_jobs(
         job = row[0]  # Job
         score = row[1]  # JobScore or None
         job_source = row[2]  # JobSource or None
+        user_state = row[3]  # this user's shortlisted/dismissed, or None
 
         job_dict = {
             "id": str(job.id),
@@ -390,7 +403,11 @@ async def list_jobs(
             "seniority": job.seniority,
             "application_type": job.application_type,
             "source_name": job_source.name if job_source else "manual",
-            "status": job.status,
+            "status": effective_status(
+                job.status,
+                user_state,
+                "applied" if job.id in applied_id_set else None,
+            ),
             "discovered_at": job.discovered_at.isoformat() if job.discovered_at else None,
             "expires_at": job.expires_at.isoformat() if job.expires_at else None,
             # First ~240 chars of the JD, HTML-stripped + word-boundary
@@ -524,6 +541,19 @@ async def get_job(job_id: UUID, user_id: CurrentUserId, db: DbSession):
     )
     score = score_result.scalar_one_or_none()
 
+    user_state = (await db.execute(
+        select(UserJobState.status).where(
+            UserJobState.job_id == job_id,
+            UserJobState.user_id == user_id,
+        )
+    )).scalar_one_or_none()
+    tracking_status = (await db.execute(
+        select(ApplicationTracking.status).where(
+            ApplicationTracking.job_id == job_id,
+            ApplicationTracking.user_id == user_id,
+        ).order_by(ApplicationTracking.updated_at.desc()).limit(1)
+    )).scalar_one_or_none()
+
     return {
         "id": str(job.id),
         "company": job.company,
@@ -542,7 +572,7 @@ async def get_job(job_id: UUID, user_id: CurrentUserId, db: DbSession):
         "seniority": job.seniority,
         "application_type": job.application_type,
         "source_name": job.source.name if job.source else "manual",
-        "status": job.status,
+        "status": effective_status(job.status, user_state, tracking_status),
         "raw_description": job.raw_description,
         # English translation when source was non-English. Frontend
         # renders `raw_description_en || raw_description` so the body
@@ -666,7 +696,7 @@ async def search_web_for_jobs(user_id: CurrentUserId, db: DbSession):
     try:
         results = await search_jobs_for_user(
             target_roles=list(profile.target_roles or []),
-            preferred_countries=list(profile.preferred_countries or []),
+            preferred_countries=country_filter_codes(profile.preferred_countries),
             skills=skills,
             remote_preference=profile.remote_preference,
         )
@@ -955,43 +985,45 @@ async def import_bulk_urls(
     }
 
 
-@router.post("/{job_id}/shortlist")
-async def shortlist_job(job_id: UUID, user_id: CurrentUserId, db: DbSession):
-    """Move a job to shortlisted status."""
-    result = await db.execute(select(Job).where(Job.id == job_id))
-    job = result.scalar_one_or_none()
+async def _get_job_or_404(db, job_id: UUID) -> Job:
+    job = (await db.execute(select(Job).where(Job.id == job_id))).scalar_one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    job.status = "shortlisted"
+    return job
+
+
+@router.post("/{job_id}/shortlist")
+async def shortlist_job(job_id: UUID, user_id: CurrentUserId, db: DbSession):
+    """Shortlist a job for the current user only."""
+    await _get_job_or_404(db, job_id)
+    await set_user_job_state(db, user_id, job_id, "shortlisted")
     await db.commit()
     return {"status": "shortlisted", "job_id": str(job_id)}
 
 
 @router.post("/{job_id}/unshortlist")
 async def unshortlist_job(job_id: UUID, user_id: CurrentUserId, db: DbSession):
-    """Move a shortlisted job back to the regular inbox.
-
-    Reverts status to "enriched" — the standard post-scoring inbox state.
-    If the job was never shortlisted, this is a no-op.
-    """
-    result = await db.execute(select(Job).where(Job.id == job_id))
-    job = result.scalar_one_or_none()
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    if job.status == "shortlisted":
-        job.status = "enriched"
+    """Move a shortlisted job back to the current user's regular inbox.
+    No-op if the user hadn't shortlisted it."""
+    job = await _get_job_or_404(db, job_id)
+    current = (await db.execute(
+        select(UserJobState.status).where(
+            UserJobState.job_id == job_id,
+            UserJobState.user_id == user_id,
+        )
+    )).scalar_one_or_none()
+    if current == "shortlisted":
+        await set_user_job_state(db, user_id, job_id, None)
         await db.commit()
-    return {"status": job.status, "job_id": str(job_id)}
+        current = None
+    return {"status": effective_status(job.status, current), "job_id": str(job_id)}
 
 
 @router.post("/{job_id}/dismiss")
 async def dismiss_job(job_id: UUID, user_id: CurrentUserId, db: DbSession):
-    """Dismiss/archive a job."""
-    result = await db.execute(select(Job).where(Job.id == job_id))
-    job = result.scalar_one_or_none()
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    job.status = "dismissed"
+    """Dismiss/archive a job for the current user only."""
+    await _get_job_or_404(db, job_id)
+    await set_user_job_state(db, user_id, job_id, "dismissed")
     await db.commit()
     return {"status": "dismissed", "job_id": str(job_id)}
 
@@ -1084,20 +1116,17 @@ async def resolve_apply_url(job_id: UUID, user_id: CurrentUserId, db: DbSession)
 async def mark_applied(job_id: UUID, user_id: CurrentUserId, db: DbSession):
     """Explicit user action: 'I just submitted this application.'
 
-    Creates / updates the ApplicationTracking row to status='applied' and
-    flips the job's own status so the inbox stops surfacing it as fresh.
+    Creates / updates this user's ApplicationTracking row to
+    status='applied', which is what hides the job from their inbox.
     Idempotent: re-pressing won't downgrade an interview/offer/rejected.
     """
-    result = await db.execute(select(Job).where(Job.id == job_id))
-    job = result.scalar_one_or_none()
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+    await _get_job_or_404(db, job_id)
 
     existing = await db.execute(
         select(ApplicationTracking).where(
             ApplicationTracking.job_id == job_id,
             ApplicationTracking.user_id == user_id,
-        )
+        ).order_by(ApplicationTracking.updated_at.desc()).limit(1)
     )
     tracking = existing.scalar_one_or_none()
     if tracking is None:
@@ -1113,9 +1142,6 @@ async def mark_applied(job_id: UUID, user_id: CurrentUserId, db: DbSession):
             tracking.status = "applied"
             if not tracking.applied_at:
                 tracking.applied_at = datetime.now(timezone.utc)
-
-    if job.status not in ("applied", "shortlisted"):
-        job.status = "applied"
 
     await db.commit()
     await db.refresh(tracking)
@@ -1134,16 +1160,11 @@ async def unmark_applied(job_id: UUID, user_id: CurrentUserId, db: DbSession):
         select(ApplicationTracking).where(
             ApplicationTracking.job_id == job_id,
             ApplicationTracking.user_id == user_id,
+            ApplicationTracking.status == "applied",
         )
     )
-    tracking = result.scalar_one_or_none()
-    if tracking and tracking.status == "applied":
+    for tracking in result.scalars().all():
         await db.delete(tracking)
-
-    job_result = await db.execute(select(Job).where(Job.id == job_id))
-    job = job_result.scalar_one_or_none()
-    if job and job.status == "applied":
-        job.status = "discovered"
 
     await db.commit()
     return {"status": "rolled_back"}

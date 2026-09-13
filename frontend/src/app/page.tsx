@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, ArrowUpRight, Check } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
+import { api } from "@/lib/api-client";
 
 import "./homepage.css";
 
@@ -117,13 +118,13 @@ function InviteForm({ placeholder, formKey }: { placeholder: string; formKey: "h
     }
     setSubmitting(true);
     try {
-      // Public invite-request endpoint isn't wired yet — the form accepts the
-      // submission optimistically and shows the success state. When the
-      // endpoint lands, replace this with a fetch to /api/v1/invite-requests.
-      await new Promise((r) => setTimeout(r, 350));
+      await api.post("/api/v1/invite-requests", { email: trimmed, source: formKey });
       setSuccess(true);
-    } catch {
-      toast.error("Couldn't reach the server", { description: "Try again in a moment." });
+    } catch (err) {
+      const invalid = (err as { status?: number }).status === 422;
+      toast.error(invalid ? "That email doesn't look right." : "Couldn't reach the server", {
+        description: invalid ? "Check it and try again." : "Try again in a moment.",
+      });
     } finally {
       setSubmitting(false);
     }
@@ -480,9 +481,9 @@ function FounderNote() {
 function Invite() {
   const stats: Array<{ n: string; l: string; accent?: boolean }> = [
     { n: "~36h", l: "REPLY TIME", accent: true },
-    { n: "240", l: "ACTIVE USERS" },
+    { n: "13", l: "JOB SOURCES" },
     { n: "8", l: "SCORING AXES" },
-    { n: "06:04", l: "DAILY SWEEP · UTC" },
+    { n: "06:00", l: "DAILY SWEEP · UTC" },
   ];
   return (
     <section className="hp-invite">
@@ -537,9 +538,9 @@ function Footer() {
       <div className="hp-footer-meta hp-mono">
         <span>v0.4 · beta</span>
         <span className="hp-faint">·</span>
-        <span>Last sweep 06:04 UTC</span>
+        <span>Daily sweep 06:00 UTC</span>
         <span className="hp-faint">·</span>
-        <span>240 active</span>
+        <span>13 sources</span>
       </div>
     </footer>
   );

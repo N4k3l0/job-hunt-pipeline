@@ -12,6 +12,8 @@ from app.models.scoring import JobScore
 from app.models.tailoring import TailoredApplication
 from app.models.tracking import ApplicationTracking, OutreachLog, PipelineEvent
 from app.models.feedback import Feedback
+from app.models.job_state import UserJobState
+from app.models.invite_request import InviteRequest
 
 __all__ = [
     "User",
@@ -31,4 +33,6 @@ __all__ = [
     "OutreachLog",
     "PipelineEvent",
     "Feedback",
+    "UserJobState",
+    "InviteRequest",
 ]

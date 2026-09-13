@@ -356,11 +356,81 @@ export default function AdminPage() {
         </CardContent>
       </Card>
 
+      <InviteRequestsCard />
       <SourceHealthCard />
       <TranslateTitlesCard />
       <BackfillCountriesCard />
       <TranslateDescriptionsCard />
     </div>
+  );
+}
+
+
+/* ============================================================
+   InviteRequestsCard — emails submitted through the landing page's
+   "Request invite" form. Invite someone with the form above.
+   ============================================================ */
+type InviteRequestRecord = {
+  id: string;
+  email: string;
+  source: string | null;
+  created_at: string | null;
+};
+
+function InviteRequestsCard() {
+  const [loading, setLoading] = useState(false);
+  const [requests, setRequests] = useState<InviteRequestRecord[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const load = async () => {
+    setLoading(true);
+    setErr(null);
+    try {
+      setRequests(await api.get<InviteRequestRecord[]>("/api/v1/invite-requests"));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Couldn't load invite requests");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Mail className="h-4 w-4" />
+          Invite requests
+        </CardTitle>
+        <CardDescription>
+          Emails from the landing page&apos;s &quot;Request invite&quot; form, newest first.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <Button onClick={load} disabled={loading} variant="outline">
+          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          {requests ? "Refresh" : "Load requests"}
+        </Button>
+        {err && <p className="text-sm text-red-400">{err}</p>}
+        {requests && requests.length === 0 && (
+          <p className="text-sm text-muted-foreground">No requests yet.</p>
+        )}
+        {requests && requests.length > 0 && (
+          <div className="space-y-1">
+            {requests.map((r) => (
+              <div
+                key={r.id}
+                className="flex items-center justify-between rounded-lg px-3 py-2 border border-white/[0.04]"
+              >
+                <span className="text-sm">{r.email}</span>
+                <span className="text-xs text-muted-foreground font-mono">
+                  {r.created_at ? new Date(r.created_at).toLocaleDateString() : ""}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

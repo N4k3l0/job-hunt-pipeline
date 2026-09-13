@@ -155,7 +155,7 @@ async def run_deep_score(
     deep_score["scored_at"] = datetime.now(timezone.utc).isoformat()
     # Metadata only — actual model is selected by llm_client via MODELS map.
     # Kept for transparency in the cached deep_score_json blob.
-    deep_score["model"] = MODELS.get("scoring", "claude-sonnet-4-6")
+    deep_score["model"] = MODELS["scoring"]
 
     # Cache the result on the JobScore record
     if score_record:

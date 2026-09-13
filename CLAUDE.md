@@ -76,15 +76,18 @@ celery -A app.workers.celery_app beat --loglevel=info
 ### Database Migrations
 ```bash
 cd backend
+export PYTHONPATH=.  # alembic/env.py imports the app package
 alembic revision --autogenerate -m "description"
 alembic upgrade head
 alembic downgrade -1  # rollback one step
 ```
+Keep a single head: `alembic heads` should print one revision.
 
 ## Key Conventions
 
 ### Backend
 - All DB queries filter by `user_id` from JWT — never return another user's data
+- `jobs` rows are shared by all users. Never write per-user state to `jobs.status`: shortlist/dismiss go in `user_job_states`, applied state in `application_tracking` (see `services/job_state.py`)
 - Use async SQLAlchemy with `asyncpg` throughout
 - Pydantic schemas for all request/response validation
 - Business logic lives in `services/`, not in route handlers
@@ -99,8 +102,9 @@ alembic downgrade -1  # rollback one step
 - API client in `lib/api-client.ts` handles auth token injection
 
 ### LLM Usage
-- **Sonnet** for: job parsing, resume parsing, scoring
-- **Opus** for: resume tailoring, cover letters, outreach messages
+- **Sonnet 5** (`claude-sonnet-5`) for: job parsing, resume parsing, scoring, web search
+- **Opus 5** (`claude-opus-5`) for: resume tailoring, cover letters, outreach messages
+- Model IDs and per-task effort live only in `llm/client.py` (`MODELS`, `EFFORT`). Don't pass `temperature` — current models and SDK 1.x reject it
 - **HARD RULE:** Never fabricate experience, tools, metrics, or employers in tailored content
 - All generated content validated against candidate's structured profile before showing to user
 - Track token usage per call for cost management
@@ -115,7 +119,9 @@ Every job flows: Raw → Normalized → Deduplicated → Enriched → Scored →
 ```bash
 cd backend
 pytest tests/unit/
-pytest tests/integration/
+# Integration tests need a disposable Postgres with pgvector, migrated to
+# head, whose database name contains "test". They TRUNCATE tables.
+TEST_DATABASE_URL=postgresql://user@localhost:5432/jobhunt_test pytest tests/integration/
 ```
 
 ## Environment Variables

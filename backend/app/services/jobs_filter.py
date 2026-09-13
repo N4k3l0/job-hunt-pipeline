@@ -27,6 +27,23 @@ from app.models.job import Job
 from app.models.job import JobSource
 
 
+# Sentinel the onboarding / profile country picker saves for
+# "Worldwide / Remote".
+WORLDWIDE_CODE = "WW"
+
+
+def country_filter_codes(preferred_countries: list[str] | None) -> list[str] | None:
+    """Uppercased country codes to filter on, or None for no country filter.
+
+    Empty preferences and any selection that includes Worldwide both mean
+    "don't filter by country". Treating WW as a country code would keep
+    only jobs whose location names no real place at all."""
+    codes = [c.strip().upper() for c in (preferred_countries or []) if c and c.strip()]
+    if not codes or WORLDWIDE_CODE in codes:
+        return None
+    return codes
+
+
 def build_role_keywords(target_roles: list[str] | None) -> list[str]:
     """Expand a user's target_roles into SQL LIKE patterns.
 
@@ -128,7 +145,8 @@ def apply_user_filters(
     AI Engineer who has Python as a skill, even though 'Python' isn't a
     role keyword.
 
-    When `preferred_countries` is non-empty, jobs are kept only if they're
+    When `preferred_countries` names real countries (not empty, and not
+    Worldwide — see country_filter_codes), jobs are kept only if they're
     in one of those countries, fully remote (location-agnostic), or have
     no country information at all (NULL — we don't know, give the benefit
     of doubt rather than starve the inbox). Hybrid/onsite jobs in an
@@ -171,7 +189,7 @@ def apply_user_filters(
         )
 
     if preferred_countries:
-        wanted = [c.upper() for c in preferred_countries if c]
+        wanted = country_filter_codes(preferred_countries)
         if wanted:
             # Keep: full_remote (location-agnostic) OR country in wanted set
             # OR country IS NULL (unclassified — could be anywhere, including
