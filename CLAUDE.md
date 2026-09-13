@@ -146,6 +146,7 @@ Both frontend and backend deploy as **separate Vercel projects** pointing at the
 
 ### Backend project
 - **Root directory**: `backend`
+- **Region**: `dub1` (Dublin, set in `backend/vercel.json`), next to the Supabase database in AWS eu-west-1. Keep them together: every request opens a fresh database connection
 - **Framework preset**: Other (Vercel auto-detects Python via `vercel.json`)
 - **Required env vars**: `DATABASE_URL` (Supabase pooler, port 6543), `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_KEY`, `SUPABASE_JWT_SECRET`, `ANTHROPIC_API_KEY`, `FIRECRAWL_API_KEY`, `ADZUNA_APP_ID`, `ADZUNA_APP_KEY`, `JSEARCH_RAPIDAPI_KEY`, `CORS_ORIGINS`, `CRON_SECRET`
 - **Cron jobs** are defined in `backend/vercel.json` (fast/slow discovery — Vercel Hobby allows max 2)
