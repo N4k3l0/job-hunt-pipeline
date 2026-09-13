@@ -978,6 +978,22 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
                     </span>
                   </div>
                 )}
+                {/* Freshness: closed jobs are expired automatically, but a
+                    recent "last listed" date is the clearest sign it's open. */}
+                <div className="flex justify-between">
+                  <span className="ds-muted">Last listed</span>
+                  <span className="ds-mono ds-dim" style={{ fontSize: 12 }}>
+                    {job.last_seen_at ? new Date(job.last_seen_at).toLocaleDateString() : "Not yet re-checked"}
+                  </span>
+                </div>
+                {job.last_checked_at && (
+                  <div className="flex justify-between">
+                    <span className="ds-muted">Link checked</span>
+                    <span className="ds-mono ds-dim" style={{ fontSize: 12 }}>
+                      {new Date(job.last_checked_at).toLocaleDateString()}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
 

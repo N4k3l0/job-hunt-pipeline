@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import select, and_
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import defer, selectinload
 
 from app.workers.celery_app import celery_app
 from app.core.database import create_worker_session
@@ -155,7 +155,10 @@ async def _batch_score_async(user_id: str, rescore_all: bool = False):
                 Job.id.notin_(scored_job_ids),
             )
             .order_by(Job.discovered_at.desc().nulls_last())
-            .options(selectinload(Job.entities))
+            # raw_content duplicates the whole source payload and isn't
+            # used for scoring; skipping it roughly halves the data a full
+            # rescore pulls from the database.
+            .options(defer(Job.raw_content), selectinload(Job.entities))
         )
         if not rescore_all:
             scan = scan.limit(300)
@@ -204,7 +207,7 @@ async def rescore_jobs_for_all_users(job_ids: list[UUID]) -> int:
             return 0
 
         jobs = (await db.execute(
-            select(Job).where(Job.id.in_(job_ids)).options(selectinload(Job.entities))
+            select(Job).where(Job.id.in_(job_ids)).options(defer(Job.raw_content), selectinload(Job.entities))
         )).scalars().all()
         existing: dict[tuple, JobScore] = {}
         for row in (await db.execute(

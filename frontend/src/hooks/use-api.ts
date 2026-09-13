@@ -223,7 +223,21 @@ export function useUploadResume() {
   return useMutation({
     mutationFn: ({ file, versionName, tags }: { file: File; versionName: string; tags: string }) =>
       api.upload<Resume>("/api/v1/candidates/resumes", file, { version_name: versionName, tags }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["resumes"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["resumes"] });
+      qc.invalidateQueries({ queryKey: ["profile"] });
+      // Rescoring runs as its own request: parsing plus a full rescore in
+      // one request can exceed the backend's 60s limit.
+      api
+        .post("/api/v1/candidates/rescore")
+        .then(() => {
+          qc.invalidateQueries({ queryKey: ["jobs"] });
+          qc.invalidateQueries({ queryKey: ["analytics"] });
+        })
+        .catch(() => {
+          // Scores refresh on the next scheduled pass if this fails.
+        });
+    },
   });
 }
 

@@ -22,6 +22,10 @@ export interface Job {
   source_name: string | null;
   status: string;
   discovered_at: string;
+  /** Last time a job board listed this job (it was still open then). */
+  last_seen_at?: string | null;
+  /** Last time the job's link was checked. */
+  last_checked_at?: string | null;
   expires_at: string | null;
 }
 

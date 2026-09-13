@@ -1099,6 +1099,35 @@ async def cron_enrich(
     }
 
 
+@router.get("/expire-stale")
+async def cron_expire_stale(
+    authorization: str | None = Header(None),
+    dry_run: bool = False,
+    verify_limit: int = 40,
+):
+    """Expire closed jobs: ones gone from full company boards, ones that
+    are old and no longer listed anywhere, and (unless dry_run) a batch of
+    links that now return 404/410. `dry_run=true` only reports counts."""
+    _verify_cron(authorization)
+
+    from app.core.database import create_worker_session
+    from app.services.maintenance.job_expiry import expire_stale_jobs
+    from app.services.maintenance.url_verifier import verify_batch
+
+    async with create_worker_session()() as db:
+        outcome = await expire_stale_jobs(db, dry_run=dry_run)
+
+    if not dry_run and verify_limit > 0:
+        try:
+            async with create_worker_session()() as db:
+                outcome["link_check"] = await asyncio.wait_for(
+                    verify_batch(db, limit=min(verify_limit, 100), timeout_s=4.0), timeout=35
+                )
+        except asyncio.TimeoutError:
+            outcome["link_check"] = "timeout"
+    return outcome
+
+
 @router.get("/review-top-matches")
 async def cron_review_top_matches(
     authorization: str | None = Header(None),

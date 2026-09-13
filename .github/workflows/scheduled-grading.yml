@@ -1,5 +1,6 @@
-# Reads newly discovered jobs with the extraction model and runs AI reviews
-# on each user's best new matches. Vercel Hobby only allows two cron jobs
+# Reads newly discovered jobs with the extraction model, expires closed
+# jobs, and runs AI reviews on each user's best new matches (skipped when
+# REVIEWS_PER_USER_PER_DAY is 0). Vercel Hobby only allows two cron jobs
 # (both used for discovery), so this schedule lives here instead.
 #
 # Off until the repository variable GRADING_SCHEDULE_ENABLED is "true".
@@ -36,7 +37,16 @@ jobs:
             -H "Authorization: Bearer $CRON_SECRET" \
             "$BACKEND_URL/api/v1/cron/enrich?limit=$JOBS_PER_RUN"
 
+      - name: Expire closed jobs
+        # Jobs gone from company boards or old and no longer listed, plus
+        # a batch of link checks. No AI calls, so no API cost.
+        run: |
+          curl --fail-with-body -sS --max-time 70 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$BACKEND_URL/api/v1/cron/expire-stale?verify_limit=40"
+
       - name: Review top matches
+        if: ${{ env.REVIEWS_PER_USER_PER_DAY != '0' }}
         run: |
           curl --fail-with-body -sS --max-time 70 \
             -H "Authorization: Bearer $CRON_SECRET" \

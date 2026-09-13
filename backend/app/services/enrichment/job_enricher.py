@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from sqlalchemy import or_, select
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import defer, selectinload
 
 from app.core.database import create_worker_session
 from app.llm.client import llm_client
@@ -216,7 +216,7 @@ async def enrich_pending_jobs(
             )
             .order_by(Job.discovered_at.desc())
             .limit(limit)
-            .options(selectinload(Job.entities))
+            .options(defer(Job.raw_content), selectinload(Job.entities))
         )).scalars().all()
         result.selected = len(rows)
         now = datetime.now(timezone.utc)

@@ -657,7 +657,7 @@ export default function ProfilePage() {
                 {uploadResume.isSuccess && (
                   <p className="text-sm text-emerald-400 mt-3 flex items-center justify-center gap-1.5">
                     <CheckCircle2 className="h-4 w-4" />
-                    Resume uploaded + parsed. Your inbox has been rescored.
+                    Resume uploaded and parsed. Your inbox is being rescored and will update in about a minute.
                   </p>
                 )}
                 {uploadResume.isError && (

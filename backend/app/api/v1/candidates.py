@@ -448,18 +448,9 @@ async def upload_resume(
         import logging
         logging.getLogger(__name__).error("Resume parse failed: %s", e)
 
-    # Full rescore against the freshly-parsed profile. Resume parsing
-    # wipes + rebuilds work_history / skills / bullets, so any existing
-    # JobScore rows reflect a stale profile and must be recomputed.
-    # Pure deterministic compute (no LLM calls) — 1.7k jobs scores in
-    # ~3s, well inside the Vercel 60s budget alongside the LLM parse.
-    from app.workers.scoring_tasks import _batch_score_async
-    try:
-        await _batch_score_async(str(user_id), rescore_all=True)
-    except Exception as e:  # noqa: BLE001
-        import logging
-        logging.getLogger(__name__).error("Initial scoring after upload failed: %s", e)
-
+    # No rescore here: parsing plus a full-catalog rescore can exceed the
+    # 60s function limit. The client calls POST /candidates/rescore as a
+    # separate request once this returns.
     return resume
 
 

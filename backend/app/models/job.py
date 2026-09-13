@@ -85,6 +85,10 @@ class Job(Base):
     )
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     parsed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Last time a discovery source listed this job (it's still open there).
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Last time the job's link was probed by the URL checker.
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Relationships
     source: Mapped["JobSource | None"] = relationship(back_populates="jobs")
