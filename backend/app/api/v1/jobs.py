@@ -421,6 +421,8 @@ async def list_jobs(
                 "applied" if job.id in applied_id_set else None,
             ),
             "discovered_at": job.discovered_at.isoformat() if job.discovered_at else None,
+            "last_seen_at": job.last_seen_at.isoformat() if job.last_seen_at else None,
+            "last_checked_at": job.last_checked_at.isoformat() if job.last_checked_at else None,
             "expires_at": job.expires_at.isoformat() if job.expires_at else None,
             # First ~240 chars of the JD, HTML-stripped + word-boundary
             # trimmed. Prefer the English translation when the source was
@@ -591,6 +593,8 @@ async def get_job(job_id: UUID, user_id: CurrentUserId, db: DbSession):
         # reads in English when we caught it.
         "raw_description_en": job.raw_description_en,
         "discovered_at": job.discovered_at.isoformat() if job.discovered_at else None,
+        "last_seen_at": job.last_seen_at.isoformat() if job.last_seen_at else None,
+        "last_checked_at": job.last_checked_at.isoformat() if job.last_checked_at else None,
         "expires_at": job.expires_at.isoformat() if job.expires_at else None,
         "entities": {
             "skills": job.entities.skills if job.entities else None,

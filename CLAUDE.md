@@ -118,6 +118,8 @@ Every job flows: Raw → Normalized → Deduplicated → Enriched → Scored →
 - Hard filters (`services/jobs_filter.py`) hide jobs per user: preferred countries, remote preference, remote roles restricted away from the user's home country, no sponsorship where the user needs it, and source-stated salary below the user's minimum. A job that doesn't state a fact is never hidden by it
 - Discovery sources keep location-restricted jobs and tag `eligible_countries`; they don't drop them
 - `/api/v1/cron/review-top-matches` runs deep reviews on each user's best new matches, capped per user per day
+- Freshness: ingest sets `jobs.last_seen_at` whenever a source lists a job again. `/api/v1/cron/expire-stale` expires jobs gone from full company boards (`curated`, unseen 5 days) and jobs older than 45 days that no source has listed for 30 days, then probes a batch of links (`last_checked_at`, 404/410 → expired). Jobs a user applied to or tailored for are never expired; old shortlisted ones are kept
+- Resume upload doesn't rescore inline (parse + full rescore can exceed 60s); the frontend calls `POST /candidates/rescore` afterwards
 - Tailoring only triggered by user action or for high-priority (80+) jobs
 
 ### Testing

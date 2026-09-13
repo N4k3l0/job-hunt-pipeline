@@ -47,20 +47,21 @@ async def _ingest_raw_jobs(jobs: list[dict]) -> tuple[int, int]:
     # 30-50s loop into ~2s.
     async with create_worker_session()() as db:
         seen_rows = await db.execute(
-            select(Job.canonical_hash, Job.job_url).where(
+            select(Job.id, Job.canonical_hash, Job.job_url).where(
                 Job.status.notin_(["raw"])
             )
         )
-        existing_hashes: set[str] = set()
-        existing_urls: set[str] = set()
-        for h, u in seen_rows.all():
+        ids_by_hash: dict[str, list] = {}
+        ids_by_url: dict[str, list] = {}
+        for job_id, h, u in seen_rows.all():
             if h:
-                existing_hashes.add(h)
+                ids_by_hash.setdefault(h, []).append(job_id)
             if u:
-                existing_urls.add(u)
+                ids_by_url.setdefault(u, []).append(job_id)
 
     pre_filtered: list[dict] = []
     pre_skipped = 0
+    still_listed: set = set()
     for raw in jobs:
         # Compute the same fingerprint we'd compute downstream.
         company = raw.get("company", "Unknown")
@@ -70,9 +71,11 @@ async def _ingest_raw_jobs(jobs: list[dict]) -> tuple[int, int]:
         city = extract_city(location)
         canonical_hash = compute_canonical_hash(company, title, city, country)
         normalized_url = normalize_url(raw.get("job_url"))
-        if canonical_hash in existing_hashes or (
-            normalized_url and normalized_url in existing_urls
-        ):
+        matches = ids_by_hash.get(canonical_hash, []) + (
+            ids_by_url.get(normalized_url, []) if normalized_url else []
+        )
+        if matches:
+            still_listed.update(matches)
             pre_skipped += 1
             continue
         # Stash the precomputed values so we don't recompute them.
@@ -84,6 +87,18 @@ async def _ingest_raw_jobs(jobs: list[dict]) -> tuple[int, int]:
         "Bulk pre-filter: %d candidates → %d to ingest (%d known dups skipped)",
         len(jobs), len(pre_filtered), pre_skipped,
     )
+
+    # A source listing a job we already have means it's still open there.
+    if still_listed:
+        from sqlalchemy import update
+        now = datetime.now(timezone.utc)
+        ids = list(still_listed)
+        async with create_worker_session()() as db:
+            for start in range(0, len(ids), 1000):
+                await db.execute(
+                    update(Job).where(Job.id.in_(ids[start:start + 1000])).values(last_seen_at=now)
+                )
+            await db.commit()
 
     async with create_worker_session()() as db:
         stored = 0
@@ -170,6 +185,7 @@ async def _ingest_raw_jobs(jobs: list[dict]) -> tuple[int, int]:
                     canonical_hash=canonical_hash,
                     status="enriched",
                     parsed_at=datetime.now(timezone.utc),
+                    last_seen_at=datetime.now(timezone.utc),
                 )
                 db.add(job)
 

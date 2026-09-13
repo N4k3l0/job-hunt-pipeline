@@ -1,10 +1,9 @@
 """Probe job apply URLs and mark confirmed-dead postings as expired.
 
-Used both by:
+Used by:
   - The admin 'Verify URLs' button (interactive, large batches)
-  - The daily cron (small piggyback batch — 25–50 jobs/day so the whole
-    catalogue gets a pass within a few weeks without burning a Vercel
-    cron slot we don't have)
+  - The daily cron (small piggyback batch)
+  - /cron/expire-stale on the scheduled grading workflow
 
 Conservative on purpose — only flips status to 'expired' on a definitive
 HTTP 404 / 410. Any other response (200, 30x, 403, 5xx, timeout, network
@@ -100,13 +99,15 @@ async def verify_batch(
     concurrency: int = 8,
     timeout_s: float = 4.0,
 ) -> dict[str, int | bool]:
-    """Probe up to `limit` unapplied jobs, oldest first, and mark
-    confirmed-dead ones as expired. Returns counters + has_more.
-
-    The cron caller passes a small `limit` (25–50) so the whole pass
-    fits inside the leftover budget after discovery/scoring runs.
+    """Probe up to `limit` unapplied jobs, least recently checked first,
+    and mark confirmed-dead ones as expired. Every probed job gets
+    last_checked_at, so repeated calls work through the whole catalog.
+    Jobs any user is tracking (applied, tailored) are left alone.
+    Returns counters + has_more.
     """
-    from sqlalchemy import func as sa_func, text
+    from datetime import datetime, timezone
+    from sqlalchemy import exists, func as sa_func, text
+    from app.models.tracking import ApplicationTracking
 
     bounded = min(max(int(limit), 1), 250)
 
@@ -115,8 +116,9 @@ async def verify_batch(
         .where(
             Job.status.in_(PRE_APPLIED_STATUSES),
             (Job.apply_url.is_not(None)) | (Job.job_url.is_not(None)),
+            ~exists().where(ApplicationTracking.job_id == Job.id),
         )
-        .order_by(Job.discovered_at.asc().nulls_first())
+        .order_by(Job.last_checked_at.asc().nulls_first(), Job.discovered_at.asc().nulls_first())
         .limit(bounded)
     )
     if age_days_min > 0:
@@ -148,7 +150,9 @@ async def verify_batch(
     alive = 0
     ambiguous = 0
     skipped = 0
+    now = datetime.now(timezone.utc)
     for job, verdict in results:
+        job.last_checked_at = now
         if verdict == "dead":
             job.status = "expired"
             expired += 1
@@ -159,8 +163,7 @@ async def verify_batch(
         else:
             ambiguous += 1
 
-    if expired:
-        await db.commit()
+    await db.commit()
 
     if expired:
         logger.info(
