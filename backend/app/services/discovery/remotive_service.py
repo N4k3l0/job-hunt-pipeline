@@ -2,7 +2,7 @@
 
 Endpoint: GET https://remotive.com/api/remote-jobs
 Returns a single JSON payload with the full active list (~1-2k jobs). Each
-record has a `candidate_required_location` field we use for Nigeria-eligibility.
+record has a `candidate_required_location` field we turn into eligible_countries.
 
 NOTE on rate limit: Remotive throttles aggressively. Their docs say >2 calls
 per minute will be blocked, and they recommend at most a few polls per day.
@@ -16,7 +16,7 @@ import logging
 import httpx
 
 from app.services.discovery.eligibility import (
-    is_nigeria_friendly,
+    eligible_countries_from_text,
     matches_keywords,
 )
 
@@ -31,7 +31,7 @@ async def fetch_jobs(
     category: str | None = None,
     limit: int = 200,
 ) -> list[dict]:
-    """Fetch the active Remotive feed and filter to Nigeria-eligible postings.
+    """Fetch the active Remotive feed, filtered by keywords.
 
     Args:
         keywords: substring keywords to filter title/description on.
@@ -68,13 +68,14 @@ async def fetch_jobs(
         if not matches_keywords(searchable, keywords):
             continue
 
-        if is_nigeria_friendly(
+        # Restricted postings (e.g. US-only) are kept and tagged; each
+        # user's inbox filters them by home country.
+        normalized = _normalize_remotive(item)
+        normalized["eligible_countries"] = eligible_countries_from_text(
             candidate_required_location=item.get("candidate_required_location"),
             description=description,
-        ) is False:
-            continue
-
-        matched.append(_normalize_remotive(item))
+        )
+        matched.append(normalized)
         if len(matched) >= limit:
             break
 

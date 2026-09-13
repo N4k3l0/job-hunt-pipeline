@@ -115,6 +115,11 @@ class JobEntity(Base):
     application_questions: Mapped[list[str] | None] = mapped_column(JSONB)
     years_experience_min: Mapped[int | None] = mapped_column(Integer)
     years_experience_max: Mapped[int | None] = mapped_column(Integer)
+    # ISO-2 codes the posting accepts applicants from (e.g. ["US"] for a
+    # US-only remote role). NULL = unrestricted or unknown.
+    eligible_countries: Mapped[list[str] | None] = mapped_column(JSONB)
+    # Set when the extraction model has read the posting.
+    enriched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Semantic-scoring embedding — 512-dim Voyage (voyage-3-lite).
     # Populated at ingest, used by the new scorer for cosine similarity
     # against the candidate profile vector.

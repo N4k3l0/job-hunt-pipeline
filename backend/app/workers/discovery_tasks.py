@@ -180,13 +180,15 @@ async def _ingest_raw_jobs(jobs: list[dict]) -> tuple[int, int]:
                 # plumbing change.
                 desc = raw.get("raw_description", "")
                 visa_flag = raw.get("visa_sponsorship")
-                if desc or visa_flag is not None:
+                eligible = raw.get("eligible_countries")
+                if desc or visa_flag is not None or eligible:
                     entities = JobEntity(
                         job_id=job_id,
                         skills=raw.get("tags", []),
                         requirements=[],
                         keywords=[],
                         sponsorship_available=visa_flag if isinstance(visa_flag, bool) else None,
+                        eligible_countries=eligible or None,
                     )
                     db.add(entities)
 

@@ -1,0 +1,43 @@
+# Reads newly discovered jobs with the extraction model and runs AI reviews
+# on each user's best new matches. Vercel Hobby only allows two cron jobs
+# (both used for discovery), so this schedule lives here instead.
+#
+# Off until the repository variable GRADING_SCHEDULE_ENABLED is "true".
+# Also needs: secret CRON_SECRET (same value as the backend's) and
+# variable BACKEND_URL (e.g. https://backend-nakel0s-projects.vercel.app).
+#
+# Cost at the default settings: about $0.004 per job read and $0.04 per
+# review, capped at REVIEWS_PER_USER_PER_DAY reviews per user per day.
+name: Scheduled grading
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: scheduled-grading
+  cancel-in-progress: false
+
+jobs:
+  grade:
+    if: ${{ vars.GRADING_SCHEDULE_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BACKEND_URL: ${{ vars.BACKEND_URL }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+      JOBS_PER_RUN: ${{ vars.ENRICH_JOBS_PER_RUN || '25' }}
+      REVIEWS_PER_USER_PER_DAY: ${{ vars.REVIEWS_PER_USER_PER_DAY || '3' }}
+    steps:
+      - name: Read new jobs
+        run: |
+          curl --fail-with-body -sS --max-time 70 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$BACKEND_URL/api/v1/cron/enrich?limit=$JOBS_PER_RUN"
+
+      - name: Review top matches
+        run: |
+          curl --fail-with-body -sS --max-time 70 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$BACKEND_URL/api/v1/cron/review-top-matches?per_user_daily=$REVIEWS_PER_USER_PER_DAY"

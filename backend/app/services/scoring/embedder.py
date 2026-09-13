@@ -146,7 +146,8 @@ def profile_corpus(*, target_roles: Iterable[str] | None,
                    headline: str | None,
                    summary: str | None,
                    skills: Iterable[str] | None,
-                   work_history: Iterable[dict] | None = None) -> str:
+                   work_history: Iterable[dict] | None = None,
+                   interests: Iterable[str] | None = None) -> str:
     """Build the text we embed per profile. Same shape as job_corpus
     so cosine similarity is meaningful — target_roles aligns to titles,
     headline to short company-blurb, summary to description, skills to
@@ -156,6 +157,10 @@ def profile_corpus(*, target_roles: Iterable[str] | None,
         roles = [r for r in target_roles if r]
         if roles:
             parts.append("Target roles: " + ", ".join(roles))
+    if interests:
+        kw = [k for k in interests if k]
+        if kw:
+            parts.append("Interests: " + ", ".join(kw[:20]))
     if headline:
         parts.append(f"Headline: {headline}")
     if skills:
@@ -178,6 +183,48 @@ def profile_corpus(*, target_roles: Iterable[str] | None,
     if summary:
         parts.append(f"\n{summary[:1500]}")
     return "\n".join(parts).strip()
+
+
+async def refresh_profile_embedding(db, profile) -> bool:
+    """Re-embed a candidate profile after anything that feeds the corpus
+    changes. Loads skills and work history itself; the caller commits.
+    Returns False (and leaves the old vector) when Voyage is unconfigured
+    or the call fails — scoring then uses rules only."""
+    from sqlalchemy import select
+    from app.models.candidate import CandidateSkill, CandidateWorkHistory
+
+    if not hasattr(profile, "embedding"):
+        return False
+    skills = (await db.execute(
+        select(CandidateSkill.skill_name).where(CandidateSkill.profile_id == profile.id)
+    )).scalars().all()
+    work = (await db.execute(
+        select(CandidateWorkHistory)
+        .where(CandidateWorkHistory.profile_id == profile.id)
+        .order_by(CandidateWorkHistory.sort_order)
+    )).scalars().all()
+    text = profile_corpus(
+        target_roles=profile.target_roles or [],
+        headline=profile.headline,
+        summary=profile.master_summary,
+        skills=[s for s in skills if s],
+        work_history=[
+            {"title": w.title, "company": w.company, "bullets": w.bullets or []}
+            for w in work
+        ],
+        interests=profile.search_keywords or [],
+    )
+    import asyncio
+    try:
+        # Bounded so a slow embedding service can't hold up a profile save.
+        vector = await asyncio.wait_for(embed_one(text, input_type="query"), timeout=10)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Profile embedding failed for profile %s: %s", profile.id, e)
+        return False
+    if vector is None:
+        return False
+    profile.embedding = vector
+    return True
 
 
 def cosine_similarity(a: Sequence[float], b: Sequence[float]) -> float:

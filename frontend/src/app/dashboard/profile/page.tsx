@@ -34,6 +34,7 @@ import {
 } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/toast";
 import { COUNTRY_OPTIONS } from "@/lib/countries";
+import { HomeCountrySelect } from "@/components/home-country-select";
 
 type SetupStep = {
   id: string;
@@ -155,6 +156,7 @@ export default function ProfilePage() {
   const [salaryMin, setSalaryMin] = useState("");
   const [salaryMax, setSalaryMax] = useState("");
   const [salaryCurrency, setSalaryCurrency] = useState("USD");
+  const [homeCountry, setHomeCountry] = useState<string | null>(null);
   const [remotePref, setRemotePref] = useState("any");
   const [searchKeywords, setSearchKeywords] = useState<string[]>([]);
   const [blockedSources, setBlockedSources] = useState<string[]>([]);
@@ -177,11 +179,12 @@ export default function ProfilePage() {
       setPortfolio(profile.links?.portfolio || "");
       setTargetRoles(profile.target_roles || []);
       setCountries(profile.preferred_countries || []);
+      setHomeCountry(profile.home_country || null);
       setSalaryMin(profile.salary_min?.toString() || "");
       setSalaryMax(profile.salary_max?.toString() || "");
       setSalaryCurrency(profile.salary_currency || "USD");
       setRemotePref(profile.remote_preference || "any");
-      setSearchKeywords((profile as any).search_keywords || []);
+      setSearchKeywords(profile.search_keywords || []);
       setBlockedSources(profile.blocked_sources || []);
     }
   }, [profile]);
@@ -200,6 +203,7 @@ export default function ProfilePage() {
     { id: "summary", label: "Write a master summary", done: !!profile?.master_summary?.trim(), tab: "profile" },
     { id: "roles", label: "Pick target roles", done: (profile?.target_roles?.length ?? 0) > 0, tab: "preferences" },
     { id: "regions", label: "Pick preferred regions", done: (profile?.preferred_countries?.length ?? 0) > 0, tab: "preferences" },
+    { id: "home", label: "Set the country you live in", done: !!profile?.home_country, tab: "preferences" },
     { id: "salary", label: "Set salary expectations", done: !!profile?.salary_min || !!profile?.salary_max, tab: "preferences" },
   ];
 
@@ -228,6 +232,7 @@ export default function ProfilePage() {
     const data = {
       target_roles: targetRoles,
       preferred_countries: countries,
+      home_country: homeCountry,
       search_keywords: searchKeywords,
       salary_min: salaryMin ? parseInt(salaryMin) : null,
       salary_max: salaryMax ? parseInt(salaryMax) : null,
@@ -816,6 +821,17 @@ export default function ProfilePage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
+              <div className="space-y-2">
+                <Label>Where you live</Label>
+                <div>
+                  <HomeCountrySelect value={homeCountry} onChange={setHomeCountry} />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Remote jobs that only hire in other countries are hidden from your inbox.
+                </p>
+              </div>
+              <Separator />
+              <Label>Countries you want jobs in</Label>
               <div className="flex flex-wrap gap-2">
                 {countries.map((c) => {
                   // Show the country NAME (not just the ISO code) so a

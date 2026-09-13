@@ -184,30 +184,9 @@ async def _parse_resume_async(resume_id: str, user_id: str):
         # are non-fatal — the scorer falls back to the rule-based path if
         # the embedding is missing. Done after commit so an embed error
         # can't roll back the parse work.
-        try:
-            from app.services.scoring.embedder import embed_one, profile_corpus
-            wh_for_embed = [
-                {
-                    "title": w.title,
-                    "company": w.company,
-                    "bullets": w.bullets or [],
-                }
-                for w in profile.work_history
-            ]
-            skills_for_embed = [s.skill_name for s in profile.skills if s.skill_name]
-            text = profile_corpus(
-                target_roles=profile.target_roles or [],
-                headline=profile.headline,
-                summary=profile.master_summary,
-                skills=skills_for_embed,
-                work_history=wh_for_embed,
-            )
-            vector = await embed_one(text, input_type="query")
-            if vector is not None:
-                profile.embedding = vector
-                await db.commit()
-        except Exception as e:  # noqa: BLE001
-            logger.warning("Profile embedding failed for user %s: %s", user_id, e)
+        from app.services.scoring.embedder import refresh_profile_embedding
+        if await refresh_profile_embedding(db, profile):
+            await db.commit()
 
         # Note: rescore is handled by the caller (candidates.upload_resume)
         # which awaits _batch_score_async directly. The scorer reads the

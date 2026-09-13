@@ -5,9 +5,9 @@ Two endpoints we use:
 - GET /jobs/api/search?...    — server-side filterable
 
 We use the /search endpoint with `worldwide=true` so the feed itself is biased
-toward Nigeria-eligible postings; we still apply our own `is_nigeria_friendly`
-heuristic per-row to catch the postings that have a `locationRestrictions`
-field even when the worldwide flag was set.
+toward postings open to any country; rows that still carry
+`locationRestrictions` are tagged with eligible_countries so each user's
+inbox can filter them by home country.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ import logging
 import httpx
 
 from app.services.discovery.eligibility import (
-    is_nigeria_friendly,
+    eligible_countries_from_text,
     matches_keywords,
 )
 
@@ -89,7 +89,6 @@ async def fetch_jobs(
                 if not matches_keywords(f"{title} {description}", keywords):
                     continue
 
-                # Drop postings that *explicitly* exclude Nigeria.
                 # locationRestrictions can come back as a string repr of a list
                 # (e.g. "['United States']") — handle both shapes.
                 lr_raw = item.get("locationRestrictions")
@@ -103,13 +102,14 @@ async def fetch_jobs(
                 else:
                     lr_list = lr_raw or []
 
-                if is_nigeria_friendly(
+                # Restricted postings are kept and tagged; each user's
+                # inbox filters them by home country.
+                normalized = _normalize_himalayas(item, lr_list, job_id)
+                normalized["eligible_countries"] = eligible_countries_from_text(
                     location_restrictions=lr_list if lr_list else None,
                     description=description,
-                ) is False:
-                    continue
-
-                matched.append(_normalize_himalayas(item, lr_list, job_id))
+                )
+                matched.append(normalized)
                 page_added += 1
 
             logger.info(

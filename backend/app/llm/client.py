@@ -11,10 +11,12 @@ from app.core.config import get_settings
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-# Model selection per task type. Sonnet for parsing, scoring and web
-# search (mechanical, cost-sensitive); Opus for tailoring and outreach
+# Model selection per task type. Haiku for high-volume field extraction
+# from every incoming job; Sonnet for parsing, scoring and web search
+# (mechanical, cost-sensitive); Opus for tailoring and outreach
 # (creative, accuracy-sensitive).
 MODELS = {
+    "extraction": "claude-haiku-4-5",
     "parsing": "claude-sonnet-5",
     "scoring": "claude-sonnet-5",
     "search": "claude-sonnet-5",
@@ -23,8 +25,11 @@ MODELS = {
 
 # Sonnet 5 and Opus 5 think by default. Every call runs inside a Vercel
 # request capped at 60s, so extraction runs at low effort and writing at
-# medium rather than the API default of high.
+# medium rather than the API default of high. None = the model doesn't
+# take an effort setting (Haiku 4.5 rejects it) and doesn't think unless
+# asked, so no thinking headroom either.
 EFFORT = {
+    "extraction": None,
     "parsing": "low",
     "scoring": "medium",
     "search": "low",
@@ -54,7 +59,7 @@ def model_for(task_type: str) -> str:
     return MODELS.get(task_type, MODELS["parsing"])
 
 
-def effort_for(task_type: str) -> str:
+def effort_for(task_type: str) -> str | None:
     return EFFORT.get(task_type, "medium")
 
 
@@ -88,11 +93,11 @@ class LLMClient:
 
     async def _create(self, task_type: str, **kwargs: Any):
         model = model_for(task_type)
-        kwargs.update(
-            model=model,
-            max_tokens=kwargs["max_tokens"] + THINKING_HEADROOM_TOKENS,
-            output_config={"effort": effort_for(task_type)},
-        )
+        kwargs["model"] = model
+        effort = effort_for(task_type)
+        if effort is not None:
+            kwargs["max_tokens"] += THINKING_HEADROOM_TOKENS
+            kwargs["output_config"] = {"effort": effort}
         client = self._client_lazy()
         if model in FALLBACK_MODELS:
             response = await client.beta.messages.create(

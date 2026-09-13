@@ -55,6 +55,18 @@ async def test_request_shape_for_sonnet_tasks():
     assert "temperature" not in call
 
 
+async def test_extraction_uses_haiku_without_effort_or_thinking_headroom():
+    llm, messages, _ = _client_with(_response(
+        SimpleNamespace(type="tool_use", name="record", input={"ok": True}), model="claude-haiku-4-5",
+    ))
+    await llm.generate_structured("extraction", "sys", "hi", tools=[{"name": "record"}], max_tokens=1500)
+
+    (call,) = messages.calls
+    assert call["model"] == "claude-haiku-4-5"
+    assert call["max_tokens"] == 1500
+    assert "output_config" not in call
+
+
 async def test_opus_tasks_use_server_side_fallbacks():
     llm, messages, beta_messages = _client_with(
         _response(SimpleNamespace(type="text", text="ok"), model="claude-opus-5")

@@ -4,7 +4,7 @@ from fastapi import APIRouter
 from sqlalchemy import select, func, and_, or_
 
 from app.api.deps import CurrentUserId, DbSession
-from app.models.job import Job, JobSource
+from app.models.job import Job, JobEntity, JobSource
 from app.models.job_state import UserJobState
 from app.models.scoring import JobScore
 from app.models.tracking import ApplicationTracking
@@ -29,6 +29,10 @@ async def get_overview(user_id: CurrentUserId, db: DbSession):
             CandidateProfile.blocked_sources,
             CandidateProfile.remote_preference,
             CandidateProfile.preferred_countries,
+            CandidateProfile.home_country,
+            CandidateProfile.visa_statuses,
+            CandidateProfile.salary_min,
+            CandidateProfile.salary_currency,
         ).where(CandidateProfile.user_id == user_id)
     )
     profile_row = profile_result.first()
@@ -56,6 +60,7 @@ async def get_overview(user_id: CurrentUserId, db: DbSession):
     jobs_query = (
         select(func.count(func.distinct(Job.id)))
         .outerjoin(JobSource, JobSource.id == Job.source_id)
+        .outerjoin(JobEntity, JobEntity.job_id == Job.id)
         .outerjoin(
             UserJobState,
             and_(UserJobState.job_id == Job.id, UserJobState.user_id == user_id),
@@ -70,6 +75,10 @@ async def get_overview(user_id: CurrentUserId, db: DbSession):
         blocked_sources=blocked_sources,
         remote_preference=remote_preference,
         preferred_countries=preferred_countries,
+        home_country=profile_row[5] if profile_row else None,
+        visa_statuses=profile_row[6] if profile_row else None,
+        salary_min=profile_row[7] if profile_row else None,
+        salary_currency=profile_row[8] if profile_row else None,
     )
     jobs_result = await db.execute(jobs_query)
     jobs_discovered = jobs_result.scalar() or 0

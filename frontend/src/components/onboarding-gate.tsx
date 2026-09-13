@@ -5,7 +5,8 @@
  *
  *   1. The user has set their name (currently empty on Supabase invite).
  *   2. The user has uploaded at least one resume.
- *   3. The user has picked at least one preferred country (or "Worldwide").
+ *   3. The user has picked at least one preferred country (or "Worldwide")
+ *      and the country they live in.
  *
  * Without any of those, every downstream feature is degraded — scoring
  * has no profile to match against, tailoring has nothing to draw from,
@@ -45,6 +46,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 import { COUNTRY_OPTIONS } from "@/lib/countries";
+import { HomeCountrySelect } from "@/components/home-country-select";
 
 export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const { data: user, isLoading: userLoading } = useCurrentUser();
@@ -64,8 +66,9 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const hasName = !!(user?.name && user.name.trim().length > 0);
   const hasResume = (resumes?.length ?? 0) > 0;
   const hasCountries = (profile?.preferred_countries?.length ?? 0) > 0;
+  const hasHomeCountry = !!profile?.home_country;
 
-  if (hasName && hasResume && hasCountries) {
+  if (hasName && hasResume && hasCountries && hasHomeCountry) {
     return <>{children}</>;
   }
 
@@ -73,9 +76,10 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     <OnboardingFlow
       hasName={hasName}
       hasResume={hasResume}
-      hasCountries={hasCountries}
+      hasCountries={hasCountries && hasHomeCountry}
       existingName={user?.name ?? ""}
       existingCountries={profile?.preferred_countries ?? []}
+      existingHomeCountry={profile?.home_country ?? null}
       hasProfile={!!profile}
     />
   );
@@ -88,6 +92,7 @@ function OnboardingFlow({
   hasCountries,
   existingName,
   existingCountries,
+  existingHomeCountry,
   hasProfile,
 }: {
   hasName: boolean;
@@ -95,6 +100,7 @@ function OnboardingFlow({
   hasCountries: boolean;
   existingName: string;
   existingCountries: string[];
+  existingHomeCountry: string | null;
   hasProfile: boolean;
 }) {
   const toast = useToast();
@@ -106,6 +112,7 @@ function OnboardingFlow({
   const [name, setName] = useState(existingName);
   const [file, setFile] = useState<File | null>(null);
   const [countries, setCountries] = useState<string[]>(existingCountries);
+  const [homeCountry, setHomeCountry] = useState<string | null>(existingHomeCountry);
 
   // Active step progression: name → resume → countries. Once a step
   // lands the panel shifts focus to the next without a page transition.
@@ -144,6 +151,12 @@ function OnboardingFlow({
   }
 
   async function saveCountries() {
+    if (!homeCountry) {
+      toast.error("Pick the country you live in", {
+        description: "We use it to hide remote jobs that only hire in other countries.",
+      });
+      return;
+    }
     if (countries.length === 0) {
       toast.error("Pick at least one country", {
         description: "Or 'Worldwide / Remote' if you don't care about location.",
@@ -151,7 +164,7 @@ function OnboardingFlow({
       return;
     }
     try {
-      const payload = { preferred_countries: countries };
+      const payload = { preferred_countries: countries, home_country: homeCountry };
       if (hasProfile) {
         await updateProfile.mutateAsync(payload);
       } else {
@@ -302,6 +315,17 @@ function OnboardingFlow({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
+          <div className="space-y-2">
+            <Label>Where do you live?</Label>
+            <div>
+              <HomeCountrySelect value={homeCountry} onChange={setHomeCountry} disabled={!hasResume} />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Some remote jobs only hire people in certain countries. We hide those
+              when they don&apos;t include yours.
+            </p>
+          </div>
+          <Label>Countries you want jobs in</Label>
           <div className="flex flex-wrap gap-2 min-h-[34px]">
             {countries.map((code) => {
               const meta = COUNTRY_OPTIONS.find((o) => o.code === code);
@@ -383,7 +407,8 @@ function OnboardingFlow({
               !hasResume ||
               updateProfile.isPending ||
               createProfile.isPending ||
-              countries.length === 0
+              countries.length === 0 ||
+              !homeCountry
             }
           >
             {(updateProfile.isPending || createProfile.isPending) ? (
