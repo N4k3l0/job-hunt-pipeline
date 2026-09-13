@@ -185,6 +185,10 @@ async def list_jobs(
             CandidateProfile.blocked_sources,
             CandidateProfile.remote_preference,
             CandidateProfile.preferred_countries,
+            CandidateProfile.home_country,
+            CandidateProfile.visa_statuses,
+            CandidateProfile.salary_min,
+            CandidateProfile.salary_currency,
         ).where(CandidateProfile.user_id == user_id)
     )
     profile_row = profile_result.first()
@@ -193,6 +197,12 @@ async def list_jobs(
     blocked_sources = profile_row[2] if profile_row else None
     profile_remote_pref = profile_row[3] if profile_row else None
     profile_pref_countries = profile_row[4] if profile_row else None
+    hard_filters = {
+        "home_country": profile_row[5] if profile_row else None,
+        "visa_statuses": profile_row[6] if profile_row else None,
+        "salary_min": profile_row[7] if profile_row else None,
+        "salary_currency": profile_row[8] if profile_row else None,
+    }
 
     # Empty / null preferred_countries means WORLDWIDE — no country filter
     # applied at all. The user opted out of geo gating; show them every
@@ -231,6 +241,7 @@ async def list_jobs(
         # single country via ?country= — that param already constrains the
         # query and would otherwise be ANDed with the broader preference list.
         preferred_countries=(None if country else profile_pref_countries),
+        **hard_filters,
     )
 
     # Apply filters
@@ -323,6 +334,7 @@ async def list_jobs(
         # single country via ?country= — that param already constrains the
         # query and would otherwise be ANDed with the broader preference list.
         preferred_countries=(None if country else profile_pref_countries),
+        **hard_filters,
     )
     if len(country_codes) == 1:
         count_base = count_base.where(Job.country == country_codes[0])

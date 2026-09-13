@@ -171,13 +171,15 @@ async def cron_discover_remote(authorization: str | None = Header(None)):
 async def cron_score_backlog(
     authorization: str | None = Header(None),
     rescore_all: bool = False,
+    user_id: str | None = None,
 ):
-    """Score every unscored job for every user.
+    """Score every unscored job for every user, or just `user_id`.
 
-    Pass `?rescore_all=true` to wipe + recompute every score for every
-    user — needed when scoring weights or the skill-overlap algorithm
-    change so the inbox sort reflects the new model. Without that flag,
-    the batch scorer skips jobs that already have a JobScore row.
+    Pass `?rescore_all=true` to wipe + recompute every score — needed when
+    scoring weights or the algorithm change so the inbox sort reflects the
+    new model. A full rescore of one user takes most of the 60s function
+    limit, so call it once per user with `user_id`. Without the flag, the
+    batch scorer skips jobs that already have a JobScore row.
     """
     _verify_cron(authorization)
 
@@ -187,9 +189,12 @@ async def cron_score_backlog(
     from app.models.user import User
     from sqlalchemy import select
 
-    async with create_worker_session()() as db:
-        users_result = await db.execute(select(User.id))
-        user_ids = [str(row[0]) for row in users_result.all()]
+    if user_id:
+        user_ids = [user_id]
+    else:
+        async with create_worker_session()() as db:
+            users_result = await db.execute(select(User.id))
+            user_ids = [str(row[0]) for row in users_result.all()]
 
     results: dict[str, str] = {}
     for uid in user_ids:
@@ -1035,3 +1040,81 @@ async def cron_discover_slow(authorization: str | None = Header(None)):
     from app.workers.discovery_tasks import _run_crossover_async
     n, status = await _run_one("crossover", _run_crossover_async)
     return {"status": "complete", "results": {n: status}}
+
+
+@router.get("/enrich")
+async def cron_enrich(
+    authorization: str | None = Header(None),
+    limit: int = 25,
+    max_age_days: int = 30,
+):
+    """Read up to `limit` recent jobs with the extraction model, then
+    rescore them for every user. Meant to be called on a schedule until
+    `pending` reaches 0; each call stays inside the 60s function limit.
+
+    Cost: roughly $0.004 per job read (Claude Haiku 4.5)."""
+    _verify_cron(authorization)
+
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import func, or_, select
+    from app.core.database import create_worker_session
+    from app.models.job import Job, JobEntity
+    from app.services.enrichment.job_enricher import enrich_pending_jobs
+    from app.workers.scoring_tasks import rescore_jobs_for_all_users
+
+    limit = max(1, min(limit, 60))
+    result = await enrich_pending_jobs(limit=limit, max_age_days=max_age_days, time_budget_seconds=35)
+    rescored = await rescore_jobs_for_all_users(result.job_ids)
+
+    embedded: int | str = 0
+    try:
+        from app.workers.discovery_tasks import _embed_unembedded_jobs
+        embedded = await asyncio.wait_for(
+            _embed_unembedded_jobs(limit=max(len(result.job_ids), 1)), timeout=8
+        )
+    except Exception as e:  # noqa: BLE001
+        embedded = f"skipped: {type(e).__name__}"
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+    async with create_worker_session()() as db:
+        pending = (await db.execute(
+            select(func.count(Job.id))
+            .outerjoin(JobEntity, JobEntity.job_id == Job.id)
+            .where(
+                Job.status.notin_(["duplicate", "raw", "expired", "dismissed"]),
+                Job.discovered_at >= cutoff,
+                or_(JobEntity.id.is_(None), JobEntity.enriched_at.is_(None)),
+            )
+        )).scalar() or 0
+
+    return {
+        "selected": result.selected,
+        "enriched": result.enriched,
+        "skipped_short": result.skipped_short,
+        "failed": result.failed,
+        "errors": result.errors[:5],
+        "scores_updated": rescored,
+        "embedded": embedded,
+        "pending": pending,
+    }
+
+
+@router.get("/review-top-matches")
+async def cron_review_top_matches(
+    authorization: str | None = Header(None),
+    per_user_daily: int = 3,
+    min_score: float = 70.0,
+):
+    """Run the AI review on each user's best new matches, up to
+    `per_user_daily` a day per user. Cost: roughly $0.04 per review
+    (Claude Sonnet 5)."""
+    _verify_cron(authorization)
+
+    from app.services.scoring.top_match_review import review_top_matches
+
+    outcome = await review_top_matches(
+        per_user_daily=max(0, min(per_user_daily, 10)),
+        min_score=min_score,
+    )
+    outcome["errors"] = outcome["errors"][:5]
+    return outcome

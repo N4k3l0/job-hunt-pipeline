@@ -21,7 +21,7 @@ import xml.etree.ElementTree as ET
 import httpx
 
 from app.services.discovery.eligibility import (
-    is_nigeria_friendly,
+    eligible_countries_from_text,
     matches_keywords,
 )
 
@@ -39,7 +39,7 @@ _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 
 async def fetch_jobs(keywords: set[str] | None = None) -> list[dict]:
-    """Pull the WWR RSS feed and return Nigeria-eligible postings."""
+    """Pull the WWR RSS feed and return postings matching the keywords."""
     async with httpx.AsyncClient(
         timeout=30.0,
         headers={"User-Agent": USER_AGENT, "Accept": "application/rss+xml, application/xml"},
@@ -68,12 +68,12 @@ async def fetch_jobs(keywords: set[str] | None = None) -> list[dict]:
         if not matches_keywords(searchable, keywords):
             continue
 
-        if is_nigeria_friendly(
+        # Restricted postings are kept and tagged; each user's inbox
+        # filters them by home country.
+        normalized["eligible_countries"] = eligible_countries_from_text(
             region_text=normalized.get("_region"),
             description=normalized["raw_description"],
-        ) is False:
-            continue
-
+        )
         normalized.pop("_region", None)
         matched.append(normalized)
 

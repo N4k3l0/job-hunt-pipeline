@@ -21,15 +21,39 @@ from __future__ import annotations
 
 import re as _re
 
-from sqlalchemy import or_, not_, func
+from sqlalchemy import Text, cast, func, not_, or_
+from sqlalchemy.dialects.postgresql import ARRAY, array
 
-from app.models.job import Job
-from app.models.job import JobSource
+from app.models.job import Job, JobEntity, JobSource
 
 
 # Sentinel the onboarding / profile country picker saves for
 # "Worldwide / Remote".
 WORLDWIDE_CODE = "WW"
+
+# visa_statuses values meaning the candidate can already work in a country.
+_AUTHORIZED_STATUSES = {"citizen", "permanent_resident", "work_visa"}
+
+
+def work_eligible_countries(home_country: str | None, visa_statuses: dict | None) -> list[str]:
+    """Countries the candidate can take a location-restricted role from:
+    where they live plus anywhere they're authorized to work."""
+    codes = {
+        code.upper()
+        for code, status in (visa_statuses or {}).items()
+        if isinstance(code, str) and status in _AUTHORIZED_STATUSES
+    }
+    if home_country:
+        codes.add(home_country.upper())
+    return sorted(codes)
+
+
+def sponsorship_needed_countries(visa_statuses: dict | None) -> list[str]:
+    return sorted(
+        code.upper()
+        for code, status in (visa_statuses or {}).items()
+        if isinstance(code, str) and status == "need_sponsorship"
+    )
 
 
 def country_filter_codes(preferred_countries: list[str] | None) -> list[str] | None:
@@ -133,11 +157,25 @@ def apply_user_filters(
     blocked_sources: list[str] | None = None,
     remote_preference: str | None = None,
     preferred_countries: list[str] | None = None,
+    home_country: str | None = None,
+    visa_statuses: dict | None = None,
+    salary_min: int | None = None,
+    salary_currency: str | None = None,
 ):
     """Apply the same filter chain the inbox uses to any Job-based query.
 
     The query MUST already join JobSource (left or otherwise) for the
-    blocked_sources filter to compile.
+    blocked_sources filter to compile, and JobEntity (outer join) when
+    home_country, visa_statuses or salary_min are passed.
+
+    Hard preference filters, each applied only when the job states the
+    relevant fact:
+      - remote postings restricted to countries the candidate can't work
+        from (home_country plus authorized visa_statuses) are hidden;
+      - jobs in a country where the candidate needs sponsorship and the
+        posting says it doesn't sponsor are hidden;
+      - jobs whose top salary is below the candidate's minimum, in the
+        same currency, are hidden.
 
     A job is kept when EITHER its title matches one of the role keywords
     (target_roles + role-family synonyms) OR its title matches one of the
@@ -283,4 +321,42 @@ def apply_user_filters(
             )
         else:
             query = query.where(Job.remote_type == remote_preference)
+
+    # Every hard filter below keeps rows where the job doesn't state the
+    # fact (NULL), so missing data never hides a job.
+    work_from = work_eligible_countries(home_country, visa_statuses)
+    if work_from:
+        query = query.where(
+            or_(
+                JobEntity.eligible_countries.is_(None),
+                func.jsonb_array_length(JobEntity.eligible_countries) == 0,
+                JobEntity.eligible_countries.op("?|")(cast(array(work_from), ARRAY(Text))),
+            )
+        )
+
+    needs_sponsorship = sponsorship_needed_countries(visa_statuses)
+    if needs_sponsorship:
+        query = query.where(
+            or_(
+                Job.country.is_(None),
+                func.upper(Job.country).notin_(needs_sponsorship),
+                # IS NOT FALSE is also true for NULL.
+                JobEntity.sponsorship_available.is_not(False),
+            )
+        )
+
+    if salary_min:
+        currency = (salary_currency or "USD").upper()
+        # Only salaries the source stated (salary_text is set by sources,
+        # never by enrichment) can hide a job; extracted ones are too
+        # unreliable to filter on.
+        query = query.where(
+            or_(
+                Job.salary_text.is_(None),
+                Job.salary_max.is_(None),
+                Job.salary_currency.is_(None),
+                func.upper(Job.salary_currency) != currency,
+                Job.salary_max >= salary_min,
+            )
+        )
     return query

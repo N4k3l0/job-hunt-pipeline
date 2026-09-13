@@ -87,7 +87,9 @@ async def update_profile(data: ProfileUpdate, user_id: CurrentUserId, db: DbSess
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
 
-    update_data = data.model_dump(exclude_none=True)
+    # exclude_unset (not exclude_none) so a field the client explicitly
+    # sends as null, like an emptied salary, is cleared.
+    update_data = data.model_dump(exclude_unset=True)
 
     # Detect target_roles changes — if the user's intent shifted (e.g. PM
     # → AI Engineer), every existing score is stale because the scorer
@@ -96,9 +98,17 @@ async def update_profile(data: ProfileUpdate, user_id: CurrentUserId, db: DbSess
     old_roles = sorted(profile.target_roles or [])
     new_roles = sorted(update_data.get("target_roles", profile.target_roles) or [])
     roles_changed = "target_roles" in update_data and old_roles != new_roles
+    corpus_fields = {"target_roles", "headline", "master_summary", "search_keywords"}
+    corpus_changed = any(
+        f in update_data and update_data[f] != getattr(profile, f) for f in corpus_fields
+    )
 
     for field, value in update_data.items():
         setattr(profile, field, value)
+
+    if corpus_changed:
+        from app.services.scoring.embedder import refresh_profile_embedding
+        await refresh_profile_embedding(db, profile)
 
     await db.commit()
     await db.refresh(profile)

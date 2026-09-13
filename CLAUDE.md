@@ -3,8 +3,8 @@
 ## Project Overview
 A private, invite-only, multi-user web application that automatically discovers job postings from multiple sources, scores them against user profiles, generates tailored application materials (resume, cover letter, answers, outreach messages), and presents everything for human review before the user applies manually.
 
-**Target roles:** Product Management, AI Automation
-**Target geographies:** US, Canada, Europe
+**Target roles:** any profession (grading is profession-agnostic)
+**Target geographies:** set per user (preferred countries + home country)
 **Users:** Small group (3-5 invited users)
 
 ## Architecture
@@ -102,7 +102,8 @@ Keep a single head: `alembic heads` should print one revision.
 - API client in `lib/api-client.ts` handles auth token injection
 
 ### LLM Usage
-- **Sonnet 5** (`claude-sonnet-5`) for: job parsing, resume parsing, scoring, web search
+- **Haiku 4.5** (`claude-haiku-4-5`) for: reading every incoming job (`services/enrichment/job_enricher.py`)
+- **Sonnet 5** (`claude-sonnet-5`) for: job parsing, resume parsing, deep reviews, web search
 - **Opus 5** (`claude-opus-5`) for: resume tailoring, cover letters, outreach messages
 - Model IDs and per-task effort live only in `llm/client.py` (`MODELS`, `EFFORT`). Don't pass `temperature` — current models and SDK 1.x reject it
 - **HARD RULE:** Never fabricate experience, tools, metrics, or employers in tailored content
@@ -112,7 +113,11 @@ Keep a single head: `alembic heads` should print one revision.
 ### Job Pipeline
 Every job flows: Raw → Normalized → Deduplicated → Enriched → Scored → Inbox
 - Dedup uses canonical hash (normalized company+title+city+country) + description similarity
-- Scoring runs two paths (PM, AI Automation), uses the higher score
+- Enrichment: `/api/v1/cron/enrich` reads recent jobs with Haiku (skills, requirements, seniority, salary with its period, sponsorship, `eligible_countries`), then rescores them for every user
+- Scoring (`services/scoring/scorer.py` + `matching.py`) is the same for every profession: title vs target roles/interests/recent titles, skills overlap, seniority, industry, remote fit; blended with resume embeddings when Voyage is available. It must stay fast: a full rescore covers the whole catalog inside 60s
+- Hard filters (`services/jobs_filter.py`) hide jobs per user: preferred countries, remote preference, remote roles restricted away from the user's home country, no sponsorship where the user needs it, and source-stated salary below the user's minimum. A job that doesn't state a fact is never hidden by it
+- Discovery sources keep location-restricted jobs and tag `eligible_countries`; they don't drop them
+- `/api/v1/cron/review-top-matches` runs deep reviews on each user's best new matches, capped per user per day
 - Tailoring only triggered by user action or for high-priority (80+) jobs
 
 ### Testing
@@ -142,6 +147,7 @@ Both frontend and backend deploy as **separate Vercel projects** pointing at the
 - **Framework preset**: Other (Vercel auto-detects Python via `vercel.json`)
 - **Required env vars**: `DATABASE_URL` (Supabase pooler, port 6543), `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_KEY`, `SUPABASE_JWT_SECRET`, `ANTHROPIC_API_KEY`, `FIRECRAWL_API_KEY`, `ADZUNA_APP_ID`, `ADZUNA_APP_KEY`, `JSEARCH_RAPIDAPI_KEY`, `CORS_ORIGINS`, `CRON_SECRET`
 - **Cron jobs** are defined in `backend/vercel.json` (fast/slow discovery — Vercel Hobby allows max 2)
+- **Enrichment and top-match reviews** run from `.github/workflows/scheduled-grading.yml` every 30 minutes. It is off until the repo variable `GRADING_SCHEDULE_ENABLED` is `true`, and needs secret `CRON_SECRET` and variable `BACKEND_URL`
 - **Set `CRON_SECRET`** to any random string; Vercel automatically sends it as `Authorization: Bearer <secret>` to cron endpoints
 
 ### Frontend project

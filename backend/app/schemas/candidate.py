@@ -15,12 +15,16 @@ class ProfileBase(BaseModel):
     master_summary: str | None = None
     target_roles: list[str] | None = None
     preferred_countries: list[str] | None = None
+    home_country: str | None = None
     visa_statuses: dict | None = None
     remote_preference: str | None = None
     salary_min: int | None = None
     salary_max: int | None = None
     salary_currency: str = "USD"
     links: dict | None = None
+    # Interests / custom search terms. Also feed job discovery.
+    search_keywords: list[str] | None = None
+    blocked_sources: list[str] | None = None
 
     @field_validator("preferred_countries")
     @classmethod
@@ -43,6 +47,16 @@ class ProfileBase(BaseModel):
                 cleaned.append(code)
                 seen.add(code)
         return cleaned or None
+
+    @field_validator("home_country")
+    @classmethod
+    def _validate_home_country(cls, v: str | None) -> str | None:
+        if v is None or not v.strip():
+            return None
+        code = v.strip().upper()
+        if len(code) != 2 or not code.isalpha() or code == "WW":
+            raise ValueError("home_country must be a 2-letter ISO country code")
+        return code
 
     @field_validator("remote_preference")
     @classmethod

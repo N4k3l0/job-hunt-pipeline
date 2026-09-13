@@ -85,12 +85,15 @@ export interface CandidateProfile {
   master_summary: string | null;
   target_roles: string[] | null;
   preferred_countries: string[] | null;
+  /** ISO-2 code of where the candidate lives; hides remote jobs they aren't eligible for. */
+  home_country: string | null;
   visa_statuses: Record<string, string> | null;
   remote_preference: string | null;
   salary_min: number | null;
   salary_max: number | null;
   salary_currency: string;
   blocked_sources: string[] | null;
+  search_keywords: string[] | null;
   links: Record<string, string> | null;
 }
 

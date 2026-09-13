@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from datetime import datetime, timezone
+from uuid import UUID
 
 from sqlalchemy import select, and_
 from sqlalchemy.orm import selectinload
@@ -23,6 +24,39 @@ def _run_async(coro):
         loop.close()
 
 
+def job_score_inputs(job: Job) -> tuple[dict, dict]:
+    """The (job_data, job_entities) dicts compute_job_score expects.
+    `job.entities` must already be loaded."""
+    job_data = {
+        "title": job.title_en or job.title,
+        "company": job.company,
+        "location": job.location,
+        "country": job.country,
+        "remote_type": job.remote_type,
+        "salary_min": job.salary_min,
+        "salary_max": job.salary_max,
+        "seniority": job.seniority,
+        # Skill scoring scans the description for user-skill mentions —
+        # sources with sparse tag lists don't surface skills any other way.
+        "raw_description": job.raw_description_en or job.raw_description or "",
+    }
+    job_entities: dict = {}
+    if job.entities:
+        e = job.entities
+        job_entities = {
+            "skills": e.skills or [],
+            "nice_to_have": e.nice_to_have or [],
+            "requirements": e.requirements or [],
+            "keywords": e.keywords or [],
+            "years_experience_min": e.years_experience_min,
+            "visa_notes": e.visa_notes,
+            "sponsorship_available": e.sponsorship_available,
+            # NULL until embedded; the scorer then uses rules only.
+            "embedding": getattr(e, "embedding", None),
+        }
+    return job_data, job_entities
+
+
 @celery_app.task(name="app.workers.scoring_tasks.score_job_for_user")
 def score_job_for_user(job_id: str, user_id: str):
     """Score a single job for a specific user."""
@@ -31,7 +65,6 @@ def score_job_for_user(job_id: str, user_id: str):
 
 async def _score_job_async(job_id: str, user_id: str):
     async with create_worker_session()() as db:
-        # Get job + entities
         result = await db.execute(
             select(Job)
             .where(Job.id == job_id)
@@ -42,53 +75,26 @@ async def _score_job_async(job_id: str, user_id: str):
             logger.error("Job %s not found for scoring", job_id)
             return
 
-        # Get user profile
         profile_data = await _load_profile(db, user_id)
         if not profile_data:
             logger.warning("No profile for user %s, skipping scoring", user_id)
             return
 
-        # Build job data dicts
-        job_data = {
-            "title": job.title,
-            "company": job.company,
-            "location": job.location,
-            "country": job.country,
-            "remote_type": job.remote_type,
-            "salary_min": job.salary_min,
-            "salary_max": job.salary_max,
-            "seniority": job.seniority,
-            "raw_description": job.raw_description or "",
-        }
-
-        job_entities = {}
-        if job.entities:
-            job_entities = {
-                "skills": job.entities.skills or [],
-                "requirements": job.entities.requirements or [],
-                "keywords": job.entities.keywords or [],
-                "visa_notes": job.entities.visa_notes,
-                "sponsorship_available": job.entities.sponsorship_available,
-            }
-
-        # Compute score
+        job_data, job_entities = job_score_inputs(job)
         scores = compute_job_score(job_data, job_entities, profile_data)
 
-        # Check for existing score
         existing = await db.execute(
             select(JobScore).where(
                 and_(JobScore.job_id == job_id, JobScore.user_id == user_id)
             )
         )
-        job_score = existing.scalar_one_or_none()
+        job_score = existing.scalars().first()
 
         if job_score:
-            # Update existing
             for key, value in scores.items():
                 setattr(job_score, key, value)
             job_score.calculated_at = datetime.now(timezone.utc)
         else:
-            # Create new
             job_score = JobScore(
                 job_id=job_id,
                 user_id=user_id,
@@ -97,14 +103,13 @@ async def _score_job_async(job_id: str, user_id: str):
             )
             db.add(job_score)
 
-        # Update job status
         if job.status in ("enriched", "normalized"):
             job.status = "scored"
 
         await db.commit()
         logger.info(
-            "Scored job %s for user %s: %.1f (%s, %s)",
-            job_id, user_id, scores["overall_fit"], scores["priority"], scores["role_path"],
+            "Scored job %s for user %s: %.1f (%s)",
+            job_id, user_id, scores["overall_fit"], scores["priority"],
         )
 
 
@@ -116,36 +121,37 @@ def batch_score_for_user(user_id: str, rescore_all: bool = False):
 
 async def _batch_score_async(user_id: str, rescore_all: bool = False):
     async with create_worker_session()() as db:
-        # Get profile first
         profile_data = await _load_profile(db, user_id)
         if not profile_data:
             logger.warning("No profile for user %s, skipping batch scoring", user_id)
             return
 
         if rescore_all:
-            # Delete existing scores for this user and re-score. We used
-            # to commit the delete separately, which was a footgun — if
-            # the subsequent INSERTs failed (e.g. missing column after a
-            # not-yet-run migration) the user ended up with ZERO scores
-            # and an empty inbox. Now the delete is in the same
-            # transaction as the inserts: either everything lands or
-            # nothing does and the user keeps their old scores.
+            # Delete existing scores for this user and re-score in the same
+            # transaction: either everything lands or nothing does and the
+            # user keeps their old scores. Deep reviews are carried over.
             from sqlalchemy import delete
+            deep_reviews = {
+                job_id: deep
+                for job_id, deep in (await db.execute(
+                    select(JobScore.job_id, JobScore.deep_score_json).where(
+                        JobScore.user_id == user_id,
+                        JobScore.deep_score_json.is_not(None),
+                    )
+                )).all()
+            }
             await db.execute(delete(JobScore).where(JobScore.user_id == user_id))
-            await db.flush()  # send to DB without committing
-            logger.info("Staged old-score wipe for user %s; will commit with inserts", user_id)
+            await db.flush()
+        else:
+            deep_reviews = {}
 
-        # Find unscored jobs (jobs without a score for this user). The
-        # cron pass caps at 300 to stay inside its budget; a user-triggered
-        # rescore_all should look at the WHOLE catalog — otherwise the
-        # 300 newest happen to be (e.g.) a wave of sales roles and the
-        # PM jobs sit outside the window. Pure compute scoring at ~1ms/job
-        # means 2k jobs is still well under 3s.
+        # Find unscored jobs. The cron pass caps at 300 to stay inside its
+        # budget; a user-triggered rescore_all looks at the whole catalog.
         scored_job_ids = select(JobScore.job_id).where(JobScore.user_id == user_id)
         scan = (
             select(Job)
             .where(
-                Job.status.notin_(["duplicate", "raw", "dismissed"]),
+                Job.status.notin_(["duplicate", "raw", "dismissed", "expired"]),
                 Job.id.notin_(scored_job_ids),
             )
             .order_by(Job.discovered_at.desc().nulls_last())
@@ -153,71 +159,76 @@ async def _batch_score_async(user_id: str, rescore_all: bool = False):
         )
         if not rescore_all:
             scan = scan.limit(300)
-        result = await db.execute(scan)
-        jobs = result.scalars().all()
+        jobs = (await db.execute(scan)).scalars().all()
 
         if not jobs:
             logger.info("No unscored jobs for user %s", user_id)
+            await db.commit()
             return
 
         logger.info("Batch scoring %d jobs for user %s", len(jobs), user_id)
-
+        now = datetime.now(timezone.utc)
         for job in jobs:
-            job_data = {
-                "title": job.title,
-                "company": job.company,
-                "location": job.location,
-                "country": job.country,
-                "remote_type": job.remote_type,
-                "salary_min": job.salary_min,
-                "salary_max": job.salary_max,
-                "seniority": job.seniority,
-                # Skill scoring scans the description for user-skill mentions
-                # — sources with sparse tag lists (DailyRemote, Arbeitnow)
-                # don't surface skills any other way.
-                "raw_description": job.raw_description or "",
-            }
-
-            job_entities = {}
-            if job.entities:
-                job_entities = {
-                    "skills": job.entities.skills or [],
-                    "requirements": job.entities.requirements or [],
-                    "keywords": job.entities.keywords or [],
-                    "visa_notes": job.entities.visa_notes,
-                    "sponsorship_available": job.entities.sponsorship_available,
-                    # Pull the cached embedding so compute_job_score can do
-                    # cosine similarity against the profile vector. NULL
-                    # until the row gets backfilled — scorer falls back
-                    # to the rule-based path in that case.
-                    "embedding": getattr(job.entities, "embedding", None),
-                }
-
-            # Deterministic filter: skip if title score would be 0 on both paths
-            title_lower = job.title.lower()
-            from app.services.scoring.pm_scorer import PM_TITLE_SCORES
-            from app.services.scoring.ai_automation_scorer import AI_TITLE_SCORES
-            has_pm_title = any(kw in title_lower for kw in PM_TITLE_SCORES)
-            has_ai_title = any(kw in title_lower for kw in AI_TITLE_SCORES)
-            if not has_pm_title and not has_ai_title:
-                # Still score it, just with lower title match
-                pass
-
+            job_data, job_entities = job_score_inputs(job)
             scores = compute_job_score(job_data, job_entities, profile_data)
-
-            job_score = JobScore(
-                job_id=job.id,
-                user_id=user_id,
-                calculated_at=datetime.now(timezone.utc),
-                **scores,
-            )
-            db.add(job_score)
-
+            row = JobScore(job_id=job.id, user_id=user_id, calculated_at=now, **scores)
+            # Only set when there is a review: assigning None stores JSON
+            # 'null', which isn't SQL NULL and breaks IS NULL checks.
+            if job.id in deep_reviews:
+                row.deep_score_json = deep_reviews[job.id]
+            db.add(row)
             if job.status in ("enriched", "normalized"):
                 job.status = "scored"
 
         await db.commit()
         logger.info("Batch scoring complete: %d jobs scored for user %s", len(jobs), user_id)
+
+
+async def rescore_jobs_for_all_users(job_ids: list[UUID]) -> int:
+    """Recompute scores for specific jobs for every user with a profile,
+    e.g. after the jobs were enriched. Updates existing rows in place (deep
+    reviews are kept) and inserts missing ones. Returns rows written."""
+    if not job_ids:
+        return 0
+    written = 0
+    async with create_worker_session()() as db:
+        user_ids = [
+            row[0] for row in (await db.execute(select(CandidateProfile.user_id))).all()
+        ]
+        profiles = {}
+        for uid in user_ids:
+            profile = await _load_profile(db, str(uid))
+            if profile:
+                profiles[uid] = profile
+        if not profiles:
+            return 0
+
+        jobs = (await db.execute(
+            select(Job).where(Job.id.in_(job_ids)).options(selectinload(Job.entities))
+        )).scalars().all()
+        existing: dict[tuple, JobScore] = {}
+        for row in (await db.execute(
+            select(JobScore).where(JobScore.job_id.in_(job_ids))
+        )).scalars().all():
+            existing.setdefault((row.job_id, row.user_id), row)
+
+        now = datetime.now(timezone.utc)
+        for job in jobs:
+            job_data, job_entities = job_score_inputs(job)
+            for uid, profile in profiles.items():
+                scores = compute_job_score(job_data, job_entities, profile)
+                row = existing.get((job.id, uid))
+                if row is None:
+                    db.add(JobScore(job_id=job.id, user_id=uid, calculated_at=now, **scores))
+                else:
+                    for key, value in scores.items():
+                        setattr(row, key, value)
+                    row.calculated_at = now
+                written += 1
+            if job.status in ("enriched", "normalized"):
+                job.status = "scored"
+        await db.commit()
+    return written
 
 
 async def _load_profile(db, user_id: str) -> dict | None:
@@ -236,14 +247,15 @@ async def _load_profile(db, user_id: str) -> dict | None:
 
     return {
         "target_roles": profile.target_roles or [],
+        "search_keywords": profile.search_keywords or [],
         "preferred_countries": profile.preferred_countries or [],
+        "home_country": profile.home_country,
         "visa_statuses": profile.visa_statuses or {},
         "remote_preference": profile.remote_preference or "any",
         "salary_min": profile.salary_min,
         "salary_max": profile.salary_max,
         # Cached profile embedding — drives semantic similarity in
-        # compute_job_score. NULL until the resume has been parsed (and
-        # re-parsed under the new path that calls embed_one).
+        # compute_job_score. NULL until the resume has been embedded.
         "embedding": getattr(profile, "embedding", None),
         "skills": [
             {"skill_name": s.skill_name, "category": s.category}
@@ -258,6 +270,6 @@ async def _load_profile(db, user_id: str) -> dict | None:
                 "skills": w.skills or [],
                 "domain_tags": w.domain_tags or [],
             }
-            for w in profile.work_history
+            for w in sorted(profile.work_history, key=lambda w: w.sort_order)
         ],
     }

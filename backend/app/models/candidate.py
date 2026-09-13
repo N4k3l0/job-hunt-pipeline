@@ -28,6 +28,9 @@ class CandidateProfile(Base):
     master_summary: Mapped[str | None] = mapped_column(Text)
     target_roles: Mapped[list[str] | None] = mapped_column(ARRAY(String))
     preferred_countries: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+    # ISO-2 code of where the candidate lives. Remote jobs restricted to
+    # other countries are hidden when this is set.
+    home_country: Mapped[str | None] = mapped_column(String(2))
     visa_statuses: Mapped[dict | None] = mapped_column(JSONB)
     remote_preference: Mapped[str | None] = mapped_column(String(50))  # full_remote, hybrid, onsite, any
     salary_min: Mapped[int | None] = mapped_column(Integer)
