@@ -1,10 +1,11 @@
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, or_
 
 from app.api.deps import CurrentUserId, DbSession
 from app.models.job import Job, JobSource
+from app.models.job_state import UserJobState
 from app.models.scoring import JobScore
 from app.models.tracking import ApplicationTracking
 from app.models.tailoring import TailoredApplication
@@ -55,7 +56,12 @@ async def get_overview(user_id: CurrentUserId, db: DbSession):
     jobs_query = (
         select(func.count(func.distinct(Job.id)))
         .outerjoin(JobSource, JobSource.id == Job.source_id)
+        .outerjoin(
+            UserJobState,
+            and_(UserJobState.job_id == Job.id, UserJobState.user_id == user_id),
+        )
         .where(Job.status.notin_(["duplicate", "raw", "expired", "dismissed"]))
+        .where(or_(UserJobState.status.is_(None), UserJobState.status != "dismissed"))
     )
     jobs_query = apply_user_filters(
         jobs_query,
@@ -70,7 +76,10 @@ async def get_overview(user_id: CurrentUserId, db: DbSession):
 
     # Jobs shortlisted
     shortlisted_result = await db.execute(
-        select(func.count(Job.id)).where(Job.status == "shortlisted")
+        select(func.count(UserJobState.id)).where(
+            UserJobState.user_id == user_id,
+            UserJobState.status == "shortlisted",
+        )
     )
     jobs_shortlisted = shortlisted_result.scalar() or 0
 

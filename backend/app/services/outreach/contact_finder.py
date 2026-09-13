@@ -23,12 +23,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app.core.config import get_settings
-
 logger = logging.getLogger(__name__)
-settings = get_settings()
-
-MODEL = "claude-sonnet-4-6"
 
 SYSTEM_PROMPT = """You help job-seekers find the right person to send a follow-up message to after applying.
 
@@ -104,16 +99,15 @@ async def find_contact_for_job(
     """Run the web-search-driven lookup. Returns a dict matching the
     record_contact schema, plus a 'citations' list extracted from the
     web_search tool results so the UI can show sources."""
-    import anthropic
+    from app.llm.client import llm_client, model_for, effort_for
 
-    client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
-
-    response = await client.messages.create(
-        model=MODEL,
-        max_tokens=2048,
+    response = await llm_client.client.messages.create(
+        model=model_for("search"),
+        max_tokens=6000,
+        output_config={"effort": effort_for("search")},
         system=SYSTEM_PROMPT,
         tools=[
-            {"type": "web_search_20250305", "name": "web_search", "max_uses": max_searches},
+            {"type": "web_search_20260209", "name": "web_search", "max_uses": max_searches},
             RECORD_CONTACT_TOOL,
         ],
         messages=[{"role": "user", "content": _build_user_prompt(company, role, location)}],

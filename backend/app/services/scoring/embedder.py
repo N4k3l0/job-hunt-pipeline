@@ -183,13 +183,20 @@ def profile_corpus(*, target_roles: Iterable[str] | None,
 def cosine_similarity(a: Sequence[float], b: Sequence[float]) -> float:
     """Cosine similarity between two equal-dim vectors. Returns 0.0
     when either is empty or all-zero. Range: -1.0 to 1.0 in theory,
-    but for embeddings in practice 0.4-0.9 covers most pairs."""
-    if not a or not b or len(a) != len(b):
+    but for embeddings in practice 0.4-0.9 covers most pairs.
+
+    Accepts lists or numpy arrays (pgvector < 0.5 returns arrays, which
+    raise on truthiness checks). Always returns a plain Python float:
+    numpy scalars aren't JSON-serializable and this value ends up in
+    JobScore.reasoning (JSONB)."""
+    if a is None or b is None or len(a) == 0 or len(a) != len(b):
         return 0.0
     dot = 0.0
     norm_a = 0.0
     norm_b = 0.0
     for x, y in zip(a, b):
+        x = float(x)
+        y = float(y)
         dot += x * y
         norm_a += x * x
         norm_b += y * y

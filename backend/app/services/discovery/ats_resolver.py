@@ -489,9 +489,6 @@ async def find_direct_apply_via_claude(
     ~5–10s and a few cents per call. Cached on job.apply_url so repeat
     clicks on the same job are instant.
     """
-    import anthropic
-    from app.core.config import get_settings
-    cfg = get_settings()
 
     record_tool = {
         "name": "record_apply_url",
@@ -539,13 +536,14 @@ async def find_direct_apply_via_claude(
     )
 
     try:
-        client = anthropic.AsyncAnthropic(api_key=cfg.anthropic_api_key)
-        response = await client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=1500,
+        from app.llm.client import llm_client, model_for, effort_for
+        response = await llm_client.client.messages.create(
+            model=model_for("search"),
+            max_tokens=5500,
+            output_config={"effort": effort_for("search")},
             system=system,
             tools=[
-                {"type": "web_search_20250305", "name": "web_search", "max_uses": 5},
+                {"type": "web_search_20260209", "name": "web_search", "max_uses": 5},
                 record_tool,
             ],
             messages=[{"role": "user", "content": user}],

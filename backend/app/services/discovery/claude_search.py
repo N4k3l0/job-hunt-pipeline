@@ -18,10 +18,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app.core.config import get_settings
-
 logger = logging.getLogger(__name__)
-settings = get_settings()
 
 
 _RECORD_JOBS_TOOL = {
@@ -172,8 +169,7 @@ async def search_jobs_for_user(
     if not target_roles:
         return []  # Nothing actionable to search for.
 
-    import anthropic
-    client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+    from app.llm.client import llm_client, model_for, effort_for
 
     # Country list is a HARD constraint — Claude should not return jobs
     # outside it. Phrasing matters: 'preferred' was getting interpreted
@@ -209,12 +205,13 @@ async def search_jobs_for_user(
     )
 
     try:
-        response = await client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=8192,
+        response = await llm_client.client.messages.create(
+            model=model_for("search"),
+            max_tokens=12000,
+            output_config={"effort": effort_for("search")},
             system=_SYSTEM_PROMPT,
             tools=[
-                {"type": "web_search_20250305", "name": "web_search", "max_uses": max_searches},
+                {"type": "web_search_20260209", "name": "web_search", "max_uses": max_searches},
                 _RECORD_JOBS_TOOL,
             ],
             messages=[{"role": "user", "content": user_prompt}],

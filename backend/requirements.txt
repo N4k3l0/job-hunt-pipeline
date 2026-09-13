@@ -22,8 +22,9 @@ cryptography>=44.0.0
 # HTTP clients
 httpx>=0.28.0
 
-# AI/LLM
-anthropic>=0.40.0
+# AI/LLM — 1.x removed temperature/top_p/top_k from messages.create and
+# needs Python 3.10+. Upper bound so a future 2.x can't land unreviewed.
+anthropic>=1.5,<2
 
 # Embeddings — semantic scoring replaces the rule-based title+skill+industry
 # buckets in the inbox scorer. We hit Voyage's REST API directly with
@@ -31,7 +32,9 @@ anthropic>=0.40.0
 # tokenizers (Rust build) and doesn't deploy cleanly on Vercel Python.
 # pgvector gives SQLAlchemy the column type to read/write the vectors
 # stored in Postgres (Supabase has the extension built in).
-pgvector>=0.3.0
+# 0.5 returns plain lists; 0.4 returned numpy arrays. Pinned so the
+# deployed return type matches what the scorer is tested against.
+pgvector>=0.5,<0.6
 
 # PDF generation — REMOVED for Vercel deploy. WeasyPrint requires cairo/pango
 # system libraries that Vercel's Python runtime does not provide. Tailored

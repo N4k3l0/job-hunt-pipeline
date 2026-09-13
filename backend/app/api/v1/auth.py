@@ -276,6 +276,16 @@ async def admin_run_discovery(admin: AdminUser):
     return {"status": "complete", "results": results, "scoring": scoring}
 
 
+def _not_tracked_by_any_user():
+    """Stale cleanup must skip jobs any user has tailored or applied to.
+    Applied state is per-user (application_tracking), not on jobs.status."""
+    from sqlalchemy import exists
+    from app.models.job import Job
+    from app.models.tracking import ApplicationTracking
+
+    return ~exists().where(ApplicationTracking.job_id == Job.id)
+
+
 @router.get("/admin/stale-jobs/preview")
 async def admin_stale_jobs_preview(
     admin: AdminUser,
@@ -300,6 +310,7 @@ async def admin_stale_jobs_preview(
         select(func.count(Job.id))
         .where(
             Job.status.in_(pre_applied),
+            _not_tracked_by_any_user(),
             Job.discovered_at < func.now() - text(f"interval '{int(days)} days'"),
         )
     )
@@ -328,6 +339,7 @@ async def admin_stale_jobs_cleanup(
         update(Job)
         .where(
             Job.status.in_(pre_applied),
+            _not_tracked_by_any_user(),
             Job.discovered_at < sa_func.now() - text(f"interval '{int(days)} days'"),
         )
         .values(status="expired")
@@ -371,6 +383,7 @@ async def admin_stale_jobs_cleanup_by_source(
         .where(
             Job.source_id == source_id,
             Job.status.in_(pre_applied),
+            _not_tracked_by_any_user(),
             Job.discovered_at < sa_func.now() - text(f"interval '{int(days)} days'"),
         )
         .values(status="expired")
