@@ -5,8 +5,8 @@
  *
  *   1. The user has set their name (currently empty on Supabase invite).
  *   2. The user has uploaded at least one resume.
- *   3. The user has picked at least one preferred country (or "Worldwide")
- *      and the country they live in.
+ *   3. The user has picked at least one preferred country (or "Worldwide").
+ *      New users also pick the country they live in at this step.
  *
  * Without any of those, every downstream feature is degraded — scoring
  * has no profile to match against, tailoring has nothing to draw from,
@@ -46,7 +46,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 import { COUNTRY_OPTIONS } from "@/lib/countries";
-import { HomeCountrySelect } from "@/components/home-country-select";
+import { HomeCountryPrompt, HomeCountrySelect } from "@/components/home-country-select";
 
 export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const { data: user, isLoading: userLoading } = useCurrentUser();
@@ -68,15 +68,23 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const hasCountries = (profile?.preferred_countries?.length ?? 0) > 0;
   const hasHomeCountry = !!profile?.home_country;
 
-  if (hasName && hasResume && hasCountries && hasHomeCountry) {
-    return <>{children}</>;
+  // Home country is asked during setup, but it isn't a gate: users who set
+  // up before it existed get a dismissible prompt instead of being sent
+  // back through the whole wizard.
+  if (hasName && hasResume && hasCountries) {
+    return (
+      <>
+        {!hasHomeCountry && <HomeCountryPrompt />}
+        {children}
+      </>
+    );
   }
 
   return (
     <OnboardingFlow
       hasName={hasName}
       hasResume={hasResume}
-      hasCountries={hasCountries && hasHomeCountry}
+      hasCountries={hasCountries}
       existingName={user?.name ?? ""}
       existingCountries={profile?.preferred_countries ?? []}
       existingHomeCountry={profile?.home_country ?? null}
