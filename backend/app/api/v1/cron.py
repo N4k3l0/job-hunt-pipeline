@@ -4,14 +4,15 @@ Split into two endpoints because Vercel Hobby caps function execution at
 60 seconds. The "fast" sources (API / RSS) run in one tick; Crossover (which
 does many Firecrawl scrapes) runs in its own tick.
 
-Auth: Vercel sends `Authorization: Bearer <CRON_SECRET>` if you set the
-CRON_SECRET env var in the Vercel project settings. We require it whenever
-the env var is set.
+Auth: callers send `Authorization: Bearer <CRON_SECRET>` (Vercel does this
+automatically when the env var is set). Without CRON_SECRET every request is
+rejected, so a new deployment never exposes these endpoints.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hmac
 import logging
 import os
 import time
@@ -31,12 +32,13 @@ PER_SOURCE_BUDGET_SECONDS = 50
 
 
 def _verify_cron(authorization: str | None) -> None:
-    """Reject any request that doesn't carry our cron secret. Skipped in dev
-    if no secret is configured."""
+    """Reject any request that doesn't carry our cron secret."""
     expected = os.environ.get("CRON_SECRET")
     if not expected:
-        return  # local dev — no auth required
-    if not authorization or authorization != f"Bearer {expected}":
+        raise HTTPException(status_code=503, detail="CRON_SECRET is not configured")
+    if not authorization or not hmac.compare_digest(
+        authorization.encode(), f"Bearer {expected}".encode()
+    ):
         raise HTTPException(status_code=401, detail="Invalid cron secret")
 
 

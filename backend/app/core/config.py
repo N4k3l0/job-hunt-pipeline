@@ -10,6 +10,11 @@ class Settings(BaseSettings):
 
     # Database
     database_url: str = "postgresql+asyncpg://jobhunt:jobhunt_dev@localhost:5432/jobhunt"
+    # Connections each server process keeps open. 0 opens a fresh one per
+    # request (Vercel); set it where the server keeps running (Railway).
+    db_pool_size: int = 0
+    # Log every SQL statement. Local debugging only: slow with big batches.
+    sql_echo: bool = False
 
     # Supabase
     supabase_url: str = ""

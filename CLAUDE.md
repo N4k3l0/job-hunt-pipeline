@@ -136,7 +136,7 @@ See `backend/.env.example` and `frontend/.env.example` for all required variable
 
 ## Important Notes
 - Public signups are DISABLED in Supabase — users are added via admin invite only
-- In production, connect to Supabase PostgreSQL via Transaction Mode (port 6543) with NullPool
+- In production, connect to Supabase PostgreSQL via Transaction Mode (port 6543). `DB_POOL_SIZE` picks the connection handling (`core/database.py`): `0` opens one per request (Vercel), above `0` keeps connections open (Railway)
 - Apify actors trigger via webhooks to `/api/webhooks/apify` — verify HMAC signature
 - All tailored application materials require human approval before use
 
@@ -152,6 +152,15 @@ Both frontend and backend deploy as **separate Vercel projects** pointing at the
 - **Cron jobs** are defined in `backend/vercel.json` (fast/slow discovery — Vercel Hobby allows max 2)
 - **Enrichment and top-match reviews** run from `.github/workflows/scheduled-grading.yml` every 30 minutes. It is off until the repo variable `GRADING_SCHEDULE_ENABLED` is `true`, and needs secret `CRON_SECRET` and variable `BACKEND_URL`
 - **Set `CRON_SECRET`** to any random string; Vercel automatically sends it as `Authorization: Bearer <secret>` to cron endpoints
+
+### Backend on Railway (moving from Vercel)
+The backend is moving to Railway: no time limit on requests, and room for the auto-apply worker. Both run side by side until the frontend switches over; until then the Vercel backend serves users and runs the crons.
+- **Project** `job-hunt-pipeline`, service `backend`, https://backend-production-7e805.up.railway.app
+- **Build**: `backend/Dockerfile` (uvicorn on `$PORT`, two processes via `WEB_CONCURRENCY`)
+- **Service settings** live on Railway, not in the repo (Railway ignores `railway.json` now): region EU West / Amsterdam (`europe-west4-drams3a`), health check `/health`, restart on failure up to 5 times
+- **Env vars**: the same as the Vercel backend, plus `DB_POOL_SIZE=5`
+- **Deploy** the current checkout with `cd backend && railway up --service backend`
+- Cron endpoints refuse every request until `CRON_SECRET` is set, and the Apify webhook until `APIFY_WEBHOOK_SECRET` is
 
 ### Frontend project
 - **Root directory**: `frontend`
