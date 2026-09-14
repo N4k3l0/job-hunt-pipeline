@@ -219,3 +219,29 @@ async def test_review_top_matches_respects_daily_cap(client, monkeypatch):
     second = (await client.get("/api/v1/cron/review-top-matches", params={"per_user_daily": 2})).json()
     assert second["queued"] == 0
     assert len(reviewed) == 3
+
+
+async def test_jobs_in_an_inbox_are_read_first(client, monkeypatch):
+    from app.core.database import engine
+    from app.services.enrichment import job_enricher
+
+    # A newer job nobody matched, and an older one that's in a user's inbox.
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "UPDATE jobs SET raw_description = :d WHERE id IN (:a, :b)"
+        ), {"d": LONG_DESCRIPTION, "a": UK_NO_SPONSOR, "b": LOW_SALARY})
+        await conn.execute(text(
+            "UPDATE jobs SET discovered_at = now() - interval '5 days' WHERE id = :id"
+        ), {"id": UK_NO_SPONSOR})
+        await conn.execute(text(
+            "UPDATE job_entities SET enriched_at = NULL WHERE job_id IN (:a, :b)"
+        ), {"a": UK_NO_SPONSOR, "b": LOW_SALARY})
+        # The fixture scored every job; only the older job clears the inbox bar.
+        await conn.execute(text("UPDATE job_scores SET overall_fit = 20"))
+        await conn.execute(text(
+            "UPDATE job_scores SET overall_fit = 72 WHERE job_id = :j AND user_id = :u"
+        ), {"j": UK_NO_SPONSOR, "u": NIGERIA_USER})
+
+    result = await job_enricher.enrich_pending_jobs(limit=1)
+    assert client.extracted_calls == [UK_NO_SPONSOR]
+    assert result.enriched == 1

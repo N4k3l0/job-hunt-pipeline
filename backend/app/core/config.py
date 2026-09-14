@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     # the scorer falls back to the rule-based path so the app still works
     # but loses the semantic match upgrade.
     voyage_api_key: str = ""
+    # Resume/job embeddings (Voyage) blended into scores. Off: the Voyage
+    # account wasn't working and scores use the rule-based axes. Turn on
+    # with EMBEDDINGS_ENABLED=true plus a working VOYAGE_API_KEY, then
+    # rescore every user.
+    embeddings_enabled: bool = False
 
     # Frontend URL — used to build the magic-link redirect_to in the invite
     # flow. Falls back to the first cors_origin if unset.
