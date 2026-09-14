@@ -95,13 +95,17 @@ async def client(monkeypatch):
         }
 
     monkeypatch.setattr(job_enricher, "extract_job_details", fake_extract)
+    monkeypatch.setenv("CRON_SECRET", "test-cron-secret")
 
     async def fake_user_id(x_test_user: str = Header()) -> uuid.UUID:
         return uuid.UUID(x_test_user)
 
     app.dependency_overrides[get_current_user_id] = fake_user_id
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test",
+        headers={"Authorization": "Bearer test-cron-secret"},
+    ) as c:
         c.extracted_calls = extracted_calls
         for user in (NIGERIA_USER, US_USER):
             r = await c.post("/api/v1/candidates/rescore", headers={"x-test-user": str(user)})

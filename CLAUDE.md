@@ -155,9 +155,12 @@ Both frontend and backend deploy as **separate Vercel projects** pointing at the
 
 ### Backend on Railway (moving from Vercel)
 The backend is moving to Railway: no time limit on requests, and room for the auto-apply worker. Both run side by side until the frontend switches over; until then the Vercel backend serves users and runs the crons.
-- **Config**: `backend/railway.json` (Dockerfile build, `/health` check, EU West / Amsterdam) and `backend/Dockerfile` (uvicorn on `$PORT`, two processes via `WEB_CONCURRENCY`)
+- **Project** `job-hunt-pipeline`, service `backend`, https://backend-production-7e805.up.railway.app
+- **Build**: `backend/Dockerfile` (uvicorn on `$PORT`, two processes via `WEB_CONCURRENCY`)
+- **Service settings** live on Railway, not in the repo (Railway ignores `railway.json` now): region EU West / Amsterdam (`europe-west4-drams3a`), health check `/health`, restart on failure up to 5 times
 - **Env vars**: the same as the Vercel backend, plus `DB_POOL_SIZE=5`
-- **Deploy** the current checkout with `cd backend && railway up`
+- **Deploy** the current checkout with `cd backend && railway up --service backend`
+- Cron endpoints refuse every request until `CRON_SECRET` is set, and the Apify webhook until `APIFY_WEBHOOK_SECRET` is
 
 ### Frontend project
 - **Root directory**: `frontend`

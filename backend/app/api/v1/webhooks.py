@@ -21,17 +21,22 @@ async def apify_webhook(request: Request):
     body = await request.body()
     signature = request.headers.get("x-apify-webhook-signature", "")
 
-    if settings.apify_webhook_secret:
-        expected = hmac.new(
-            settings.apify_webhook_secret.encode(),
-            body,
-            hashlib.sha256,
-        ).hexdigest()
-        if not hmac.compare_digest(signature, expected):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid webhook signature",
-            )
+    # Without a secret there's no way to tell Apify from anyone else.
+    if not settings.apify_webhook_secret:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Apify webhook secret is not configured",
+        )
+    expected = hmac.new(
+        settings.apify_webhook_secret.encode(),
+        body,
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(signature.encode(), expected.encode()):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid webhook signature",
+        )
 
     payload = await request.json()
     actor_run_id = payload.get("resource", {}).get("id")
