@@ -21,6 +21,7 @@ MODELS = {
     "scoring": "claude-sonnet-5",
     "search": "claude-sonnet-5",
     "tailoring": "claude-opus-5",
+    "applying": "claude-sonnet-5",
 }
 
 # Sonnet 5 and Opus 5 think by default. Every call runs inside a Vercel
@@ -34,6 +35,7 @@ EFFORT = {
     "scoring": "medium",
     "search": "low",
     "tailoring": "medium",
+    "applying": "medium",
 }
 
 # Thinking counts toward max_tokens. Callers size max_tokens for the

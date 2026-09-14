@@ -103,7 +103,7 @@ Keep a single head: `alembic heads` should print one revision.
 
 ### LLM Usage
 - **Haiku 4.5** (`claude-haiku-4-5`) for: reading every incoming job (`services/enrichment/job_enricher.py`)
-- **Sonnet 5** (`claude-sonnet-5`) for: job parsing, resume parsing, deep reviews, web search
+- **Sonnet 5** (`claude-sonnet-5`) for: job parsing, resume parsing, deep reviews, web search, drafting application-form answers (`applying`)
 - **Opus 5** (`claude-opus-5`) for: resume tailoring, cover letters, outreach messages
 - Model IDs and per-task effort live only in `llm/client.py` (`MODELS`, `EFFORT`). Don't pass `temperature` — current models and SDK 1.x reject it
 - **HARD RULE:** Never fabricate experience, tools, metrics, or employers in tailored content
@@ -122,6 +122,13 @@ Every job flows: Raw → Normalized → Deduplicated → Enriched → Scored →
 - Freshness: ingest sets `jobs.last_seen_at` whenever a source lists a job again. `/api/v1/cron/expire-stale` expires jobs gone from full company boards (`curated`, unseen 5 days) and jobs older than 45 days that no source has listed for 30 days, then probes a batch of links (`last_checked_at`, 404/410 → expired). Jobs a user applied to or tailored for are never expired; old shortlisted ones are kept
 - Resume upload doesn't rescore inline (parse + full rescore can exceed 60s); the frontend calls `POST /candidates/rescore` afterwards
 - Tailoring only triggered by user action or for high-priority (80+) jobs
+
+### Apply for me (`services/auto_apply/`, `/api/v1/auto-apply`)
+- Supported: jobs whose `apply_url`/`job_url` is on Greenhouse, Lever or Ashby (`ats.py`). Greenhouse and Ashby publish each job's form as JSON; Lever's is read from its apply page (`forms.py`). All three forms carry invisible bot checks (reCAPTCHA / hCaptcha): never build anything that gets around them
+- `prepare_application` reads the form, fills answers from the profile with rules (`answers.py`), then drafts the remaining required questions in one Claude call (`drafting.py`). Every answer records its `source` and whether it's `confirmed`
+- Only confirmed answers come from facts: profile and resume, the user's earlier answer to the same question (`saved_answers`, confirmed for 30 days), declining voluntary demographic questions and marketing messages. Suggested and drafted answers always need the user
+- Legal agreements, acknowledgements and attestations are never answered for the user, even when required. Work authorization and sponsorship are answered only when `home_country`/`visa_statuses` settle them for the job's country
+- Statuses: `needs_you` until every required question is answered and confirmed, then `queued` once the user approves (`PUT /{id}/answers` with `approve`). Nothing sends applications yet: approved ones are sent by hand from the form link
 
 ### Testing
 ```bash

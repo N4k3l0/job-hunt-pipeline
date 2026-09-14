@@ -22,6 +22,8 @@ class ProfileBase(BaseModel):
     salary_max: int | None = None
     salary_currency: str = "USD"
     links: dict | None = None
+    phone: str | None = None
+    current_location: str | None = None
     # Interests / custom search terms. Also feed job discovery.
     search_keywords: list[str] | None = None
     blocked_sources: list[str] | None = None
@@ -57,6 +59,17 @@ class ProfileBase(BaseModel):
         if len(code) != 2 or not code.isalpha() or code == "WW":
             raise ValueError("home_country must be a 2-letter ISO country code")
         return code
+
+    @field_validator("phone", "current_location")
+    @classmethod
+    def _validate_contact(cls, v: str | None, info) -> str | None:
+        if v is None or not v.strip():
+            return None
+        v = " ".join(v.split())
+        limit = 40 if info.field_name == "phone" else 255
+        if len(v) > limit:
+            raise ValueError(f"{info.field_name} must be at most {limit} characters")
+        return v
 
     @field_validator("remote_preference")
     @classmethod

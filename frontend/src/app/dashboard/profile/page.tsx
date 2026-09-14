@@ -151,6 +151,8 @@ export default function ProfilePage() {
   const [summary, setSummary] = useState("");
   const [linkedin, setLinkedin] = useState("");
   const [portfolio, setPortfolio] = useState("");
+  const [phone, setPhone] = useState("");
+  const [currentLocation, setCurrentLocation] = useState("");
   const [targetRoles, setTargetRoles] = useState<string[]>([]);
   const [countries, setCountries] = useState<string[]>([]);
   const [salaryMin, setSalaryMin] = useState("");
@@ -177,6 +179,8 @@ export default function ProfilePage() {
       setSummary(profile.master_summary || "");
       setLinkedin(profile.links?.linkedin || "");
       setPortfolio(profile.links?.portfolio || "");
+      setPhone(profile.phone || "");
+      setCurrentLocation(profile.current_location || "");
       setTargetRoles(profile.target_roles || []);
       setCountries(profile.preferred_countries || []);
       setHomeCountry(profile.home_country || null);
@@ -211,7 +215,10 @@ export default function ProfilePage() {
     const data = {
       headline,
       master_summary: summary,
-      links: { linkedin, portfolio },
+      // Keep links this form doesn't show (GitHub, website from the resume).
+      links: { ...(profile?.links || {}), linkedin, portfolio },
+      phone,
+      current_location: currentLocation,
     };
 
     if (profile) {
@@ -404,6 +411,30 @@ export default function ProfilePage() {
                   />
                 </div>
               </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="phone">Phone</Label>
+                  <Input
+                    id="phone"
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="+234 800 000 0000"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="current-location">Current location</Label>
+                  <Input
+                    id="current-location"
+                    value={currentLocation}
+                    onChange={(e) => setCurrentLocation(e.target.value)}
+                    placeholder="City, Country"
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Application forms ask for these. Apply for me fills them in.
+              </p>
               <div className="flex items-center gap-3">
                 <Button onClick={handleSaveProfile} disabled={isSavingProfile}>
                   {isSavingProfile ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
