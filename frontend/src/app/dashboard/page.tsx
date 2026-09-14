@@ -29,7 +29,7 @@ import { ScoreRing } from "@/components/ds/score";
 
 export default function DashboardOverview() {
   const { data: analytics } = useAnalytics();
-  const { data: jobsData } = useJobs({ pageSize: 10, sortBy: "score" });
+  const { data: jobsData } = useJobs({ pageSize: 10, sortBy: "best" });
   const { data: reviewQueue } = useReviewQueue();
   const { data: reminders } = useReminders();
   const { data: currentUser } = useCurrentUser();
@@ -216,7 +216,7 @@ function RadarSection({
       <div className="dash-card dash-radar-card">
         <div className="dash-radar-head">
           <span className="ds-mono dash-radar-count">
-            {radar.length} OF {totalScored} · TOP BY SCORE
+            {radar.length} OF {totalScored} · BEST MATCHES, NEWEST FIRST
           </span>
           <span className="ds-mono dash-radar-sweep">
             SWEPT {formatSweepTime(lastSweep)}

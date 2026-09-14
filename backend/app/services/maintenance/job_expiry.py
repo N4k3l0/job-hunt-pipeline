@@ -11,8 +11,9 @@ Two rules, on top of the link checker in url_verifier.py:
    that, and a source still listing it would have refreshed last_seen_at.
 
 Both rules wait until last_seen_at tracking has been running long enough
-to be meaningful, and never touch a job a user has applied to or
-tailored materials for. Old jobs a user has shortlisted are kept too.
+to be meaningful, and never touch a job a user has applied to, tailored
+materials for, or started an Apply for me application for. Old jobs a user
+has shortlisted are kept too.
 """
 
 from __future__ import annotations
@@ -22,8 +23,10 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import and_, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.auto_apply import AutoApplication
 from app.models.job import Job, JobSource
 from app.models.job_state import UserJobState
+from app.models.tailoring import TailoredApplication
 from app.models.tracking import ApplicationTracking
 
 # Sources that fetch complete job boards on every run.
@@ -54,8 +57,14 @@ async def expire_stale_jobs(
     now: datetime | None = None,
 ) -> dict:
     now = now or datetime.now(timezone.utc)
-    not_tracked = ~exists().where(ApplicationTracking.job_id == Job.id)
-    base = [Job.status.in_(EXPIRABLE_STATUSES), not_tracked]
+    # Jobs a user is working on stay: tracked applications, tailored packs
+    # (even before approval) and Apply for me applications.
+    not_in_use = [
+        ~exists().where(ApplicationTracking.job_id == Job.id),
+        ~exists().where(TailoredApplication.job_id == Job.id),
+        ~exists().where(AutoApplication.job_id == Job.id),
+    ]
+    base = [Job.status.in_(EXPIRABLE_STATUSES), *not_in_use]
     outcome: dict = {"dry_run": dry_run, "gone_from_board": 0, "old_and_unseen": 0}
 
     for source_name in FULL_BOARD_SOURCES:
