@@ -1,7 +1,10 @@
+# Manual fallback for the Railway "scheduler" service, which now runs this
+# work every 30 minutes (backend/scripts/scheduled_tasks.py). GitHub's own
+# schedule was unreliable: it ran 2 of ~20 expected runs overnight.
+#
 # Reads newly discovered jobs with the extraction model, expires closed
 # jobs, and runs AI reviews on each user's best new matches (skipped when
-# REVIEWS_PER_USER_PER_DAY is 0). Vercel Hobby only allows two cron jobs
-# (both used for discovery), so this schedule lives here instead.
+# REVIEWS_PER_USER_PER_DAY is 0).
 #
 # Off until the repository variable GRADING_SCHEDULE_ENABLED is "true".
 # Also needs: secret CRON_SECRET (same value as the backend's) and
@@ -12,8 +15,6 @@
 name: Scheduled grading
 
 on:
-  schedule:
-    - cron: "*/30 * * * *"
   workflow_dispatch:
 
 concurrency:

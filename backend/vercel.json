@@ -1,20 +1,18 @@
 {
   "version": 2,
-  "regions": ["dub1"],
+  "regions": [
+    "dub1"
+  ],
   "builds": [
-    { "src": "api/index.py", "use": "@vercel/python" }
+    {
+      "src": "api/index.py",
+      "use": "@vercel/python"
+    }
   ],
   "routes": [
-    { "src": "/(.*)", "dest": "/api/index.py" }
-  ],
-  "crons": [
     {
-      "path": "/api/v1/cron/discover-fast",
-      "schedule": "0 6 * * *"
-    },
-    {
-      "path": "/api/v1/cron/discover-remote",
-      "schedule": "30 6 * * *"
+      "src": "/(.*)",
+      "dest": "/api/index.py"
     }
   ]
 }
