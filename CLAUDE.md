@@ -113,8 +113,8 @@ Keep a single head: `alembic heads` should print one revision.
 ### Job Pipeline
 Every job flows: Raw → Normalized → Deduplicated → Enriched → Scored → Inbox
 - Dedup uses canonical hash (normalized company+title+city+country) + description similarity
-- Enrichment: `/api/v1/cron/enrich` reads recent jobs with Haiku (skills, requirements, seniority, salary with its period, sponsorship, `eligible_countries`), then rescores them for every user
-- Scoring (`services/scoring/scorer.py` + `matching.py`) is the same for every profession: title vs target roles/interests/recent titles, skills overlap, seniority, industry, remote fit; blended with resume embeddings when Voyage is available. It must stay fast: a full rescore covers the whole catalog inside 60s
+- Enrichment: `/api/v1/cron/enrich` reads recent jobs with Haiku (skills, requirements, seniority, salary with its period, sponsorship, `eligible_countries`), then rescores them for every user. Jobs already in some user's inbox (score ≥ 50) are read first
+- Scoring (`services/scoring/scorer.py` + `matching.py`) is the same for every profession: title vs target roles/interests/recent titles, skills overlap, seniority, industry, remote fit; blended with Voyage resume/job embeddings only when `EMBEDDINGS_ENABLED=true` and `VOYAGE_API_KEY` is set (off in production). It must stay fast: a full rescore covers the whole catalog inside 60s
 - Hard filters (`services/jobs_filter.py`) hide jobs per user: preferred countries, remote preference, remote roles restricted away from the user's home country, no sponsorship where the user needs it, and source-stated salary below the user's minimum. A job that doesn't state a fact is never hidden by it
 - Inbox relevance: a job's title matches the user's roles or skills, or its score shows a skill match (`job_scores.skill_score > 0`). Never filter inbox queries on `raw_description`: ~83 MB of text across 12k jobs made each query take ~25s
 - Discovery sources keep location-restricted jobs and tag `eligible_countries`; they don't drop them

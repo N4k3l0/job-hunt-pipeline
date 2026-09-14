@@ -57,8 +57,9 @@ async def embed_texts(
     'query' when embedding the candidate profile. Voyage uses different
     representations for retrieval vs. document.
     """
-    if not settings.voyage_api_key:
-        logger.warning("VOYAGE_API_KEY unset — skipping embedding (returning None)")
+    if not settings.embeddings_enabled or not settings.voyage_api_key:
+        # Off by default: scoring runs on the rule-based axes alone.
+        logger.debug("Embeddings off (EMBEDDINGS_ENABLED / VOYAGE_API_KEY) — skipping")
         return None
     if not texts:
         return []
