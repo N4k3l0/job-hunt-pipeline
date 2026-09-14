@@ -62,6 +62,8 @@ async def _ingest_raw_jobs(jobs: list[dict]) -> tuple[int, int]:
     pre_filtered: list[dict] = []
     pre_skipped = 0
     still_listed: set = set()
+    batch_hashes: set[str] = set()
+    batch_urls: set[str] = set()
     for raw in jobs:
         # Compute the same fingerprint we'd compute downstream.
         company = raw.get("company", "Unknown")
@@ -78,6 +80,15 @@ async def _ingest_raw_jobs(jobs: list[dict]) -> tuple[int, int]:
             still_listed.update(matches)
             pre_skipped += 1
             continue
+        # The same job twice in this batch (two sources, or a source that
+        # repeats itself): keep the first. Checking only against the
+        # database let 113 exact copies in.
+        if canonical_hash in batch_hashes or (normalized_url and normalized_url in batch_urls):
+            pre_skipped += 1
+            continue
+        batch_hashes.add(canonical_hash)
+        if normalized_url:
+            batch_urls.add(normalized_url)
         # Stash the precomputed values so we don't recompute them.
         raw["_canonical_hash"] = canonical_hash
         raw["_normalized_url"] = normalized_url

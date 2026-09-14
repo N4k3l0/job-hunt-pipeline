@@ -27,6 +27,9 @@ export interface Job {
   /** Last time the job's link was checked. */
   last_checked_at?: string | null;
   expires_at: string | null;
+  /** Inbox only: other postings of the same job (same company and title,
+   *  other cities or sources) folded into this one. */
+  other_postings?: number;
 }
 
 export interface JobDetail extends Job {

@@ -48,12 +48,14 @@ async def _seed(conn):
     ), {"ng": NIGERIA_USER, "us": US_USER, "visa": json.dumps({"GB": "need_sponsorship"})})
 
     now = datetime.now(timezone.utc)
+    # Distinct titles: the inbox shows postings with the same company and
+    # title once.
     jobs = [
         (US_ONLY, "Product Manager", None, "full_remote", LONG_DESCRIPTION, now, None, None),
         (SHORT, "Senior Product Manager", None, "full_remote", "Short.", now, None, None),
         (OLD, "Product Manager, Growth", None, "full_remote", LONG_DESCRIPTION, now - timedelta(days=60), None, None),
-        (UK_NO_SPONSOR, "Product Manager", "GB", "onsite", "Short.", now, None, None),
-        (LOW_SALARY, "Product Manager", None, "full_remote", "Short.", now, 60000, "USD"),
+        (UK_NO_SPONSOR, "Product Manager, London", "GB", "onsite", "Short.", now, None, None),
+        (LOW_SALARY, "Product Manager, Payments", None, "full_remote", "Short.", now, 60000, "USD"),
     ]
     for job_id, title, country, remote, desc, discovered, salary_max, currency in jobs:
         await conn.execute(text(

@@ -684,6 +684,11 @@ function TopMatchCard({
             {job.salary_text && (
               <span className="ds-mono" style={{ color: "var(--ds-fg)" }}>{job.salary_text}</span>
             )}
+            {job.other_postings > 0 && (
+              <span className="ds-dim" title="The same job is also posted for other locations or on other job sites">
+                +{job.other_postings} more {job.other_postings === 1 ? "posting" : "postings"}
+              </span>
+            )}
             <span className="ds-mono ds-dim">{timeAgo(job.discovered_at)} ago</span>
           </div>
         </div>
@@ -920,6 +925,11 @@ function DenseRow({
           )}
           {job.salary_text && (
             <span className="ds-mono" style={{ color: "var(--ds-fg)" }}>{job.salary_text}</span>
+          )}
+          {job.other_postings > 0 && (
+            <span className="ds-dim" title="The same job is also posted for other locations or on other job sites">
+              +{job.other_postings} more {job.other_postings === 1 ? "posting" : "postings"}
+            </span>
           )}
           <span className="ds-mono ds-dim" style={{ marginLeft: "auto" }}>
             {timeAgo(job.discovered_at)}
