@@ -37,6 +37,9 @@ FORMS = {
         {"required": True, "label": "Resume/CV", "fields": [{"name": "resume", "type": "input_file"}]},
         {"required": True, "label": "Why Stripe?", "fields": [{"name": "question_why", "type": "textarea"}]},
         HEAR,
+        {"required": True, "label": "Have you ever interviewed at Stripe before?", "fields": [
+            {"name": "question_interviewed", "type": "multi_value_single_select",
+             "values": [{"label": "Yes", "value": 1}, {"label": "No", "value": 0}]}]},
         {"required": True, "label": "Please read the arbitration agreement", "fields": [
             {"name": "question_arb", "type": "multi_value_single_select",
              "values": [{"label": "I have read and agree to the arbitration agreement.", "value": 1}]}]},
@@ -138,8 +141,11 @@ async def test_prepare_answer_and_queue(client):
     assert fields["phone"]["needs_attention"] and fields["phone"]["answer"]["value"] is None
     assert fields["question_hear"]["needs_attention"]
     assert fields["question_arb"]["kind"] == "agreement" and fields["question_arb"]["needs_attention"]
-    assert body["open_count"] == 4
-    # Only questions the rules couldn't answer are drafted; agreements never are.
+    assert fields["question_interviewed"]["needs_attention"]
+    assert fields["question_interviewed"]["answer"] is None
+    assert body["open_count"] == 5
+    # Only questions the rules couldn't answer are drafted. Agreements never
+    # are, nor whether the user interviewed there before: no profile says.
     assert client.drafted_for == [["question_why", "question_hear"]]
 
     # Approving with questions still open is refused and names them.
@@ -147,7 +153,7 @@ async def test_prepare_answer_and_queue(client):
         "answers": {"question_why": "I led payments work at Acme."}, "approve": True,
     })
     assert r.status_code == 422
-    assert set(r.json()["detail"]["fields"]) == {"phone", "question_hear", "question_arb"}
+    assert set(r.json()["detail"]["fields"]) == {"phone", "question_hear", "question_interviewed", "question_arb"}
 
     # An option that isn't on the form is refused.
     r = await client.put(f"/api/v1/auto-apply/{app_id}/answers", json={"answers": {"question_hear": "99"}})
@@ -156,10 +162,11 @@ async def test_prepare_answer_and_queue(client):
     # Saving without approving keeps it waiting on the user.
     r = await client.put(f"/api/v1/auto-apply/{app_id}/answers", json={"answers": {"phone": "+234 800 111 2222"}})
     assert r.status_code == 200 and r.json()["status"] == "needs_you"
-    assert r.json()["open_count"] == 3  # the failed save above changed nothing
+    assert r.json()["open_count"] == 4  # the failed save above changed nothing
 
     r = await client.put(f"/api/v1/auto-apply/{app_id}/answers", json={
-        "answers": {"question_why": "I led payments work at Acme.", "question_hear": "12", "question_arb": "1"},
+        "answers": {"question_why": "I led payments work at Acme.", "question_hear": "12",
+                    "question_interviewed": "0", "question_arb": "1"},
         "approve": True,
     })
     assert r.status_code == 200, r.text
@@ -170,7 +177,10 @@ async def test_prepare_answer_and_queue(client):
         phone = (await conn.execute(text("SELECT phone FROM candidate_profiles WHERE user_id = :u"), {"u": USER})).scalar()
         saved = (await conn.execute(text("SELECT label, answer FROM saved_answers WHERE user_id = :u"), {"u": USER})).all()
     assert phone == "+234 800 111 2222"  # remembered on the profile
-    assert [(label, answer) for label, answer in saved] == [("How did you hear about this job?", {"labels": ["Job board"]})]
+    assert sorted((label, answer["labels"]) for label, answer in saved) == [
+        ("Have you ever interviewed at Stripe before?", ["No"]),
+        ("How did you hear about this job?", ["Job board"]),
+    ]
 
     # The next form asking the same question is answered from memory.
     r = await client.post(f"/api/v1/auto-apply/jobs/{JOB_B}")
