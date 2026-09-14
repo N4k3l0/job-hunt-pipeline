@@ -97,6 +97,15 @@ async def test_expiry_rules():
         await _job(conn, source_id=other, discovered=days_ago(60), last_seen=days_ago(5), title="Old, still listed")
         await _job(conn, source_id=other, discovered=days_ago(20), last_seen=None, title="Recent")
         applied = await _job(conn, source_id=other, discovered=days_ago(90), last_seen=None, title="Old, applied")
+        tailored = await _job(conn, source_id=other, discovered=days_ago(90), last_seen=None, title="Old, tailored")
+        preparing = await _job(conn, source_id=other, discovered=days_ago(90), last_seen=None, title="Old, Apply for me")
+        await conn.execute(text(
+            "INSERT INTO tailored_applications (id, job_id, user_id, approval_status) "
+            "VALUES (gen_random_uuid(), :j, :u, 'ready')"
+        ), {"j": tailored, "u": USER})
+        await conn.execute(text(
+            "INSERT INTO auto_applications (id, job_id, user_id, status) VALUES (gen_random_uuid(), :j, :u, 'needs_you')"
+        ), {"j": preparing, "u": USER})
         shortlisted = await _job(conn, source_id=other, discovered=days_ago(90), last_seen=None, title="Old, shortlisted")
         await conn.execute(text(
             "INSERT INTO application_tracking (id, job_id, user_id, status) VALUES (gen_random_uuid(), :j, :u, 'applied')"
@@ -121,7 +130,7 @@ async def test_expiry_rules():
     assert statuses["Board: taken down"] == "expired"
     assert statuses["Old, unlisted"] == "expired"
     for title in ("Board: still listed", "Board: missed 3 days", "Old, still listed", "Recent",
-                  "Old, applied", "Old, shortlisted"):
+                  "Old, applied", "Old, shortlisted", "Old, tailored", "Old, Apply for me"):
         assert statuses[title] == "scored", title
 
 

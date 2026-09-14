@@ -64,7 +64,9 @@ function pct(raw: number | null | undefined, max: number): number {
   return Math.max(0, Math.min(100, Math.round((raw / max) * 100)));
 }
 
+// "best" is the score with older jobs gradually ranked lower (backend fresh_rank).
 const SORT_LABELS: Record<string, string> = {
+  best: "best match",
   score: "score",
   date: "date",
   salary: "salary",
@@ -180,7 +182,7 @@ export default function JobsInboxPage() {
   // ── State ──────────────────────────────────────────────────────────
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [sortBy, setSortBy] = useState("score");
+  const [sortBy, setSortBy] = useState("best");
   const [activeView, setActiveView] = useState<string | null>(null);
 
   // ── Saved views (server-side presets) ──────────────────────────────
@@ -529,7 +531,7 @@ export default function JobsInboxPage() {
                   }}
                 >
                   <span>REST OF INBOX · {rest.length}</span>
-                  <span className="ds-faint">SORTED BY {sortBy.toUpperCase()}</span>
+                  <span className="ds-faint">SORTED BY {(SORT_LABELS[sortBy] ?? sortBy).toUpperCase()}</span>
                 </div>
 
                 <div className="ds-card" style={{ overflow: "hidden" }}>

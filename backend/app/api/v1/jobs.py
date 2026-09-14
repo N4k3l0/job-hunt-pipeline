@@ -78,6 +78,21 @@ class JobImportBulkURLs(BaseModel):
     source: str = "linkedin_alert"
 
 
+# Ranking for "best": a job keeps its full score for its first week, then
+# loses a point a day, up to 25 points. A strong match from two months ago
+# (most likely filled) ranks below a good one posted this week.
+FRESH_DAYS = 7
+MAX_AGE_PENALTY = 25
+
+
+def fresh_rank():
+    # A job's age counts from when it was posted, or when the app found it
+    # if that was earlier (some sources report an "updated" date instead).
+    age_days = func.extract("epoch", func.now() - func.least(Job.posted_at, Job.discovered_at)) / 86400
+    penalty = func.least(func.greatest(age_days - FRESH_DAYS, 0), MAX_AGE_PENALTY)
+    return func.coalesce(JobScore.overall_fit, 0) - func.coalesce(penalty, 0)
+
+
 def _scored_or_manual(user_id, min_score: float):
     """Jobs this user's score puts at min_score or above, plus manual imports
     not scored yet (the user asked for those explicitly, so they show even
@@ -121,7 +136,9 @@ async def list_jobs(
     # Frontend can pass min_score=0 to show everything (including unscored
     # jobs, which appear with overall_fit IS NULL — see filter below).
     min_score: float | None = 50,
-    sort_by: str = "score",
+    # best: score, with jobs losing ground as they age (see fresh_rank).
+    # score: score alone. date: newest first. salary: highest first.
+    sort_by: str = "best",
     status: str | None = None,
     include_applied: bool = False,
     # Filter chips set this to a short relative window so server-side
@@ -377,7 +394,9 @@ async def list_jobs(
     total = total_result.scalar() or 0
 
     # Sort
-    if sort_by == "score":
+    if sort_by == "best":
+        query = query.order_by(fresh_rank().desc(), Job.discovered_at.desc())
+    elif sort_by == "score":
         query = query.order_by(JobScore.overall_fit.desc().nulls_last())
     elif sort_by == "date":
         query = query.order_by(Job.discovered_at.desc())
