@@ -20,7 +20,7 @@
  * refetch after each save.
  */
 
-import { useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import {
   useCurrentUser,
   useUpdateMe,
@@ -48,14 +48,48 @@ import { useToast } from "@/components/ui/toast";
 import { COUNTRY_OPTIONS } from "@/lib/countries";
 import { HomeCountryPrompt, HomeCountrySelect } from "@/components/home-country-select";
 
+// Remembers that this browser's user finished setup, so the page can start
+// loading its own data at once instead of waiting ~1s for the three checks.
+const SETUP_DONE_KEY = "onboarding-complete";
+
+function readSetupDone(): boolean {
+  try {
+    return window.localStorage.getItem(SETUP_DONE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+const noSubscription = () => () => {};
+
 export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const { data: user, isLoading: userLoading } = useCurrentUser();
   const { data: resumes, isLoading: resumesLoading } = useResumes();
   const { data: profile, isLoading: profileLoading } = useProfile();
+  // false on the server and during hydration, so both render the same.
+  const setupDoneBefore = useSyncExternalStore(noSubscription, readSetupDone, () => false);
 
-  // Treat loading as 'don't render yet' rather than 'gate is open' — would
-  // otherwise flash the children for a frame before swapping back.
-  if (userLoading || resumesLoading || profileLoading) {
+  const loading = userLoading || resumesLoading || profileLoading;
+  const hasName = !!(user?.name && user.name.trim().length > 0);
+  const hasResume = (resumes?.length ?? 0) > 0;
+  const hasCountries = (profile?.preferred_countries?.length ?? 0) > 0;
+  const hasHomeCountry = !!profile?.home_country;
+  const setupDone = hasName && hasResume && hasCountries;
+
+  useEffect(() => {
+    if (loading) return;
+    try {
+      if (setupDone) window.localStorage.setItem(SETUP_DONE_KEY, "1");
+      else window.localStorage.removeItem(SETUP_DONE_KEY);
+    } catch {
+      // Storage blocked: the gate just waits for the checks every time.
+    }
+  }, [loading, setupDone]);
+
+  if (loading) {
+    // Someone who finished setup before sees the page straight away; if
+    // that changed, the checks below swap in the setup view when they land.
+    if (setupDoneBefore) return <>{children}</>;
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
         <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -63,15 +97,10 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     );
   }
 
-  const hasName = !!(user?.name && user.name.trim().length > 0);
-  const hasResume = (resumes?.length ?? 0) > 0;
-  const hasCountries = (profile?.preferred_countries?.length ?? 0) > 0;
-  const hasHomeCountry = !!profile?.home_country;
-
   // Home country is asked during setup, but it isn't a gate: users who set
   // up before it existed get a dismissible prompt instead of being sent
   // back through the whole wizard.
-  if (hasName && hasResume && hasCountries) {
+  if (setupDone) {
     return (
       <>
         {!hasHomeCountry && <HomeCountryPrompt />}
