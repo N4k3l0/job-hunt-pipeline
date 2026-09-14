@@ -6,7 +6,7 @@ from uuid import UUID
 import httpx
 from fastapi import APIRouter, Query, HTTPException, Response
 from pydantic import BaseModel
-from sqlalchemy import select, func, and_, or_, not_, exists, union_all
+from sqlalchemy import select, func, and_, or_, not_, exists, tuple_, union_all
 from sqlalchemy.orm import aliased, defer, selectinload
 
 from app.api.deps import CurrentUserId, DbSession
@@ -18,7 +18,7 @@ from app.models.tracking import ApplicationTracking
 from app.models.auto_apply import AutoApplication
 from app.services.auto_apply.ats import detect_ats
 from app.services.discovery.ats_resolver import find_direct_apply, is_ats_url, _is_aggregator
-from app.services.jobs_filter import country_filter_codes
+from app.services.jobs_filter import country_filter_codes, job_group_key
 from app.services.job_state import (
     APPLIED_TRACKING_STATUSES,
     USER_JOB_STATUSES,
@@ -216,7 +216,11 @@ async def list_jobs(
         .where(status_clause)
     )
     if not include_applied and applied_ids:
-        query = query.where(Job.id.notin_(applied_ids))
+        # Hide the job's other postings too (same company and title).
+        applied_job = aliased(Job)
+        query = query.where(tuple_(*job_group_key(Job)).notin_(
+            select(*job_group_key(applied_job)).where(applied_job.id.in_(applied_ids))
+        ))
 
     # Pull profile preferences once and run them through the shared filter
     # (same code path the dashboard's /analytics/overview uses, so the counts
@@ -344,74 +348,56 @@ async def list_jobs(
 
         query = query.where(or_(*[func.lower(Job.title).like(kw) for kw in keywords]))
 
-    # Count total — apply identical filter chain through the shared helper.
-    count_base = (
-        select(func.count(func.distinct(Job.id)))
-        .outerjoin(JobScore, and_(JobScore.job_id == Job.id, JobScore.user_id == user_id))
-        .outerjoin(JobSource, JobSource.id == Job.source_id)
-        .outerjoin(JobEntity, JobEntity.job_id == Job.id)
-        .outerjoin(UserJobState, user_state_join)
-        .where(Job.status.notin_(["duplicate", "raw", "expired", "dismissed"]))
-        .where(status_clause)
-    )
-    if not include_applied and applied_ids:
-        count_base = count_base.where(Job.id.notin_(applied_ids))
-    count_base = apply_user_filters(
-        count_base,
-        target_roles=apply_target_roles,
-        skills=user_skills if not role_type else None,
-        blocked_sources=blocked_sources,
-        remote_preference=effective_remote_pref,
-        # Skip the country filter when the user has explicitly asked for a
-        # single country via ?country= — that param already constrains the
-        # query and would otherwise be ANDed with the broader preference list.
-        preferred_countries=(None if country else profile_pref_countries),
-        **hard_filters,
-        user_id=user_id,
-    )
-    if len(country_codes) == 1:
-        count_base = count_base.where(Job.country == country_codes[0])
-    elif len(country_codes) > 1:
-        count_base = count_base.where(Job.country.in_(country_codes))
-    if since_cutoff is not None:
-        count_base = count_base.where(Job.discovered_at >= since_cutoff)
-    if remote_type:
-        if remote_type == "unknown":
-            count_base = count_base.where(Job.remote_type == None)
-        else:
-            count_base = count_base.where(Job.remote_type == remote_type)
-    elif remote_only:
-        count_base = count_base.where(Job.remote_type == "full_remote")
-    if sponsorship:
-        count_base = count_base.where(JobEntity.sponsorship_available == True)
-    if source:
-        count_base = count_base.where(JobSource.name == source)
-    if min_score is not None and has_scores:
-        count_base = count_base.where(_scored_or_manual(user_id, min_score))
-    if role_type:
-        count_base = count_base.where(or_(*[func.lower(Job.title).like(kw) for kw in keywords]))
-    total_result = await db.execute(count_base)
-    total = total_result.scalar() or 0
+    # One entry per job: the same company and title posted for several
+    # cities, or listed by several sources, shows once as its best-ranked
+    # posting, with a count of the others. The page and the total come from
+    # one query over the filtered jobs.
+    group_key = job_group_key(Job)
+    sort_value = {
+        "best": fresh_rank(),
+        "score": JobScore.overall_fit,
+        "salary": Job.salary_max,
+    }.get(sort_by, Job.discovered_at)
+    ranked = query.with_only_columns(
+        Job.id.label("job_id"),
+        sort_value.label("sort_value"),
+        Job.discovered_at.label("discovered_at"),
+        func.row_number().over(
+            partition_by=group_key, order_by=(fresh_rank().desc(), Job.discovered_at.desc(), Job.id),
+        ).label("rn"),
+        func.count().over(partition_by=group_key).label("postings"),
+    ).subquery()
 
-    # Sort
-    if sort_by == "best":
-        query = query.order_by(fresh_rank().desc(), Job.discovered_at.desc())
-    elif sort_by == "score":
-        query = query.order_by(JobScore.overall_fit.desc().nulls_last())
-    elif sort_by == "date":
-        query = query.order_by(Job.discovered_at.desc())
-    elif sort_by == "salary":
-        query = query.order_by(Job.salary_max.desc().nulls_last())
-    else:
-        query = query.order_by(Job.discovered_at.desc())
-
-    # Paginate
     offset = (page - 1) * page_size
-    # raw_content holds whole scraped pages and the inbox never shows it.
-    query = query.offset(offset).limit(page_size).options(defer(Job.raw_content))
+    page_rows = (await db.execute(
+        select(ranked.c.job_id, ranked.c.postings, func.count().over().label("total"))
+        .where(ranked.c.rn == 1)
+        .order_by(ranked.c.sort_value.desc().nulls_last(), ranked.c.discovered_at.desc(), ranked.c.job_id)
+        .offset(offset)
+        .limit(page_size)
+    )).all()
+    if page_rows:
+        total = page_rows[0].total
+    else:
+        total = (await db.execute(
+            select(func.count()).select_from(ranked).where(ranked.c.rn == 1)
+        )).scalar() or 0
 
-    result = await db.execute(query)
-    rows = result.unique().all()
+    page_ids = [r.job_id for r in page_rows]
+    other_postings = {r.job_id: r.postings - 1 for r in page_rows}
+    rows = []
+    if page_ids:
+        details = (await db.execute(
+            select(Job, JobScore, JobSource, UserJobState.status)
+            .outerjoin(JobScore, and_(JobScore.job_id == Job.id, JobScore.user_id == user_id))
+            .outerjoin(JobSource, JobSource.id == Job.source_id)
+            .outerjoin(UserJobState, user_state_join)
+            .where(Job.id.in_(page_ids))
+            # raw_content holds whole scraped pages and the inbox never shows it.
+            .options(defer(Job.raw_content))
+        )).unique().all()
+        by_id = {row[0].id: row for row in details}
+        rows = [by_id[job_id] for job_id in page_ids if job_id in by_id]
 
     # Serialize with score and source included
     jobs_out = []
@@ -458,6 +444,9 @@ async def list_jobs(
             # back to raw_description on already-English (or untranslated)
             # rows. Empty string ends up None via _make_excerpt.
             "excerpt": _make_excerpt(job.raw_description_en or job.raw_description),
+            # Other postings of the same job (other cities or sources) that
+            # passed the same filters.
+            "other_postings": other_postings.get(job.id, 0),
             "score": {
                 "role_path": score.role_path,
                 "overall_fit": score.overall_fit,

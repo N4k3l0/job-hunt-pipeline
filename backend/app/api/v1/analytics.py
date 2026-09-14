@@ -10,7 +10,7 @@ from app.models.scoring import JobScore
 from app.models.tracking import ApplicationTracking
 from app.models.tailoring import TailoredApplication
 from app.models.candidate import CandidateProfile
-from app.services.jobs_filter import apply_user_filters
+from app.services.jobs_filter import apply_user_filters, job_group_key
 
 router = APIRouter()
 
@@ -57,8 +57,11 @@ async def get_overview(user_id: CurrentUserId, db: DbSession):
 
     # Jobs discovered — exact same filter chain the inbox applies, so the
     # number on the dashboard always matches what the user actually sees.
+    # Each job once, like the inbox: postings of the same job in several
+    # cities or from several sources count as one.
+    company_key, title_key = job_group_key(Job)
     jobs_query = (
-        select(func.count(func.distinct(Job.id)))
+        select(func.count(func.distinct(company_key + "|" + title_key)))
         .outerjoin(JobSource, JobSource.id == Job.source_id)
         .outerjoin(JobEntity, JobEntity.job_id == Job.id)
         .outerjoin(

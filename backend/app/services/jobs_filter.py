@@ -151,6 +151,13 @@ def _skill_keywords(skills: list[str] | None) -> list[str]:
     return list(set(out))
 
 
+def job_group_key(job=Job):
+    """Normalized company and title. Postings of the same job for several
+    cities, or from several sources, share it; the inbox and the dashboard
+    count each job once."""
+    return (func.lower(func.trim(job.company)), func.lower(func.trim(job.title)))
+
+
 def apply_user_filters(
     query,
     *,
