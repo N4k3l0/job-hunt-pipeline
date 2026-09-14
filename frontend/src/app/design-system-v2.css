@@ -136,6 +136,27 @@
   --filterbar-fade: linear-gradient(var(--bg) 80%, rgba(247,245,240,0));
 }
 
+/* shadcn components (Card, Badge, Tabs, Input, Select, popovers) read these
+   names, which globals.css only defines with dark values. Without this,
+   pages built from them kept black cards in the light theme. Pointing them
+   at the theme tokens makes them follow the Dark/Light switch. */
+:root,
+[data-theme="dark"],
+[data-theme="light"] {
+  --background: var(--bg);
+  --foreground: var(--fg);
+  --card: var(--bg-elev-1);
+  --card-foreground: var(--fg);
+  --popover: var(--bg-elev-1);
+  --popover-foreground: var(--fg);
+  --secondary: var(--bg-elev-2);
+  --secondary-foreground: var(--fg);
+  --muted: var(--bg-elev-2);
+  --muted-foreground: var(--fg-muted);
+  --border: var(--line);
+  --input: var(--line-strong);
+}
+
 * {
   box-sizing: border-box;
 }

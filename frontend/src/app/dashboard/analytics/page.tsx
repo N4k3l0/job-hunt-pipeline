@@ -1,34 +1,29 @@
 "use client";
 
-import {
-  Card, CardContent, CardHeader, CardTitle, CardDescription,
-} from "@/components/ui/card";
-import {
-  Loader2, TrendingUp, Briefcase, FileText, BarChart3, CheckCircle2, Clock, Phone,
-} from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useAnalytics } from "@/hooks/use-api";
 
-function StatTile({
-  label, value, sub, icon: Icon, isPercent,
-}: {
-  label: string; value: number; sub: string;
-  icon: React.ElementType; isPercent?: boolean;
-}) {
-  // Keep zeros muted so a fresh account doesn't read as failure.
-  const isZero = value === 0;
-  const display = isPercent ? `${value.toFixed(0)}%` : value;
+function StatTile({ label, value, sub, isPercent }: { label: string; value: number; sub: string; isPercent?: boolean }) {
+  // Zeros read as a dash so a fresh account doesn't look like failure.
+  const display = value === 0 ? "—" : isPercent ? `${value.toFixed(0)}%` : value.toLocaleString();
   return (
-    <div className="rounded-xl border border-white/[0.06] bg-white/[0.015] p-4 transition-colors hover:border-white/[0.12]">
-      <div className="flex items-center gap-2 mb-2.5">
-        <Icon className="h-4 w-4 text-muted-foreground" />
-        <span className="text-xs uppercase tracking-[0.1em] text-muted-foreground font-medium">
-          {label}
-        </span>
+    <div className="ds-card" style={{ padding: "18px 18px 16px", minWidth: 0 }}>
+      <div
+        className="ds-mono"
+        style={{ fontSize: 10, letterSpacing: "0.12em", color: "var(--ds-fg-faint)", textTransform: "uppercase", fontWeight: 600 }}
+      >
+        {label}
       </div>
-      <span className={`text-3xl font-bold tracking-tight tabular-nums block ${isZero ? "text-muted-foreground/40" : ""}`}>
-        {isZero ? "—" : display}
-      </span>
-      <span className="text-sm text-muted-foreground mt-1 block">{sub}</span>
+      <div
+        className="ds-mono"
+        style={{
+          fontSize: 30, fontWeight: 600, letterSpacing: "-0.03em", lineHeight: 1.1, marginTop: 10,
+          color: value === 0 ? "var(--ds-fg-faint)" : "var(--ds-fg)",
+        }}
+      >
+        {display}
+      </div>
+      <div className="ds-muted" style={{ fontSize: 12, marginTop: 6 }}>{sub}</div>
     </div>
   );
 }
@@ -44,97 +39,94 @@ export default function AnalyticsPage() {
     );
   }
 
-  const a = analytics;
-  const discovered = a?.jobs_discovered ?? 0;
-  const shortlisted = a?.jobs_shortlisted ?? 0;
-  const applied = a?.applications_sent ?? 0;
-  const thisWeek = a?.applications_this_week ?? 0;
-  const responseRate = a?.response_rate ?? 0;
-  const interviewRate = a?.interview_rate ?? 0;
+  const discovered = analytics?.jobs_discovered ?? 0;
+  const shortlisted = analytics?.jobs_shortlisted ?? 0;
+  const applied = analytics?.applications_sent ?? 0;
+  const thisWeek = analytics?.applications_this_week ?? 0;
+  const responseRate = analytics?.response_rate ?? 0;
+  const interviewRate = analytics?.interview_rate ?? 0;
 
   // Funnel = Discovered → Shortlisted → Applied → Responses → Interviews.
-  // Compute counts (response/interview counts derive from rate × applied).
+  // Response and interview counts derive from rate × applied.
   const responses = Math.round(applied * (responseRate / 100));
   const interviews = Math.round(applied * (interviewRate / 100));
   const hasAnyData = discovered > 0 || applied > 0;
 
   const funnel = [
-    { label: "Discovered", count: discovered, color: "bg-blue-400/70" },
-    { label: "Shortlisted", count: shortlisted, color: "bg-violet-400/70" },
-    { label: "Applied", count: applied, color: "bg-amber-400/70" },
-    { label: "Responses", count: responses, color: "bg-emerald-400/70" },
-    { label: "Interviews", count: interviews, color: "bg-emerald-500/80" },
+    { label: "Discovered", count: discovered },
+    { label: "Shortlisted", count: shortlisted },
+    { label: "Applied", count: applied },
+    { label: "Responses", count: responses },
+    { label: "Interviews", count: interviews },
   ];
   const peak = Math.max(...funnel.map((f) => f.count), 1);
 
-  const stats: { label: string; value: number; sub: string; icon: React.ElementType; isPercent?: boolean }[] = [
-    { label: "Discovered", value: discovered, sub: `${shortlisted} shortlisted`, icon: Briefcase },
-    { label: "Applied", value: applied, sub: `${thisWeek} this week`, icon: FileText },
-    { label: "Responses", value: responses, sub: applied > 0 ? `from ${applied} applied` : "no data yet", icon: CheckCircle2 },
-    { label: "Interviews", value: interviews, sub: applied > 0 ? `from ${applied} applied` : "no data yet", icon: Phone },
-    { label: "Response Rate", value: responseRate, sub: "of all applications", icon: TrendingUp, isPercent: true },
-    { label: "Interview Rate", value: interviewRate, sub: "of all applications", icon: BarChart3, isPercent: true },
+  const stats = [
+    { label: "Discovered", value: discovered, sub: `${shortlisted} shortlisted` },
+    { label: "Applied", value: applied, sub: `${thisWeek} this week` },
+    { label: "Responses", value: responses, sub: applied > 0 ? `from ${applied} applied` : "no data yet" },
+    { label: "Interviews", value: interviews, sub: applied > 0 ? `from ${applied} applied` : "no data yet" },
+    { label: "Response rate", value: responseRate, sub: "of all applications", isPercent: true },
+    { label: "Interview rate", value: interviewRate, sub: "of all applications", isPercent: true },
   ];
 
   return (
-    <div className="space-y-6 sm:space-y-8">
-      <div>
-        <h1 className="font-display text-2xl sm:text-3xl font-semibold tracking-tight">Analytics</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Where your pipeline stands and how it&apos;s converting.
-        </p>
-      </div>
+    <div className="ds-root ds-page-fade" style={{ background: "var(--ds-bg)" }}>
+      <div className="space-y-6" style={{ maxWidth: 1100, margin: "0 auto" }}>
+        <div>
+          <h1 className="ds-h1">Analytics</h1>
+          <p className="ds-muted" style={{ marginTop: 6 }}>Where your pipeline stands and how it&apos;s converting.</p>
+        </div>
 
-      {/* Stat tiles */}
-      <div className="grid gap-3 grid-cols-2 lg:grid-cols-3">
-        {stats.map((s) => (
-          <StatTile key={s.label} {...s} />
-        ))}
-      </div>
+        <div className="grid grid-cols-2 lg:grid-cols-3" style={{ gap: 14 }}>
+          {stats.map((s) => (
+            <StatTile key={s.label} {...s} />
+          ))}
+        </div>
 
-      {/* Funnel — replaces the empty 'Activity Over Time' placeholder with
-          something that's actually useful even at low volume. */}
-      <Card className="border-white/[0.06]">
-        <CardHeader>
-          <CardTitle className="text-sm">Pipeline funnel</CardTitle>
-          <CardDescription>
+        <section className="ds-card" style={{ padding: 18 }}>
+          <h2 className="ds-h3">Pipeline funnel</h2>
+          <p className="ds-dim" style={{ fontSize: 13, marginTop: 4 }}>
             {hasAnyData
               ? "From discovery through to interview, in absolute counts."
-              : "Once jobs start flowing in and you apply, the funnel will populate here."}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {funnel.map((stage) => {
-            const pct = hasAnyData ? (stage.count / peak) * 100 : 0;
-            return (
-              <div key={stage.label} className="flex items-center gap-3">
-                <span className="w-24 shrink-0 text-xs text-muted-foreground">
-                  {stage.label}
-                </span>
-                <div className="flex-1 h-7 rounded-md bg-white/[0.03] overflow-hidden relative">
-                  <div
-                    className={`h-full ${stage.color} transition-all duration-500`}
-                    style={{ width: `${Math.max(pct, hasAnyData && stage.count === 0 ? 0 : 1.5)}%` }}
-                  />
-                  <span className="absolute inset-0 flex items-center px-3 text-sm font-medium tabular-nums">
-                    {stage.count === 0 ? (
-                      <span className="text-muted-foreground">—</span>
-                    ) : (
-                      stage.count
-                    )}
+              : "Once jobs start flowing in and you apply, the funnel fills in here."}
+          </p>
+          <div className="space-y-3" style={{ marginTop: 16 }}>
+            {funnel.map((stage, i) => {
+              const pct = hasAnyData && stage.count > 0 ? Math.max((stage.count / peak) * 100, 1.5) : 0;
+              return (
+                <div key={stage.label} className="grid items-center" style={{ gridTemplateColumns: "96px minmax(0, 1fr) 64px", gap: 12 }}>
+                  <span className="ds-muted" style={{ fontSize: 13 }}>{stage.label}</span>
+                  <div style={{ height: 10, borderRadius: 999, background: "var(--ds-bg-elev-2)", overflow: "hidden" }}>
+                    <div
+                      style={{
+                        height: "100%",
+                        width: `${pct}%`,
+                        borderRadius: 999,
+                        background: "var(--ds-accent)",
+                        // One accent, fading down the funnel.
+                        opacity: 1 - i * 0.15,
+                        transition: "width 500ms var(--ds-ease)",
+                      }}
+                    />
+                  </div>
+                  <span
+                    className="ds-mono"
+                    style={{ fontSize: 13, textAlign: "right", color: stage.count === 0 ? "var(--ds-fg-faint)" : "var(--ds-fg)" }}
+                  >
+                    {stage.count === 0 ? "—" : stage.count.toLocaleString()}
                   </span>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
           {!hasAnyData && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground pt-2">
-              <Clock className="h-3.5 w-3.5" />
-              Discovery is running — check back after your first few applications.
-            </div>
+            <p className="ds-dim" style={{ fontSize: 13, marginTop: 14 }}>
+              Discovery is running. Check back after your first few applications.
+            </p>
           )}
-        </CardContent>
-      </Card>
+        </section>
+      </div>
     </div>
   );
 }
