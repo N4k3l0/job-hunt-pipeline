@@ -122,9 +122,10 @@ export default function DashboardOverview() {
       label: "RESPONSE RATE",
       value:
         (analytics?.applications_sent ?? 0) > 0
-          ? `${Math.round((analytics?.response_rate ?? 0) * 100)}%`
+          // The API already sends percentages (0–100).
+          ? `${Math.round(analytics?.response_rate ?? 0)}%`
           : "—",
-      sub: `${Math.round((analytics?.interview_rate ?? 0) * 100)}% interview rate`,
+      sub: `${Math.round(analytics?.interview_rate ?? 0)}% interview rate`,
     },
   ];
 
