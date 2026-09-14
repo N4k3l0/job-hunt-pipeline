@@ -86,6 +86,7 @@ async def pick_jobs_to_review(db, user_id, *, limit: int, min_score: float, max_
         visa_statuses=profile.visa_statuses,
         salary_min=profile.salary_min,
         salary_currency=profile.salary_currency,
+        user_id=user_id,
     )
     query = query.order_by(JobScore.overall_fit.desc()).limit(limit)
     return list((await db.execute(query)).scalars().all())

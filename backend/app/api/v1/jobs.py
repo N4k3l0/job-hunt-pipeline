@@ -242,6 +242,7 @@ async def list_jobs(
         # query and would otherwise be ANDed with the broader preference list.
         preferred_countries=(None if country else profile_pref_countries),
         **hard_filters,
+        user_id=user_id,
     )
 
     # Apply filters
@@ -335,6 +336,7 @@ async def list_jobs(
         # query and would otherwise be ANDed with the broader preference list.
         preferred_countries=(None if country else profile_pref_countries),
         **hard_filters,
+        user_id=user_id,
     )
     if len(country_codes) == 1:
         count_base = count_base.where(Job.country == country_codes[0])

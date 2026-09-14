@@ -79,6 +79,7 @@ async def get_overview(user_id: CurrentUserId, db: DbSession):
         visa_statuses=profile_row[6] if profile_row else None,
         salary_min=profile_row[7] if profile_row else None,
         salary_currency=profile_row[8] if profile_row else None,
+        user_id=user_id,
     )
     jobs_result = await db.execute(jobs_query)
     jobs_discovered = jobs_result.scalar() or 0
