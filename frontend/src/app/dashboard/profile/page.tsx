@@ -21,8 +21,9 @@ import {
 import {
   User, Upload, FileText, Plus, X, Globe, DollarSign, Search,
   Briefcase, GraduationCap, Loader2, CheckCircle2, Trash2, Circle, ArrowRight,
-  Sparkles, FileSignature, Quote,
+  Sparkles, FileSignature, Quote, ExternalLink,
 } from "lucide-react";
+import { api } from "@/lib/api-client";
 import { EmptyState } from "@/components/ui/empty-state";
 import { OperationProgress } from "@/components/operation-progress";
 import {
@@ -132,6 +133,24 @@ export default function ProfilePage() {
   const { data: currentUser } = useCurrentUser();
   const updateMe = useUpdateMe();
   const toast = useToast();
+
+  // Resumes are private: ask the backend for a link that works for 10
+  // minutes. The tab opens first so the popup blocker allows it.
+  async function openResume(resumeId: string) {
+    const tab = window.open("about:blank", "_blank");
+    try {
+      const { url } = await api.get<{ url: string }>(`/api/v1/candidates/resumes/${resumeId}/download`);
+      if (tab) {
+        tab.opener = null;
+        tab.location.href = url;
+      } else {
+        window.location.href = url;
+      }
+    } catch (e) {
+      tab?.close();
+      toast.error("Couldn't open the resume", { description: e instanceof Error ? e.message : undefined });
+    }
+  }
   const [displayName, setDisplayName] = useState("");
   useEffect(() => {
     if (currentUser?.name) setDisplayName(currentUser.name);
@@ -740,13 +759,26 @@ export default function ProfilePage() {
                           </div>
                         </div>
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        onClick={() => deleteResume.mutate(resume.id)}
-                      >
-                        <Trash2 className="h-4 w-4 text-muted-foreground hover:text-destructive" />
-                      </Button>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          onClick={() => openResume(resume.id)}
+                          title="Open this resume"
+                          aria-label="Open this resume"
+                        >
+                          <ExternalLink className="h-4 w-4 text-muted-foreground" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          onClick={() => deleteResume.mutate(resume.id)}
+                          title="Delete this resume"
+                          aria-label="Delete this resume"
+                        >
+                          <Trash2 className="h-4 w-4 text-muted-foreground hover:text-destructive" />
+                        </Button>
+                      </div>
                     </div>
                   ))}
                 </div>

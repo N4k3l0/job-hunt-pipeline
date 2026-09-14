@@ -164,7 +164,7 @@ class ResumeResponse(BaseModel):
     version_name: str
     tags: list[str] | None = None
     source_type: str
-    file_url: str
+    # No file_url: files are private, opened through /resumes/{id}/download.
     parsed_at: datetime | None = None
     created_at: datetime
 
