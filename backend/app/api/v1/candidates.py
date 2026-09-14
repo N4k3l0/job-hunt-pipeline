@@ -1,7 +1,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, status
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, func
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUserId, DbSession
@@ -413,11 +413,14 @@ async def upload_resume(
     if len(content) > 10 * 1024 * 1024:  # 10MB limit
         raise HTTPException(status_code=400, detail="File too large (max 10MB)")
 
-    # Upload to Supabase Storage
+    # Upload to Supabase Storage. A generated name, not the uploaded file's
+    # name: two uploads with the same name used to overwrite each other, and
+    # a filename is untrusted input. file_url holds the path in the bucket.
+    import uuid as _uuid
     from app.services.storage import upload_file
     file_url = await upload_file(
         bucket="resumes",
-        path=f"{user_id}/{file.filename}",
+        path=f"{user_id}/{_uuid.uuid4()}.{ext}",
         content=content,
         content_type=file.content_type or "application/octet-stream",
     )
@@ -489,8 +492,35 @@ async def delete_resume(resume_id: UUID, user_id: CurrentUserId, db: DbSession):
         .values(base_resume_id=None)
     )
 
+    stored = resume.file_url
     await db.delete(resume)
     await db.commit()
+
+    # Remove the file too, unless another resume row still points at it
+    # (uploads with the same filename shared a path before generated names).
+    from app.services.storage import delete_file, object_path
+    still_used = (await db.execute(
+        select(func.count()).select_from(Resume).where(Resume.file_url == stored)
+    )).scalar()
+    if not still_used:
+        try:
+            await delete_file("resumes", object_path("resumes", stored))
+        except Exception as e:  # noqa: BLE001 — the row is gone; a stray file is logged, not fatal
+            import logging
+            logging.getLogger(__name__).warning("Couldn't delete resume file for %s: %s", resume_id, e)
+
+
+@router.get("/resumes/{resume_id}/download")
+async def download_resume(resume_id: UUID, user_id: CurrentUserId, db: DbSession):
+    """A link to the user's own resume file, valid for 10 minutes."""
+    resume = (await db.execute(
+        select(Resume).where(Resume.id == resume_id, Resume.user_id == user_id)
+    )).scalar_one_or_none()
+    if not resume:
+        raise HTTPException(status_code=404, detail="Resume not found")
+    from app.services.storage import SIGNED_URL_SECONDS, object_path, signed_url
+    url = await signed_url("resumes", object_path("resumes", resume.file_url))
+    return {"url": url, "expires_in": SIGNED_URL_SECONDS}
 
 
 @router.post("/resumes/{resume_id}/parse")

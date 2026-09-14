@@ -170,7 +170,6 @@ export interface Resume {
   version_name: string;
   tags: string[] | null;
   source_type: string;
-  file_url: string;
   parsed_at: string | null;
   created_at: string;
 }

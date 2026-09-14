@@ -9,7 +9,7 @@ from app.core.database import create_worker_session
 from app.models.candidate import Resume, CandidateProfile, CandidateWorkHistory, CandidateSkill, CandidateEducation, CandidateBullet
 from app.services.parsing.resume_parser import parse_resume_content, build_bullets_from_parsed
 from app.services.parsing.job_parser import parse_job_text
-from app.services.storage import download_file
+from app.services.storage import download_file, object_path
 
 logger = logging.getLogger(__name__)
 
@@ -55,10 +55,9 @@ async def _parse_resume_async(resume_id: str, user_id: str):
             logger.info("Resume %s already parsed at %s — skipping", resume_id, resume.parsed_at)
             return
 
-        # Download file from storage
-        # Extract bucket path from URL
-        path = f"{user_id}/{resume.file_url.split('/')[-1]}"
-        content = await download_file("resumes", path)
+        # Download file from storage (file_url is a path, or a public URL
+        # on rows saved before the bucket went private).
+        content = await download_file("resumes", object_path("resumes", resume.file_url))
 
         # Parse with LLM
         parsed = await parse_resume_content(content, resume.source_type)

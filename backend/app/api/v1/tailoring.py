@@ -454,4 +454,5 @@ async def download_pdf(tailored_id: UUID, user_id: CurrentUserId, db: DbSession)
     if not app.tailored_resume_url:
         raise HTTPException(status_code=404, detail="PDF not yet generated")
 
-    return RedirectResponse(url=app.tailored_resume_url)
+    from app.services.storage import object_path, signed_url
+    return RedirectResponse(url=await signed_url("resumes", object_path("resumes", app.tailored_resume_url)))
