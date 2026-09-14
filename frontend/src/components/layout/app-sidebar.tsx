@@ -20,6 +20,7 @@ import {
   LayoutDashboard,
   Inbox,
   ClipboardList,
+  ClipboardCheck,
   Send,
   BarChart3,
   User,
@@ -39,6 +40,7 @@ import {
   useCurrentUser,
   useAnalytics,
   useReviewQueue,
+  useAutoApplications,
 } from "@/hooks/use-api";
 import { FeedbackDialog } from "@/components/feedback-dialog";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
@@ -47,13 +49,14 @@ type Item = {
   title: string;
   href: string;
   icon: React.ComponentType<{ size?: number; className?: string }>;
-  countKey?: "review" | "applied";
+  countKey?: "review" | "applied" | "needsYou";
 };
 
 const PIPELINE_ITEMS: Item[] = [
   { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { title: "Inbox", href: "/dashboard/jobs", icon: Inbox },
   { title: "Review Queue", href: "/dashboard/review", icon: ClipboardList, countKey: "review" },
+  { title: "Apply for me", href: "/dashboard/auto-apply", icon: ClipboardCheck, countKey: "needsYou" },
   { title: "Applications", href: "/dashboard/applications", icon: Send, countKey: "applied" },
   { title: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
 ];
@@ -68,10 +71,12 @@ export function AppSidebar() {
   const { data: currentUser } = useCurrentUser();
   const { data: analytics } = useAnalytics();
   const { data: reviewQueue } = useReviewQueue();
+  const { data: autoApplications } = useAutoApplications();
 
   const counts = {
     review: (reviewQueue ?? []).filter((r: { approval_status?: string }) => r.approval_status === "ready").length,
     applied: analytics?.applications_sent ?? 0,
+    needsYou: (autoApplications ?? []).filter((a) => a.status === "needs_you").length,
   };
 
   // Auto-collapse the mobile sheet whenever the route changes.

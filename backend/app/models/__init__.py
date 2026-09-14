@@ -14,6 +14,7 @@ from app.models.tracking import ApplicationTracking, OutreachLog, PipelineEvent
 from app.models.feedback import Feedback
 from app.models.job_state import UserJobState
 from app.models.invite_request import InviteRequest
+from app.models.auto_apply import AutoApplication, SavedAnswer
 
 __all__ = [
     "User",
@@ -35,4 +36,6 @@ __all__ = [
     "Feedback",
     "UserJobState",
     "InviteRequest",
+    "AutoApplication",
+    "SavedAnswer",
 ]

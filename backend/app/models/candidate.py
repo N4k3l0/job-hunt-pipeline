@@ -39,6 +39,9 @@ class CandidateProfile(Base):
     search_keywords: Mapped[list[str] | None] = mapped_column(ARRAY(String))  # Custom job search queries
     blocked_sources: Mapped[list[str] | None] = mapped_column(ARRAY(String))  # source names to hide from this user's inbox
     links: Mapped[dict | None] = mapped_column(JSONB)  # linkedin, github, portfolio, etc.
+    # Contact details application forms ask for.
+    phone: Mapped[str | None] = mapped_column(String(40))
+    current_location: Mapped[str | None] = mapped_column(String(255))  # e.g. "Lagos, Nigeria"
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

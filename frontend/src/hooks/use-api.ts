@@ -10,6 +10,9 @@ import type {
   TailoredApplication,
   ApplicationTracking,
   AnalyticsOverview,
+  AutoApplication,
+  AutoApplicationDetail,
+  AutoApplyValue,
 } from "@/lib/types";
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
@@ -611,6 +614,63 @@ export function useDeleteTailored() {
   return useMutation({
     mutationFn: (id: string) => api.delete(`/api/v1/tailoring/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["tailoring"] }),
+  });
+}
+
+// ── Apply for me ─────────────────────────────────────────────────────────────
+
+export function useAutoApplications() {
+  return useQuery({
+    queryKey: ["auto-apply"],
+    queryFn: () => api.get<AutoApplication[]>("/api/v1/auto-apply"),
+    staleTime: 30 * 1000,
+  });
+}
+
+export function useAutoApplication(id: string) {
+  return useQuery({
+    queryKey: ["auto-apply", id],
+    queryFn: () => api.get<AutoApplicationDetail>(`/api/v1/auto-apply/${id}`),
+    enabled: !!id,
+  });
+}
+
+/** Reads the job's form and fills in answers; can take ~30s when some
+ *  answers are drafted. */
+export function usePrepareAutoApplication() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (jobId: string) => api.post<AutoApplicationDetail>(`/api/v1/auto-apply/jobs/${jobId}`),
+    onSuccess: (data) => {
+      qc.setQueryData(["auto-apply", data.id], data);
+      qc.invalidateQueries({ queryKey: ["auto-apply"], exact: true });
+      qc.invalidateQueries({ queryKey: ["jobs", data.job_id] });
+    },
+  });
+}
+
+export function useSaveAutoApplyAnswers(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { answers: Record<string, AutoApplyValue>; approve: boolean }) =>
+      api.put<AutoApplicationDetail>(`/api/v1/auto-apply/${id}/answers`, body),
+    onSuccess: (data) => {
+      qc.setQueryData(["auto-apply", id], data);
+      qc.invalidateQueries({ queryKey: ["auto-apply"], exact: true });
+      qc.invalidateQueries({ queryKey: ["jobs", data.job_id] });
+      qc.invalidateQueries({ queryKey: ["profile"] });
+    },
+  });
+}
+
+export function useCancelAutoApplication(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<AutoApplication>(`/api/v1/auto-apply/${id}/cancel`),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["auto-apply"] });
+      qc.invalidateQueries({ queryKey: ["jobs", data.job_id] });
+    },
   });
 }
 

@@ -33,6 +33,68 @@ export interface JobDetail extends Job {
   raw_description: string | null;
   entities: JobEntity | null;
   score: JobScore | null;
+  auto_apply?: {
+    /** The job's form is on Greenhouse, Lever or Ashby. */
+    supported: boolean;
+    application_id: string | null;
+    status: AutoApplicationStatus | null;
+  };
+}
+
+// ── Apply for me ──────────────────────────────────────────────────────────
+
+export type AutoApplicationStatus =
+  | "preparing"
+  | "needs_you"
+  | "queued"
+  | "submitting"
+  | "submitted"
+  | "failed"
+  | "unsupported"
+  | "cancelled";
+
+export type AutoApplyValue = string | number | boolean | string[] | null;
+
+export interface AutoApplyAnswer {
+  value: AutoApplyValue;
+  /** profile | saved | default | suggested | drafted | user */
+  source: string | null;
+  confirmed: boolean;
+  note: string | null;
+}
+
+export interface AutoApplyField {
+  key: string;
+  label: string;
+  type:
+    | "text" | "textarea" | "email" | "phone" | "url" | "number" | "date"
+    | "file" | "select" | "multiselect" | "boolean" | "location";
+  required: boolean;
+  options: { label: string; value: string }[] | null;
+  description: string | null;
+  group: "application" | "voluntary";
+  kind: string;
+  answer: AutoApplyAnswer | null;
+  needs_attention: boolean;
+}
+
+export interface AutoApplication {
+  id: string;
+  job_id: string;
+  job: { id: string; title: string; company: string; location: string | null } | null;
+  status: AutoApplicationStatus;
+  ats: "greenhouse" | "lever" | "ashby" | null;
+  form_url: string | null;
+  open_count: number;
+  error: string | null;
+  submitted_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface AutoApplicationDetail extends AutoApplication {
+  fields: AutoApplyField[];
+  result: Record<string, unknown> | null;
 }
 
 export interface JobEntity {
@@ -99,6 +161,8 @@ export interface CandidateProfile {
   blocked_sources: string[] | null;
   search_keywords: string[] | null;
   links: Record<string, string> | null;
+  phone: string | null;
+  current_location: string | null;
 }
 
 export interface Resume {

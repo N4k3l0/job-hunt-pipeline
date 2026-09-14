@@ -15,6 +15,8 @@ from app.models.job_state import UserJobState
 from app.models.scoring import JobScore
 from app.models.candidate import CandidateProfile
 from app.models.tracking import ApplicationTracking
+from app.models.auto_apply import AutoApplication
+from app.services.auto_apply.ats import detect_ats
 from app.services.discovery.ats_resolver import find_direct_apply, is_ats_url, _is_aggregator
 from app.services.jobs_filter import country_filter_codes
 from app.services.job_state import (
@@ -569,12 +571,23 @@ async def get_job(job_id: UUID, user_id: CurrentUserId, db: DbSession):
             ApplicationTracking.user_id == user_id,
         ).order_by(ApplicationTracking.updated_at.desc()).limit(1)
     )).scalar_one_or_none()
+    auto_application = (await db.execute(
+        select(AutoApplication).where(
+            AutoApplication.job_id == job_id,
+            AutoApplication.user_id == user_id,
+        )
+    )).scalar_one_or_none()
 
     return {
         "id": str(job.id),
         "company": job.company,
         "title": job.title,
         "title_en": job.title_en,
+        "auto_apply": {
+            "supported": (detect_ats(job.apply_url) or detect_ats(job.job_url)) is not None,
+            "application_id": str(auto_application.id) if auto_application else None,
+            "status": auto_application.status if auto_application else None,
+        },
         "location": job.location,
         "country": job.country,
         "remote_type": job.remote_type,

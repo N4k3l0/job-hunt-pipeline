@@ -11,9 +11,12 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
   ArrowLeft, MapPin, Globe, Building2, Clock, ExternalLink,
-  Briefcase, Star, Sparkles, Loader2, CheckCircle2, AlertCircle,
+  Briefcase, Star, Sparkles, Loader2, CheckCircle2, AlertCircle, Send,
 } from "lucide-react";
-import { useJob, useShortlistJob, useGenerateTailored, useDeepScore } from "@/hooks/use-api";
+import {
+  useJob, useShortlistJob, useGenerateTailored, useDeepScore, usePrepareAutoApplication,
+} from "@/hooks/use-api";
+import { AUTO_APPLY_STATUS_LABELS } from "@/components/auto-apply-status";
 import { ScoreHero, ScoreAxis } from "@/components/ds/score";
 import { useToast } from "@/components/ui/toast";
 import { useQueryClient } from "@tanstack/react-query";
@@ -101,6 +104,7 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
   const shortlist = useShortlistJob();
   const generateTailored = useGenerateTailored();
   const deepScore = useDeepScore();
+  const prepareApplication = usePrepareAutoApplication();
   const toast = useToast();
   const router = useRouter();
   const qc = useQueryClient();
@@ -639,6 +643,28 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
               {applying ? "Opening…" : "Apply directly"}
             </button>
           )}
+          {job.auto_apply?.application_id ? (
+            <Link href={`/dashboard/auto-apply/${job.auto_apply.application_id}`} className="ds-btn">
+              <Send className="h-4 w-4" />
+              Apply for me: {AUTO_APPLY_STATUS_LABELS[job.auto_apply.status ?? "preparing"]}
+            </Link>
+          ) : job.auto_apply?.supported && !isAlreadyApplied ? (
+            <button
+              type="button"
+              className="ds-btn"
+              onClick={() =>
+                prepareApplication.mutate(id, {
+                  onSuccess: (application) => router.push(`/dashboard/auto-apply/${application.id}`),
+                  onError: (e) => toast.error("Couldn't prepare the application", { description: e.message }),
+                })
+              }
+              disabled={prepareApplication.isPending}
+              title="Fills in the company's application form from your profile. You check it before anything is sent."
+            >
+              {prepareApplication.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              {prepareApplication.isPending ? "Preparing…" : "Apply for me"}
+            </button>
+          ) : null}
           <button
             type="button"
             className="ds-btn"
@@ -696,6 +722,15 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
             </button>
           )}
         </div>
+        <OperationProgress
+          active={prepareApplication.isPending}
+          title="Preparing your application"
+          stages={[
+            { label: "Reading the application form", durationMs: 2000, tip: "Every question the company asks, straight from its hiring system." },
+            { label: "Filling in from your profile", durationMs: 1000, tip: "Contact details, resume, work rights." },
+            { label: "Drafting answers to the rest", durationMs: 9000, tip: "Only from your real experience. You check each one." },
+          ]}
+        />
       </div>
 
       {generateTailored.isSuccess && (
