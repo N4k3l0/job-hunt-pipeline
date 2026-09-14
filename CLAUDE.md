@@ -116,6 +116,7 @@ Every job flows: Raw → Normalized → Deduplicated → Enriched → Scored →
 - Enrichment: `/api/v1/cron/enrich` reads recent jobs with Haiku (skills, requirements, seniority, salary with its period, sponsorship, `eligible_countries`), then rescores them for every user
 - Scoring (`services/scoring/scorer.py` + `matching.py`) is the same for every profession: title vs target roles/interests/recent titles, skills overlap, seniority, industry, remote fit; blended with resume embeddings when Voyage is available. It must stay fast: a full rescore covers the whole catalog inside 60s
 - Hard filters (`services/jobs_filter.py`) hide jobs per user: preferred countries, remote preference, remote roles restricted away from the user's home country, no sponsorship where the user needs it, and source-stated salary below the user's minimum. A job that doesn't state a fact is never hidden by it
+- Inbox relevance: a job's title matches the user's roles or skills, or its score shows a skill match (`job_scores.skill_score > 0`). Never filter inbox queries on `raw_description`: ~83 MB of text across 12k jobs made each query take ~25s
 - Discovery sources keep location-restricted jobs and tag `eligible_countries`; they don't drop them
 - `/api/v1/cron/review-top-matches` runs deep reviews on each user's best new matches, capped per user per day
 - Freshness: ingest sets `jobs.last_seen_at` whenever a source lists a job again. `/api/v1/cron/expire-stale` expires jobs gone from full company boards (`curated`, unseen 5 days) and jobs older than 45 days that no source has listed for 30 days, then probes a batch of links (`last_checked_at`, 404/410 → expired). Jobs a user applied to or tailored for are never expired; old shortlisted ones are kept
@@ -154,12 +155,12 @@ Both frontend and backend deploy as **separate Vercel projects** pointing at the
 - **Set `CRON_SECRET`** to any random string; Vercel automatically sends it as `Authorization: Bearer <secret>` to cron endpoints
 
 ### Backend on Railway (moving from Vercel)
-The backend is moving to Railway: no time limit on requests, and room for the auto-apply worker. Both run side by side until the frontend switches over; until then the Vercel backend serves users and runs the crons.
+The website (`NEXT_PUBLIC_API_URL`) and the GitHub schedule (`BACKEND_URL`) use the Railway backend: no time limit on requests, and room for the auto-apply worker. The Vercel backend still runs the two daily discovery crons. To roll back, set both back to `https://backend-nakel0s-projects.vercel.app` and redeploy the frontend.
 - **Project** `job-hunt-pipeline`, service `backend`, https://backend-production-7e805.up.railway.app
 - **Build**: `backend/Dockerfile` (uvicorn on `$PORT`, two processes via `WEB_CONCURRENCY`)
 - **Service settings** live on Railway, not in the repo (Railway ignores `railway.json` now): region EU West / Amsterdam (`europe-west4-drams3a`), health check `/health`, restart on failure up to 5 times
 - **Env vars**: the same as the Vercel backend, plus `DB_POOL_SIZE=5`
-- **Deploy** the current checkout with `cd backend && railway up --service backend`
+- **Deploys** automatically from GitHub `main` (root directory `/backend`, watch paths `/backend/**`). `cd backend && railway up --service backend` deploys the local checkout instead
 - Cron endpoints refuse every request until `CRON_SECRET` is set, and the Apify webhook until `APIFY_WEBHOOK_SECRET` is
 
 ### Frontend project

@@ -21,10 +21,12 @@ from __future__ import annotations
 
 import re as _re
 
-from sqlalchemy import Text, cast, func, not_, or_
+from sqlalchemy import Text, cast, exists, func, not_, or_
 from sqlalchemy.dialects.postgresql import ARRAY, array
+from sqlalchemy.orm import aliased
 
 from app.models.job import Job, JobEntity, JobSource
+from app.models.scoring import JobScore
 
 
 # Sentinel the onboarding / profile country picker saves for
@@ -161,8 +163,12 @@ def apply_user_filters(
     visa_statuses: dict | None = None,
     salary_min: int | None = None,
     salary_currency: str | None = None,
+    user_id=None,
 ):
     """Apply the same filter chain the inbox uses to any Job-based query.
+
+    Pass `user_id` with `skills` so jobs whose scores show a skill match are
+    kept even when their title doesn't match.
 
     The query MUST already join JobSource (left or otherwise) for the
     blocked_sources filter to compile, and JobEntity (outer join) when
@@ -199,16 +205,23 @@ def apply_user_filters(
     if title_keywords:
         # A job lands in the inbox when:
         #   - its TITLE matches any role keyword OR any skill keyword, OR
-        #   - its DESCRIPTION mentions any of the user's skills.
-        # Description matching is restricted to SKILLS only (not role
-        # keywords) — matching role keywords against description is too
-        # noisy because every JD mentions tangentially-related terms.
-        # Specific skill tokens (Python, n8n, Excel, Figma, SQL...) are
-        # high-signal: if a JD mentions them, the role probably uses them.
+        #   - scoring found the user's skills in it (job_scores.skill_score:
+        #     the job's extracted skills and its description).
+        # Skills only, not role keywords: every description mentions
+        # tangentially related roles. Scoring already did the description
+        # search; repeating it with LIKE over every description took ~25s
+        # per query on the production database.
         clauses = [func.lower(Job.title).like(kw) for kw in title_keywords]
-        if skill_keywords:
-            clauses.extend(
-                func.lower(Job.raw_description).like(kw) for kw in skill_keywords
+        if skill_keywords and user_id is not None:
+            # Aliased: the inbox query already joins job_scores, which
+            # would otherwise be correlated away from the subquery.
+            scores = aliased(JobScore)
+            clauses.append(
+                exists().where(
+                    scores.job_id == Job.id,
+                    scores.user_id == user_id,
+                    scores.skill_score > 0,
+                )
             )
         query = query.where(or_(*clauses))
 
