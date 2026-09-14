@@ -157,18 +157,22 @@ Both frontend and backend deploy as **separate Vercel projects** pointing at the
 - **Region**: `dub1` (Dublin, set in `backend/vercel.json`), next to the Supabase database in AWS eu-west-1. Keep them together: every request opens a fresh database connection
 - **Framework preset**: Other (Vercel auto-detects Python via `vercel.json`)
 - **Required env vars**: `DATABASE_URL` (Supabase pooler, port 6543), `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_KEY`, `SUPABASE_JWT_SECRET`, `ANTHROPIC_API_KEY`, `FIRECRAWL_API_KEY`, `ADZUNA_APP_ID`, `ADZUNA_APP_KEY`, `JSEARCH_RAPIDAPI_KEY`, `CORS_ORIGINS`, `CRON_SECRET`
-- **Cron jobs** are defined in `backend/vercel.json` (fast/slow discovery — Vercel Hobby allows max 2)
-- **Enrichment and top-match reviews** run from `.github/workflows/scheduled-grading.yml` every 30 minutes. It is off until the repo variable `GRADING_SCHEDULE_ENABLED` is `true`, and needs secret `CRON_SECRET` and variable `BACKEND_URL`
-- **Set `CRON_SECRET`** to any random string; Vercel automatically sends it as `Authorization: Bearer <secret>` to cron endpoints
+- **No cron jobs**: scheduled work runs on Railway (below). The Vercel backend stays deployed only as a rollback target
 
-### Backend on Railway (moving from Vercel)
-The website (`NEXT_PUBLIC_API_URL`) and the GitHub schedule (`BACKEND_URL`) use the Railway backend: no time limit on requests, and room for the auto-apply worker. The Vercel backend still runs the two daily discovery crons. To roll back, set both back to `https://backend-nakel0s-projects.vercel.app` and redeploy the frontend.
+### Backend on Railway
+The website (`NEXT_PUBLIC_API_URL`) uses the Railway backend: no time limit on requests, and room for the auto-apply worker. To roll back, set it back to `https://backend-nakel0s-projects.vercel.app`, redeploy the frontend, and restore the crons in `backend/vercel.json` from git history.
 - **Project** `job-hunt-pipeline`, service `backend`, https://backend-production-7e805.up.railway.app
 - **Build**: `backend/Dockerfile` (uvicorn on `$PORT`, two processes via `WEB_CONCURRENCY`)
 - **Service settings** live on Railway, not in the repo (Railway ignores `railway.json` now): region EU West / Amsterdam (`europe-west4-drams3a`), health check `/health`, restart on failure up to 5 times
 - **Env vars**: the same as the Vercel backend, plus `DB_POOL_SIZE=5`
 - **Deploys** automatically from GitHub `main` (root directory `/backend`, watch paths `/backend/**`). `cd backend && railway up --service backend` deploys the local checkout instead
 - Cron endpoints refuse every request until `CRON_SECRET` is set, and the Apify webhook until `APIFY_WEBHOOK_SECRET` is
+
+### Scheduler on Railway
+Service `scheduler` in the same project is a Railway cron service: every 30 minutes (`*/30 * * * *`) it runs `python scripts/scheduled_tasks.py` from the backend image and exits. That script calls the backend's cron endpoints: discovery at 06:00 (`discover-fast`) and 06:30 UTC (`discover-remote`), and on every run `enrich`, `expire-stale` and, when `REVIEWS_PER_USER_PER_DAY` > 0, `review-top-matches`.
+- **Env vars**: `BACKEND_URL` (`https://${{backend.RAILWAY_PUBLIC_DOMAIN}}`), `CRON_SECRET` (`${{backend.CRON_SECRET}}`), `ENRICH_JOBS_PER_RUN` (25), `REVIEWS_PER_USER_PER_DAY` (0). Both references point at the backend service, so there's one secret to rotate
+- **Run by hand**: `python scripts/scheduled_tasks.py --discovery both` runs discovery regardless of the time. `.github/workflows/scheduled-grading.yml` remains as a manual fallback (workflow_dispatch only)
+- Railway skips a run while the previous one is still going, and each run's log shows every endpoint's response
 
 ### Frontend project
 - **Root directory**: `frontend`
@@ -184,4 +188,3 @@ DATABASE_URL=<your-supabase-pooler-url> alembic upgrade head
 ### Constraints to know
 - Vercel Hobby function timeout is **60 seconds** — tailoring (3-5 LLM calls) usually fits but ~10% of generations may need a retry. Upgrade to Pro for 5-minute timeouts.
 - PDF generation is removed in this deploy — replaced with `/dashboard/review/[id]/print` (browser print-to-PDF). To restore PDFs, run the backend on a host that supports cairo/pango (Railway, Fly, Render web services).
-- Vercel Hobby allows max 2 Cron jobs.
