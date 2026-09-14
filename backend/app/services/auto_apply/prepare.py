@@ -25,7 +25,9 @@ from app.services.scoring.matching import candidate_years
 logger = logging.getLogger(__name__)
 
 LOCKED_STATUSES = ("submitting", "submitted")
-DRAFTABLE_KINDS = {"question", "previous_company_contact", "years_experience", "salary"}
+# Not "previous_company_contact": whether someone interviewed or applied
+# somewhere before is never in their profile, so a draft could only guess.
+DRAFTABLE_KINDS = {"question", "years_experience", "salary"}
 MAX_TEXT_ANSWER = 10_000
 
 
