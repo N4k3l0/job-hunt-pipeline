@@ -301,6 +301,20 @@ async def cron_job_alert_details(
     }
 
 
+@router.get("/send-digests")
+async def cron_send_digests(authorization: str | None = Header(None)):
+    """Send the daily email to everyone who wants it and hasn't had today's.
+    Does nothing before DIGEST_HOUR_UTC or while email isn't set up, so it's
+    safe on every scheduler run."""
+    _verify_cron(authorization)
+
+    from app.services.notifications.digest import send_due_digests
+
+    outcome = await send_due_digests()
+    outcome["errors"] = outcome["errors"][:5]
+    return outcome
+
+
 @router.get("/review-top-matches")
 async def cron_review_top_matches(
     authorization: str | None = Header(None),

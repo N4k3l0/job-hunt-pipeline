@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import get_settings
 from app.api.v1 import (
     auth, candidates, jobs, tailoring, tracking, analytics, cron, feedback,
-    invite_requests, auto_apply, ratings, job_alerts,
+    invite_requests, auto_apply, ratings, job_alerts, notifications,
 )
 
 settings = get_settings()
@@ -38,6 +38,7 @@ def create_app() -> FastAPI:
     app.include_router(auto_apply.router, prefix="/api/v1/auto-apply", tags=["auto-apply"])
     app.include_router(ratings.router, prefix="/api/v1/ratings", tags=["ratings"])
     app.include_router(job_alerts.router, prefix="/api/v1/job-alerts", tags=["job-alerts"])
+    app.include_router(notifications.router, prefix="/api/v1/notifications", tags=["notifications"])
 
     @app.get("/health")
     async def health_check():

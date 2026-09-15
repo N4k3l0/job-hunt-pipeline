@@ -30,6 +30,23 @@ class Settings(BaseSettings):
     # Frontend URL — used to build the magic-link redirect_to in the invite
     # flow. Falls back to the first cors_origin if unset.
     frontend_url: str = ""
+    # Public address of this backend, for links in emails (unsubscribe).
+    # On Railway, RAILWAY_PUBLIC_DOMAIN fills it in when this is unset.
+    api_public_url: str = ""
+
+    # Email (services/notifications/email.py). Railway's plan blocks SMTP,
+    # so email goes out through an HTTPS service:
+    #   resend       RESEND_API_KEY and EMAIL_FROM on a domain verified with Resend
+    #   apps_script  EMAIL_RELAY_URL and EMAIL_RELAY_SECRET: a Google Apps Script
+    #                web app in the sending Gmail account (scripts/email_relay.gs)
+    # Unset: nothing is sent.
+    email_provider: str = ""
+    resend_api_key: str = ""
+    email_from: str = ""
+    email_relay_url: str = ""
+    email_relay_secret: str = ""
+    # The daily email goes out on the first scheduler run at or after this hour (UTC).
+    digest_hour_utc: int = 7
 
     @property
     def async_database_url(self) -> str:
