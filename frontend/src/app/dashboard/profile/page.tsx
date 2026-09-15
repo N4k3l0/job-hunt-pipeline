@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {
   User, Upload, FileText, Plus, X, Globe, DollarSign, Search,
-  Briefcase, GraduationCap, Loader2, CheckCircle2, Trash2, Circle, ArrowRight,
+  Briefcase, Loader2, CheckCircle2, Trash2, Circle, ArrowRight,
   Sparkles, FileSignature, Quote, ExternalLink,
 } from "lucide-react";
 import { api } from "@/lib/api-client";
@@ -29,7 +29,7 @@ import { OperationProgress } from "@/components/operation-progress";
 import {
   useProfile, useCreateProfile, useUpdateProfile,
   useResumes, useUploadResume, useDeleteResume,
-  useWorkHistory, useSkills, useBullets,
+  useBullets,
   useCurrentUser, useUpdateMe, useRescoreInbox,
   useSampleApplications, useCreateSampleApplication, useDeleteSampleApplication,
 } from "@/hooks/use-api";
@@ -37,6 +37,7 @@ import { useToast } from "@/components/ui/toast";
 import { COUNTRY_OPTIONS } from "@/lib/countries";
 import { HomeCountrySelect } from "@/components/home-country-select";
 import { JobAlertsCard } from "@/components/job-alerts-card";
+import { SkillsCard, WorkHistoryCard } from "@/components/profile-details-editor";
 
 type SetupStep = {
   id: string;
@@ -159,12 +160,12 @@ export default function ProfilePage() {
 
   // Resume data
   const { data: resumes, isLoading: resumesLoading } = useResumes();
-  const { data: workHistory } = useWorkHistory();
-  const { data: skills } = useSkills();
   const { data: bullets } = useBullets();
   const uploadResume = useUploadResume();
   const deleteResume = useDeleteResume();
   const rescoreInbox = useRescoreInbox();
+  // Roles or skills changed since the last rescore.
+  const [detailsChanged, setDetailsChanged] = useState(false);
 
   // Form state
   const [headline, setHeadline] = useState("");
@@ -346,6 +347,33 @@ export default function ProfilePage() {
 
         {/* ── Profile Tab ────────────────────────────────────────── */}
         <TabsContent value="profile" className="space-y-4 mt-4">
+          {detailsChanged && (
+            <Card className="border-[var(--ds-accent-edge)]">
+              <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
+                <p className="text-sm">
+                  Your matches still use your old roles and skills.
+                  {rescoreInbox.isPending && <span className="text-muted-foreground"> Updating, about 30 seconds…</span>}
+                </p>
+                <Button
+                  size="sm"
+                  disabled={rescoreInbox.isPending}
+                  onClick={() =>
+                    rescoreInbox.mutate(undefined, {
+                      onSuccess: () => {
+                        setDetailsChanged(false);
+                        toast.success("Your matches are up to date");
+                      },
+                      onError: (e) => toast.error("Couldn't update your matches", { description: e instanceof Error ? e.message : undefined }),
+                    })
+                  }
+                >
+                  {rescoreInbox.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+                  Update my matches
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Display name — drives the dashboard greeting. Without this set,
               we fall back to nothing rather than the email local-part. */}
           <Card>
@@ -469,111 +497,9 @@ export default function ProfilePage() {
             </CardContent>
           </Card>
 
-          {/* Work History */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <GraduationCap className="h-5 w-5" />
-                Work History
-              </CardTitle>
-              <CardDescription>
-                Parsed from your uploaded resumes
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {!workHistory || workHistory.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-4">
-                  Upload a resume to auto-populate your work history.
-                </p>
-              ) : (
-                <div className="space-y-4">
-                  {workHistory.map((entry: any) => (
-                    <div key={entry.id} className="rounded-lg border border-white/[0.06] p-4">
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <h4 className="text-sm font-semibold">{entry.title}</h4>
-                          <p className="text-sm text-muted-foreground">{entry.company}</p>
-                          {(entry.start_date || entry.end_date) && (
-                            <p className="text-xs text-muted-foreground mt-0.5">
-                              {entry.start_date} — {entry.end_date || "Present"}
-                            </p>
-                          )}
-                        </div>
-                        {entry.domain_tags?.length > 0 && (
-                          <div className="flex gap-1">
-                            {entry.domain_tags.map((tag: string) => (
-                              <Badge key={tag} variant="outline" className="text-xs">{tag}</Badge>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                      {entry.bullets?.length > 0 && (
-                        <ul className="mt-2 space-y-1">
-                          {entry.bullets.map((b: string, i: number) => (
-                            <li key={i} className="text-sm text-foreground/70 flex items-start gap-2">
-                              <span className="text-muted-foreground mt-0.5 shrink-0">-</span>
-                              {b}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                      {entry.skills?.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mt-2">
-                          {entry.skills.map((s: string) => (
-                            <Badge key={s} variant="secondary" className="text-xs">{s}</Badge>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          <WorkHistoryCard onChanged={() => setDetailsChanged(true)} />
 
-          {/* Skills */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Briefcase className="h-5 w-5" />
-                Skills
-              </CardTitle>
-              <CardDescription>
-                Extracted from your resume and profile
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {!skills || skills.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-4">
-                  No skills yet. Upload a resume to extract them.
-                </p>
-              ) : (
-                <div className="space-y-3">
-                  {["technical", "domain", "tool", "soft"].map((category) => {
-                    const categorySkills = skills.filter((s: any) => s.category === category);
-                    if (categorySkills.length === 0) return null;
-                    return (
-                      <div key={category}>
-                        <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1.5 font-medium">
-                          {category}
-                        </p>
-                        <div className="flex flex-wrap gap-1.5">
-                          {categorySkills.map((s: any) => (
-                            <Badge key={s.id} variant="secondary" className="text-xs">
-                              {s.skill_name}
-                              {s.proficiency && (
-                                <span className="text-muted-foreground ml-1">· {s.proficiency}</span>
-                              )}
-                            </Badge>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          <SkillsCard onChanged={() => setDetailsChanged(true)} />
 
           {/* Bullet Bank */}
           <Card>

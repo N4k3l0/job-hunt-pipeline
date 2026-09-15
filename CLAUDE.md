@@ -113,6 +113,7 @@ Every job flows: Raw → Normalized → Deduplicated → Enriched → Scored →
 - Discovery sources keep location-restricted jobs and tag `eligible_countries`; they don't drop them
 - `/api/v1/cron/review-top-matches` runs deep reviews on each user's best new matches, capped per user per day
 - Freshness: ingest sets `jobs.last_seen_at` whenever a source lists a job again. `/api/v1/cron/expire-stale` expires jobs gone from full company boards (`curated`, unseen 5 days) and jobs older than 45 days that no source has listed for 30 days, then probes a batch of links (`last_checked_at`, 404/410 → expired). Jobs a user applied to or tailored for are never expired; old shortlisted ones are kept
+- Users edit their roles and skills on Profile (`/candidates/work-history`, `/candidates/skills`). Roles are kept in date order, current ones first (`_order_work_history`): `seniority_match` reads the first role as the candidate's level. Edits don't rescore; the page offers "Update my matches" (`POST /candidates/rescore`)
 - Resume upload doesn't rescore inline (parse + full rescore can exceed 60s); the frontend calls `POST /candidates/rescore` afterwards
 - Tailoring only triggered by user action or for high-priority (80+) jobs
 

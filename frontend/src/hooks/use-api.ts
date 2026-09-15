@@ -13,6 +13,9 @@ import type {
   AutoApplicationDetail,
   AutoApplyValue,
   JobAlertStatus,
+  Skill,
+  SkillCategory,
+  WorkHistoryEntry,
   JobRatingValue,
   RatingCounts,
   RatingQueue,
@@ -156,16 +159,61 @@ export function useUpdateProfile() {
 export function useWorkHistory() {
   return useQuery({
     queryKey: ["work-history"],
-    queryFn: () => api.get<any[]>("/api/v1/candidates/work-history"),
+    queryFn: () => api.get<WorkHistoryEntry[]>("/api/v1/candidates/work-history"),
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+export type WorkHistoryInput = {
+  company: string;
+  title: string;
+  start_date: string | null;
+  end_date: string | null;
+  bullets: string[];
+};
+
+/** Adds a role, or changes one when `id` is given. */
+export function useSaveWorkHistory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id?: string; data: WorkHistoryInput }) =>
+      id
+        ? api.put<WorkHistoryEntry>(`/api/v1/candidates/work-history/${id}`, data)
+        : api.post<WorkHistoryEntry>("/api/v1/candidates/work-history", data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["work-history"] }),
+  });
+}
+
+export function useDeleteWorkHistory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`/api/v1/candidates/work-history/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["work-history"] }),
   });
 }
 
 export function useSkills() {
   return useQuery({
     queryKey: ["skills"],
-    queryFn: () => api.get<any[]>("/api/v1/candidates/skills"),
+    queryFn: () => api.get<Skill[]>("/api/v1/candidates/skills"),
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useAddSkill() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { skill_name: string; category: SkillCategory }) =>
+      api.post<Skill>("/api/v1/candidates/skills", data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["skills"] }),
+  });
+}
+
+export function useDeleteSkill() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`/api/v1/candidates/skills/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["skills"] }),
   });
 }
 

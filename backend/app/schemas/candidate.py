@@ -1,7 +1,8 @@
 from datetime import date, datetime
+from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 # Allowed remote preferences — anything outside this set means the scorer
@@ -114,7 +115,19 @@ class WorkHistoryBase(BaseModel):
 
 
 class WorkHistoryCreate(WorkHistoryBase):
-    pass
+    """A role the user adds by hand."""
+    company: str = Field(min_length=1, max_length=255)
+    title: str = Field(min_length=1, max_length=255)
+    bullets: list[str] | None = Field(default=None, max_length=30)
+
+
+class WorkHistoryUpdate(BaseModel):
+    """Only the fields sent change."""
+    company: str | None = Field(default=None, min_length=1, max_length=255)
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    start_date: date | None = None
+    end_date: date | None = None
+    bullets: list[str] | None = Field(default=None, max_length=30)
 
 
 class WorkHistoryResponse(WorkHistoryBase):
@@ -131,7 +144,8 @@ class SkillBase(BaseModel):
 
 
 class SkillCreate(SkillBase):
-    pass
+    skill_name: str = Field(min_length=1, max_length=255)
+    category: Literal["technical", "tool", "domain", "soft"] | None = None
 
 
 class SkillResponse(SkillBase):
