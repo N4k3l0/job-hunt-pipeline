@@ -64,8 +64,11 @@ def safe_description_html(raw: str | None) -> str | None:
     text = (raw or "").strip()
     if not text:
         return None
+    # Decode when escaped tags outnumber real ones: some boards wrap an
+    # escaped description in a few real tags (seen: 248 escaped, 4 real).
     for _ in range(2):
-        if _REAL_TAG_RE.search(text) or not _ESCAPED_TAG_RE.search(text):
+        escaped = len(_ESCAPED_TAG_RE.findall(text))
+        if not escaped or escaped <= len(_REAL_TAG_RE.findall(text)):
             break
         text = html.unescape(text)
     if not _REAL_TAG_RE.search(text):
