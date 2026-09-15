@@ -33,7 +33,13 @@ export interface Job {
 }
 
 export interface JobDetail extends Job {
+  /** Straight from the job board: never render as HTML. */
   raw_description: string | null;
+  /** English translation of the description, when the posting wasn't English. */
+  raw_description_en?: string | null;
+  /** The description (in English when translated), sanitized by the backend.
+   *  The only description field safe to render as HTML. */
+  description_html?: string | null;
   entities: JobEntity | null;
   score: JobScore | null;
   auto_apply?: {

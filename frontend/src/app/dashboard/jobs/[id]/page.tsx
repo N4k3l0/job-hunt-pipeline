@@ -847,18 +847,16 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
             ]}
           />
 
-          {/* About the role + Requirements — prefer the English
-              translation when the source posting was in another
-              language. Falls back to the original raw_description on
-              already-English jobs (and on jobs where translation
-              failed). Surfaces a small badge so the reader knows when
-              they're looking at a translation. */}
+          {/* About the role + Requirements. The backend sends the
+              description sanitized, in English when the posting was
+              translated; a small badge says when it's a translation. Job
+              boards write these descriptions, so never render
+              raw_description or raw_description_en as HTML. */}
           <section>
             <h3 className="ds-h3">About the role</h3>
             {(() => {
-              const translated = (job as any).raw_description_en as string | null | undefined;
-              const original = job.raw_description;
-              const body = translated || original;
+              const translated = !!job.raw_description_en;
+              const body = job.description_html;
               if (!body) {
                 return (
                   <p className="ds-muted" style={{ fontSize: 13, marginTop: 12 }}>

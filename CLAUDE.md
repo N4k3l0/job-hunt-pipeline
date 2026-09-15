@@ -91,6 +91,7 @@ Keep a single head: `alembic heads` should print one revision.
 - Use async SQLAlchemy with `asyncpg` throughout
 - Pydantic schemas for all request/response validation
 - Business logic lives in `services/`, not in route handlers
+- Job descriptions are written by job boards and scrapers: the job page renders only `description_html` (sanitized with nh3 in `services/parsing/html_text.py`). Never render `raw_description` or `raw_description_en` as HTML
 - All external API calls go through dedicated service files in `services/discovery/`
 - LLM calls go through `llm/client.py` which handles retries, rate limits, and cost tracking
 

@@ -19,7 +19,7 @@ from app.models.auto_apply import AutoApplication
 from app.services.auto_apply.ats import detect_ats
 from app.services.discovery.ats_resolver import find_direct_apply, is_ats_url, _is_aggregator
 from app.services.jobs_filter import country_filter_codes, job_group_key
-from app.services.parsing.html_text import strip_html
+from app.services.parsing.html_text import safe_description_html, strip_html
 from app.services.job_state import (
     APPLIED_TRACKING_STATUSES,
     USER_JOB_STATUSES,
@@ -616,10 +616,12 @@ async def get_job(job_id: UUID, user_id: CurrentUserId, db: DbSession):
         "source_name": job.source.name if job.source else "manual",
         "status": effective_status(job.status, user_state, tracking_status),
         "raw_description": job.raw_description,
-        # English translation when source was non-English. Frontend
-        # renders `raw_description_en || raw_description` so the body
-        # reads in English when we caught it.
+        # English translation when source was non-English.
         "raw_description_en": job.raw_description_en,
+        # What the job page renders: the English description when there is
+        # one, sanitized. The raw fields come from job boards and must never
+        # be rendered as HTML.
+        "description_html": safe_description_html(job.raw_description_en or job.raw_description),
         "discovered_at": job.discovered_at.isoformat() if job.discovered_at else None,
         "last_seen_at": job.last_seen_at.isoformat() if job.last_seen_at else None,
         "last_checked_at": job.last_checked_at.isoformat() if job.last_checked_at else None,
