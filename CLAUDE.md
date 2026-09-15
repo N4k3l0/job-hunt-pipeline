@@ -26,6 +26,7 @@ A private, invite-only, multi-user web application that discovers job postings f
 ```
 job-hunt-pipeline/
 ├── frontend/          # Next.js app
+├── extension/         # Chrome extension that fills in application forms
 ├── backend/           # FastAPI
 │   ├── app/
 │   │   ├── api/v1/    # Route handlers
@@ -135,7 +136,10 @@ Every job flows: Raw → Normalized → Deduplicated → Enriched → Scored →
 - `prepare_application` reads the form, fills answers from the profile with rules (`answers.py`), then drafts the remaining required questions in one Claude call (`drafting.py`). Every answer records its `source` and whether it's `confirmed`
 - Only confirmed answers come from facts: profile and resume, the user's earlier answer to the same question (`saved_answers`, confirmed for 30 days), declining voluntary demographic questions and marketing messages. Suggested and drafted answers always need the user
 - Legal agreements, acknowledgements and attestations are never answered for the user, even when required. Work authorization and sponsorship are answered only when `home_country`/`visa_statuses` settle them for the job's country
-- Statuses: `needs_you` until every required question is answered and confirmed, then `queued` once the user approves (`PUT /{id}/answers` with `approve`). Nothing sends applications yet: approved ones are sent by hand from the form link
+- Statuses: `needs_you` until every required question is answered and confirmed, then `queued` once the user approves (`PUT /{id}/answers` with `approve`), then `submitted` once sent
+- The server never sends applications. The Chrome extension (`extension/`) fills in the company's form in the user's own browser and the user presses Submit: the app page gets `GET /{id}/fill` (answers, a 10-minute signed resume link, `sent_url` + `sent_token`) and posts it to the extension's content script on the app (`app-bridge.js`, protocol in `frontend/src/lib/extension.ts`). `background.js` downloads the resume and opens the form in a new tab; `form-bridge.js` hands the answers to `fill.js`, which runs in the page's own world because Greenhouse's react-select dropdowns only take a choice through the component (`selectOption` found from the input's React fiber). Text goes in through the native value setter plus input/change events; files through `DataTransfer`. Greenhouse is server-rendered: wait for React to take over before touching it, or React redraws the page and drops the resume
+- After the user presses Submit, `form-bridge.js` watches for the confirmation page (`/confirmation`, `/thanks`) or a thank-you message with the form gone, and posts `sent_token` to `POST /{id}/sent-by-extension` (no login; an HMAC of the application id keyed on `SUPABASE_JWT_SECRET`, like the email's unsubscribe link). `POST /{id}/sent` is the app's "I sent it myself". Both mark it `submitted` and track the job as applied (`services/tracking/applied.py`)
+- The install page (`/dashboard/extension`) serves `frontend/public/job-hunt-extension.zip`. After changing anything in `extension/`, run `extension/package.sh` and commit the zip. The manifest's `host_permissions` must include the backend's public URL, and its content script matches the app's URLs
 
 ### Testing
 ```bash

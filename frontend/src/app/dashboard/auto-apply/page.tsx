@@ -60,7 +60,8 @@ export default function AutoApplyPage() {
           <h1 className="ds-h1">Apply for me</h1>
           <p className="ds-muted" style={{ marginTop: 6, maxWidth: 620 }}>
             The app reads each job&apos;s application form and fills in what your profile answers. You check the
-            rest, and nothing goes to an employer until you approve it.
+            rest, then the <Link href="/dashboard/extension" className="ds-accent-fg">Chrome extension</Link> fills
+            in the company&apos;s form for you to send.
           </p>
         </div>
 

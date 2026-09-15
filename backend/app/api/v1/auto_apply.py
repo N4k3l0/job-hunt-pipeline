@@ -1,7 +1,9 @@
 """Applications the app prepares for the user ("Apply for me").
 
 Preparing reads the job's form and drafts answers, which can take up to
-half a minute when some answers are drafted with Claude.
+half a minute when some answers are drafted with Claude. Once the answers
+are approved, the browser extension fills in the company's form in the
+user's own browser, and the user presses Submit there.
 """
 
 from uuid import UUID
@@ -15,6 +17,7 @@ from app.api.deps import CurrentUserId, DbSession
 from app.models.auto_apply import AutoApplication
 from app.models.job import Job
 from app.services.auto_apply import answers as rules
+from app.services.auto_apply.extension import fill_details, mark_sent, valid_sent_token
 from app.services.auto_apply.prepare import (
     AnswerError,
     cancel_application,
@@ -124,6 +127,48 @@ async def save_answers(application_id: UUID, body: AnswersUpdate, user_id: Curre
     except AnswerError as e:
         raise _answer_error(e) from e
     return serialize(await _load(db, user_id, application_id), detail=True)
+
+
+@router.get("/{application_id}/fill")
+async def fill_in(application_id: UUID, user_id: CurrentUserId, db: DbSession):
+    """Everything the extension needs to fill in the company's form."""
+    application = await _load(db, user_id, application_id)
+    if application.status == "submitted":
+        raise HTTPException(status_code=409, detail="This application has already been sent.")
+    if application.status != "queued":
+        raise HTTPException(status_code=409, detail="Approve the answers before filling in the form.")
+    return await fill_details(db, application)
+
+
+@router.post("/{application_id}/sent")
+async def sent(application_id: UUID, user_id: CurrentUserId, db: DbSession):
+    """The user says they sent the application themselves."""
+    application = await _load(db, user_id, application_id)
+    try:
+        await mark_sent(db, application)
+    except AnswerError as e:
+        raise _answer_error(e) from e
+    return serialize(await _load(db, user_id, application_id), detail=False)
+
+
+class ExtensionReport(BaseModel):
+    token: str
+
+
+@router.post("/{application_id}/sent-by-extension")
+async def sent_by_extension(application_id: UUID, body: ExtensionReport, db: DbSession):
+    """The extension saw the company's form accept the application. No
+    login: the token from the fill-in only allows this."""
+    if not valid_sent_token(application_id, body.token):
+        raise HTTPException(status_code=403, detail="This link doesn't work")
+    application = await db.get(AutoApplication, application_id)
+    if application is None:
+        raise HTTPException(status_code=404, detail="Application not found")
+    try:
+        await mark_sent(db, application)
+    except AnswerError as e:
+        raise _answer_error(e) from e
+    return {"status": application.status}
 
 
 @router.post("/{application_id}/cancel")

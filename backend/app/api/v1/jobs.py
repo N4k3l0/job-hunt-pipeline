@@ -20,6 +20,7 @@ from app.services.auto_apply.ats import detect_ats
 from app.services.discovery.ats_resolver import find_direct_apply, is_ats_url, _is_aggregator
 from app.services.jobs_filter import country_filter_codes, job_group_key
 from app.services.parsing.html_text import safe_description_html, strip_html
+from app.services.tracking.applied import record_applied
 from app.services.job_state import (
     APPLIED_TRACKING_STATUSES,
     USER_JOB_STATUSES,
@@ -1072,28 +1073,7 @@ async def mark_applied(job_id: UUID, user_id: CurrentUserId, db: DbSession):
     Idempotent: re-pressing won't downgrade an interview/offer/rejected.
     """
     await _get_job_or_404(db, job_id)
-
-    existing = await db.execute(
-        select(ApplicationTracking).where(
-            ApplicationTracking.job_id == job_id,
-            ApplicationTracking.user_id == user_id,
-        ).order_by(ApplicationTracking.updated_at.desc()).limit(1)
-    )
-    tracking = existing.scalar_one_or_none()
-    if tracking is None:
-        tracking = ApplicationTracking(
-            job_id=job_id,
-            user_id=user_id,
-            status="applied",
-            applied_at=datetime.now(timezone.utc),
-        )
-        db.add(tracking)
-    else:
-        if tracking.status not in ("interviewing", "offered", "rejected"):
-            tracking.status = "applied"
-            if not tracking.applied_at:
-                tracking.applied_at = datetime.now(timezone.utc)
-
+    tracking = await record_applied(db, user_id, job_id)
     await db.commit()
     await db.refresh(tracking)
     return {

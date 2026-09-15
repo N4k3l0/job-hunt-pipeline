@@ -598,11 +598,27 @@ export function useAutoApplications() {
   });
 }
 
-export function useAutoApplication(id: string) {
+/** `watch` re-checks every few seconds, while the user is sending the form. */
+export function useAutoApplication(id: string, { watch = false }: { watch?: boolean } = {}) {
   return useQuery({
     queryKey: ["auto-apply", id],
     queryFn: () => api.get<AutoApplicationDetail>(`/api/v1/auto-apply/${id}`),
     enabled: !!id,
+    refetchInterval: watch ? 5000 : false,
+  });
+}
+
+/** The user sent the application themselves. */
+export function useMarkAutoApplicationSent(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<AutoApplication>(`/api/v1/auto-apply/${id}/sent`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["auto-apply"] });
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      qc.invalidateQueries({ queryKey: ["tracking"] });
+      qc.invalidateQueries({ queryKey: ["analytics"] });
+    },
   });
 }
 
