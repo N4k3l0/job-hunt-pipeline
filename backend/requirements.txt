@@ -48,6 +48,10 @@ PyPDF2>=3.0.0
 # Supabase
 supabase>=2.10.0
 
+# Sanitizing job description HTML from job boards before the job page
+# shows it (services/parsing/html_text.py).
+nh3>=0.3.7,<0.4
+
 # Utilities
 pydantic[email]>=2.10.0
 pydantic-settings>=2.7.0
