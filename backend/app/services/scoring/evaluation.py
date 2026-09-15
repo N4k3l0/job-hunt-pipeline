@@ -8,9 +8,10 @@ scoring change is judged on the user's own verdicts before it replaces the
 stored scores.
 
 Which jobs to rate: the 20 best-scored inbox jobs, 20 more from the rest of
-the inbox and 10 that just miss it (scores 35-49). A mix is needed to see
-good jobs the scores leave out, not only bad jobs at the top. The order is
-shuffled so the top matches don't come first.
+the inbox, 10 that just miss it (scores 35-49) and 10 the user's LinkedIn
+job alerts sent. A mix is needed to see good jobs the scores leave out,
+not only bad jobs at the top. The order is shuffled so the top matches
+don't come first.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ from sqlalchemy.orm import defer, selectinload
 
 from app.models.job import Job, JobEntity, JobSource
 from app.models.job_rating import JobRating
+from app.models.job_alert import JobAlertHit
 from app.models.job_state import UserJobState
 from app.models.scoring import JobScore
 from app.models.tracking import ApplicationTracking
@@ -38,6 +40,9 @@ NEAR_MIN_SCORE = 35
 TOP_SAMPLE = 20
 INBOX_SAMPLE = 20
 NEAR_SAMPLE = 10
+# Jobs the user's LinkedIn alerts sent, whatever their score, so ratings
+# show how often LinkedIn's picks fit.
+ALERT_SAMPLE = 10
 TOP_N = 10
 DISAGREEMENTS = 5
 
@@ -123,7 +128,19 @@ async def rating_queue(db, user_id: UUID, limit: int) -> list[UUID]:
     rest = candidates[TOP_SAMPLE:]
     inbox = shuffled([r for r in rest if r[1] >= INBOX_MIN_SCORE])[:INBOX_SAMPLE]
     near = shuffled([r for r in rest if r[1] < INBOX_MIN_SCORE])[:NEAR_SAMPLE]
-    sample = shuffled(top + inbox + near)
+    picked = {r[0] for r in top + inbox + near}
+    alert_rows = (await db.execute(
+        select(JobAlertHit.job_id)
+        .join(Job, Job.id == JobAlertHit.job_id)
+        .outerjoin(UserJobState, and_(UserJobState.job_id == Job.id, UserJobState.user_id == user_id))
+        .where(
+            JobAlertHit.user_id == user_id,
+            Job.status.notin_(["duplicate", "raw", "expired", "dismissed"]),
+            or_(UserJobState.status.is_(None), UserJobState.status != "dismissed"),
+        )
+    )).scalars().all()
+    alerts = shuffled([(job_id, None) for job_id in alert_rows if job_id not in picked and job_id not in rated])
+    sample = shuffled(top + inbox + near + alerts[:ALERT_SAMPLE])
     in_sample = {r[0] for r in sample}
     ordered = sample + shuffled([r for r in candidates if r[0] not in in_sample])
     return [job_id for job_id, _ in ordered if job_id not in rated][:limit]
@@ -137,6 +154,9 @@ async def evaluate(db, user_id: UUID) -> dict:
     ratings = dict((await db.execute(
         select(JobRating.job_id, JobRating.rating).where(JobRating.user_id == user_id)
     )).all())
+    alert_job_ids = set((await db.execute(
+        select(JobAlertHit.job_id).where(JobAlertHit.user_id == user_id)
+    )).scalars().all())
     profile = await load_scoring_profile(db, str(user_id))
     versions = [SCORE_VERSION] + ([PROPOSED_SCORE_VERSION] if PROPOSED_SCORE_VERSION != SCORE_VERSION else [])
     rows: list[dict] = []
@@ -154,6 +174,7 @@ async def evaluate(db, user_id: UUID) -> dict:
                 "title": job.title_en or job.title,
                 "company": job.company,
                 "rating": ratings[job.id],
+                "linkedin_alert": job.id in alert_job_ids,
                 "scores": {
                     str(v): compute_job_score(job_data, job_entities, profile, version=v)["overall_fit"]
                     for v in versions
@@ -184,6 +205,14 @@ async def evaluate(db, user_id: UUID) -> dict:
         "min_for_results": MIN_RATINGS_FOR_RESULTS,
         "current": metrics(SCORE_VERSION),
         "proposed": metrics(PROPOSED_SCORE_VERSION) if len(versions) > 1 else None,
+        # How often the user rates jobs their LinkedIn alerts sent as good,
+        # next to every other rated job.
+        "linkedin_alerts": {
+            "rated": sum(1 for r in rows if r["linkedin_alert"]),
+            "good": sum(1 for r in rows if r["linkedin_alert"] and r["rating"] == "good"),
+            "others_rated": sum(1 for r in rows if not r["linkedin_alert"]),
+            "others_good": sum(1 for r in rows if not r["linkedin_alert"] and r["rating"] == "good"),
+        },
         "disagreements": {
             "good_scored_low": good_scored_low[:DISAGREEMENTS],
             "bad_scored_high": bad_scored_high[:DISAGREEMENTS],

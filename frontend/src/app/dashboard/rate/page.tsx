@@ -146,6 +146,7 @@ function Results({ results }: { results: RatingResults }) {
     ...(results.proposed ? [{ label: "New scoring", metrics: results.proposed }] : []),
   ];
   const versions = columns.map((c) => String(c.metrics.version));
+  const alerts = results.linkedin_alerts;
   return (
     <section className="space-y-4">
       <div>
@@ -189,6 +190,25 @@ function Results({ results }: { results: RatingResults }) {
           </tbody>
         </table>
       </div>
+      {alerts && alerts.rated > 0 && (
+        <p className="ds-muted" style={{ fontSize: 13 }}>
+          Jobs your LinkedIn alerts sent: you rated{" "}
+          <span className="ds-mono" style={{ color: "var(--ds-fg)" }}>
+            {alerts.good} of {alerts.rated} ({Math.round((100 * alerts.good) / alerts.rated)}%)
+          </span>{" "}
+          good fits
+          {alerts.others_rated > 0 && (
+            <>
+              , against{" "}
+              <span className="ds-mono" style={{ color: "var(--ds-fg)" }}>
+                {Math.round((100 * alerts.others_good) / alerts.others_rated)}%
+              </span>{" "}
+              of the other jobs you rated
+            </>
+          )}
+          .
+        </p>
+      )}
       <Disagreements
         title={results.proposed ? "Good fits the new scoring keeps out of the inbox" : "Good fits kept out of the inbox"}
         rows={results.disagreements.good_scored_low}

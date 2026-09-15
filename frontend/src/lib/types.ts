@@ -30,9 +30,11 @@ export interface Job {
   /** Inbox only: other postings of the same job (same company and title,
    *  other cities or sources) folded into this one. */
   other_postings?: number;
+  /** Inbox only: one of the user's LinkedIn job alerts sent them this job. */
+  linkedin_alert?: boolean;
 }
 
-export interface JobDetail extends Job {
+export interface JobDetail extends Omit<Job, "linkedin_alert"> {
   /** Straight from the job board: never render as HTML. */
   raw_description: string | null;
   /** English translation of the description, when the posting wasn't English. */
@@ -40,6 +42,13 @@ export interface JobDetail extends Job {
   /** The description (in English when translated), sanitized by the backend.
    *  The only description field safe to render as HTML. */
   description_html?: string | null;
+  /** Set when one of the user's LinkedIn job alerts sent them this job. */
+  linkedin_alert?: {
+    search: string | null;
+    location: string | null;
+    times_sent: number;
+    last_sent_at: string | null;
+  } | null;
   entities: JobEntity | null;
   score: JobScore | null;
   auto_apply?: {
@@ -163,6 +172,8 @@ export interface RatedJobScores {
 
 export interface RatingResults extends RatingCounts {
   min_for_results: number;
+  /** Rated jobs the user's LinkedIn alerts sent, next to all other rated jobs. */
+  linkedin_alerts?: { rated: number; good: number; others_rated: number; others_good: number };
   current: ScoringMetrics;
   /** Null once the proposed scoring is the one in use. */
   proposed: ScoringMetrics | null;
@@ -170,6 +181,19 @@ export interface RatingResults extends RatingCounts {
     good_scored_low: RatedJobScores[];
     bad_scored_high: RatedJobScores[];
   };
+}
+
+// ── LinkedIn job alert sync ──────────────────────────────────────────────
+
+export interface JobAlertStatus {
+  has_key: boolean;
+  key_created_at: string | null;
+  /** Last time the Gmail script sent emails with the key. */
+  last_used_at: string | null;
+  emails_read: number;
+  last_email_at: string | null;
+  jobs_sent: number;
+  searches: { search: string; location: string | null; jobs: number }[];
 }
 
 export interface JobEntity {

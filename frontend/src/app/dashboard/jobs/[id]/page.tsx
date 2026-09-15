@@ -623,6 +623,15 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
                   <span className="ds-mono">{job.salary_text}</span>
                 </span>
               )}
+              {job.linkedin_alert && (
+                <span
+                  className="ds-pill"
+                  title={`Your LinkedIn job alert sent this ${job.linkedin_alert.times_sent === 1 ? "once" : `${job.linkedin_alert.times_sent} times`}`}
+                >
+                  From your LinkedIn alert
+                  {job.linkedin_alert.search ? `: ${job.linkedin_alert.search}` : ""}
+                </span>
+              )}
             </div>
           </div>
           {score && (

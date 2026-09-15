@@ -689,6 +689,9 @@ function TopMatchCard({
                 +{job.other_postings} more {job.other_postings === 1 ? "posting" : "postings"}
               </span>
             )}
+            {job.linkedin_alert && (
+              <span className="ds-dim" title="One of your LinkedIn job alerts sent you this job">LinkedIn alert</span>
+            )}
             <span className="ds-mono ds-dim">{timeAgo(job.discovered_at)} ago</span>
           </div>
         </div>
@@ -930,6 +933,9 @@ function DenseRow({
             <span className="ds-dim" title="The same job is also posted for other locations or on other job sites">
               +{job.other_postings} more {job.other_postings === 1 ? "posting" : "postings"}
             </span>
+          )}
+          {job.linkedin_alert && (
+            <span className="ds-dim" title="One of your LinkedIn job alerts sent you this job">LinkedIn alert</span>
           )}
           <span className="ds-mono ds-dim" style={{ marginLeft: "auto" }}>
             {timeAgo(job.discovered_at)}
