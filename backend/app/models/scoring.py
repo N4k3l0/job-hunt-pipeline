@@ -13,6 +13,8 @@ class JobScore(Base):
     __table_args__ = (
         Index("ix_job_scores_user_fit", "user_id", "overall_fit"),
         Index("ix_job_scores_user_priority", "user_id", "priority"),
+        # A job's best score for any user (enrichment reads those first).
+        Index("ix_job_scores_job_fit", "job_id", "overall_fit"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(

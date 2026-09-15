@@ -283,11 +283,17 @@ def level_from_years(years: float) -> str:
     return "entry"
 
 
+# Seniority score by how many levels apart the job and the candidate are:
+# the same level, one apart, two apart, three or more.
+LEVEL_GAP_SCORES = (1.0, 0.7, 0.35, 0.1)
+
+
 def seniority_match(
     job_seniority: str | None,
     job_title: str,
     years_required_min: int | None,
     work_history: list[dict] | None,
+    gap_scores: tuple[float, float, float, float] = LEVEL_GAP_SCORES,
 ) -> tuple[float, dict]:
     years = candidate_years(work_history)
     candidate_level = None
@@ -303,7 +309,7 @@ def seniority_match(
         return 0.55, detail
 
     diff = abs(SENIORITY_LEVELS.index(job_level) - SENIORITY_LEVELS.index(candidate_level))
-    score = {0: 1.0, 1: 0.7, 2: 0.35}.get(diff, 0.1)
+    score = gap_scores[min(diff, 3)]
     if years_required_min is not None and years + 1 < years_required_min:
         score = min(score, 0.4)
     return score, detail

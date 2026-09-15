@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 import type {
   Job,
@@ -13,6 +13,10 @@ import type {
   AutoApplication,
   AutoApplicationDetail,
   AutoApplyValue,
+  JobRatingValue,
+  RatingCounts,
+  RatingQueue,
+  RatingResults,
 } from "@/lib/types";
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
@@ -671,6 +675,47 @@ export function useCancelAutoApplication(id: string) {
       qc.invalidateQueries({ queryKey: ["auto-apply"] });
       qc.invalidateQueries({ queryKey: ["jobs", data.job_id] });
     },
+  });
+}
+
+// ── Rate matches ─────────────────────────────────────────────────────────────
+
+/** Jobs to rate, best-guess order fixed by the server. `limit` grows with
+ *  the jobs skipped this visit, so skipped ones don't use up the page. */
+export function useRatingQueue(limit: number) {
+  return useQuery({
+    queryKey: ["ratings", "queue", limit],
+    queryFn: () => api.get<RatingQueue>(`/api/v1/ratings/queue?limit=${limit}`),
+    placeholderData: keepPreviousData,
+    staleTime: 0,
+  });
+}
+
+export function useRatingResults(enabled: boolean) {
+  return useQuery({
+    queryKey: ["ratings", "results"],
+    queryFn: () => api.get<RatingResults>("/api/v1/ratings/results"),
+    enabled,
+  });
+}
+
+export function useRateJob() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ jobId, rating }: { jobId: string; rating: JobRatingValue }) =>
+      api.put<RatingCounts & { job_id: string; rating: JobRatingValue }>(`/api/v1/ratings/${jobId}`, { rating }),
+    onSuccess: ({ rated, good }) => {
+      qc.setQueriesData<RatingQueue>({ queryKey: ["ratings", "queue"] }, (old) => (old ? { ...old, rated, good } : old));
+      qc.invalidateQueries({ queryKey: ["ratings", "results"] });
+    },
+  });
+}
+
+export function useUnrateJob() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (jobId: string) => api.delete(`/api/v1/ratings/${jobId}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["ratings"] }),
   });
 }
 

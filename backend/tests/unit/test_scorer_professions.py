@@ -3,7 +3,7 @@ jobs, whatever the profession."""
 
 import pytest
 
-from app.services.scoring.scorer import SCORE_VERSION, compute_job_score
+from app.services.scoring.scorer import PROPOSED_SCORE_VERSION, SCORE_VERSION, compute_job_score
 
 
 def _profile(roles, skills, titles, domain_tags=None, remote="any"):
@@ -56,15 +56,17 @@ JOBS = {
 }
 
 
+@pytest.mark.parametrize("version", [SCORE_VERSION, PROPOSED_SCORE_VERSION])
 @pytest.mark.parametrize("profession", sorted(PROFILES))
-def test_own_profession_ranks_first(profession):
+def test_own_profession_ranks_first(profession, version):
     profile = PROFILES[profession]
     scores = {
-        name: compute_job_score(job_data, entities, profile)["overall_fit"]
+        name: compute_job_score(job_data, entities, profile, version=version)["overall_fit"]
         for name, (job_data, entities) in JOBS.items()
     }
     own = scores.pop(profession)
-    assert own >= 65, (profession, own)
+    # Version 3 gives nothing for the level the accountant job doesn't state.
+    assert own >= (65 if version < 3 else 50), (profession, own)
     assert all(own - other >= 25 for other in scores.values()), (profession, own, scores)
 
 

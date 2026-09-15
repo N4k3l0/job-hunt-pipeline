@@ -151,6 +151,47 @@ def _skill_keywords(skills: list[str] | None) -> list[str]:
     return list(set(out))
 
 
+async def user_filter_kwargs(db, user_id) -> dict:
+    """apply_user_filters arguments from the user's profile, the way the
+    inbox passes them (skills are technical and tool skills only)."""
+    from sqlalchemy import select
+    from app.models.candidate import CandidateProfile, CandidateSkill
+
+    row = (await db.execute(
+        select(
+            CandidateProfile.id,
+            CandidateProfile.target_roles,
+            CandidateProfile.blocked_sources,
+            CandidateProfile.remote_preference,
+            CandidateProfile.preferred_countries,
+            CandidateProfile.home_country,
+            CandidateProfile.visa_statuses,
+            CandidateProfile.salary_min,
+            CandidateProfile.salary_currency,
+        ).where(CandidateProfile.user_id == user_id)
+    )).first()
+    if row is None:
+        return {"target_roles": None, "user_id": user_id}
+    skills = (await db.execute(
+        select(CandidateSkill.skill_name).where(
+            CandidateSkill.profile_id == row.id,
+            CandidateSkill.category.in_(("technical", "tool")),
+        )
+    )).scalars().all()
+    return {
+        "target_roles": row.target_roles,
+        "skills": [s for s in skills if s],
+        "blocked_sources": row.blocked_sources,
+        "remote_preference": row.remote_preference,
+        "preferred_countries": row.preferred_countries,
+        "home_country": row.home_country,
+        "visa_statuses": row.visa_statuses,
+        "salary_min": row.salary_min,
+        "salary_currency": row.salary_currency,
+        "user_id": user_id,
+    }
+
+
 def job_group_key(job=Job):
     """Normalized company and title. Postings of the same job for several
     cities, or from several sources, share it; the inbox and the dashboard
