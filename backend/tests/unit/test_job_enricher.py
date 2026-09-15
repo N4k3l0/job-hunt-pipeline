@@ -123,7 +123,14 @@ def test_annual_salary(amount, period, expected):
 
 
 def test_clean_description_strips_html():
-    assert clean_description("<p>Hello&nbsp;<b>there</b></p>\n\n  friend") == "Hello&nbsp; there friend"
+    assert clean_description("<p>Hello&nbsp;<b>there</b></p>\n\n  friend") == "Hello there friend"
+
+
+def test_clean_description_decodes_escaped_html():
+    escaped = '&lt;div class=&quot;intro&quot;&gt;&lt;p&gt;Grafana Labs &amp;amp; friends&#39; tools&lt;/p&gt;&lt;/div&gt;'
+    assert clean_description(escaped) == "Grafana Labs & friends' tools"
+    assert clean_description("&amp;lt;p&amp;gt;Twice&amp;lt;/p&amp;gt;") == "Twice"
+    assert clean_description("Salary: 5 < 6 and R&D") == "Salary: 5 < 6 and R&D"
 
 
 def test_implausible_salary_ranges_are_dropped():

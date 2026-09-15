@@ -25,6 +25,7 @@ from app.llm.client import llm_client
 from app.llm.prompts.enrich_job import RECORD_TOOL, SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
 from app.models.job import Job, JobEntity
 from app.models.scoring import JobScore
+from app.services.parsing.html_text import strip_html
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,6 @@ DESCRIPTION_CHAR_LIMIT = 6000
 MIN_DESCRIPTION_CHARS = 200
 MAX_LIST_ITEMS = 25
 
-_HTML_TAG_RE = re.compile(r"<[^>]+>")
 _WHITESPACE_RE = re.compile(r"\s+")
 
 _SENIORITIES = {"entry", "mid", "senior", "lead", "director", "vp", "c_level"}
@@ -59,8 +59,7 @@ class EnrichmentResult:
 
 
 def clean_description(raw: str | None) -> str:
-    text = _HTML_TAG_RE.sub(" ", raw or "")
-    return _WHITESPACE_RE.sub(" ", text).strip()
+    return _WHITESPACE_RE.sub(" ", strip_html(raw)).strip()
 
 
 def _clean_list(value, limit: int = MAX_LIST_ITEMS) -> list[str]:
