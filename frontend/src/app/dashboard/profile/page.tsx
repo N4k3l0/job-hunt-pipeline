@@ -36,6 +36,7 @@ import {
 import { useToast } from "@/components/ui/toast";
 import { COUNTRY_OPTIONS } from "@/lib/countries";
 import { HomeCountrySelect } from "@/components/home-country-select";
+import { JobAlertsCard } from "@/components/job-alerts-card";
 
 type SetupStep = {
   id: string;
@@ -791,6 +792,8 @@ export default function ProfilePage() {
 
         {/* ── Preferences Tab ────────────────────────────────────── */}
         <TabsContent value="preferences" className="space-y-4 mt-4">
+          <JobAlertsCard />
+
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">

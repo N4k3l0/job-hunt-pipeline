@@ -13,6 +13,7 @@ import type {
   AutoApplication,
   AutoApplicationDetail,
   AutoApplyValue,
+  JobAlertStatus,
   JobRatingValue,
   RatingCounts,
   RatingQueue,
@@ -716,6 +717,33 @@ export function useUnrateJob() {
   return useMutation({
     mutationFn: (jobId: string) => api.delete(`/api/v1/ratings/${jobId}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["ratings"] }),
+  });
+}
+
+// ── LinkedIn job alert sync ─────────────────────────────────────────────────
+
+export function useJobAlertStatus() {
+  return useQuery({
+    queryKey: ["job-alerts", "status"],
+    queryFn: () => api.get<JobAlertStatus>("/api/v1/job-alerts/status"),
+    staleTime: 60 * 1000,
+  });
+}
+
+/** A new key for the Gmail script. The old key, if any, stops working. */
+export function useCreateJobAlertKey() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<{ key: string }>("/api/v1/job-alerts/key"),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["job-alerts"] }),
+  });
+}
+
+export function useDeleteJobAlertKey() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.delete("/api/v1/job-alerts/key"),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["job-alerts"] }),
   });
 }
 

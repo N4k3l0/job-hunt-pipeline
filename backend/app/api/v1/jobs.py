@@ -16,6 +16,7 @@ from app.models.scoring import JobScore
 from app.models.candidate import CandidateProfile
 from app.models.tracking import ApplicationTracking
 from app.models.auto_apply import AutoApplication
+from app.models.job_alert import JobAlertHit
 from app.services.auto_apply.ats import detect_ats
 from app.services.discovery.ats_resolver import find_direct_apply, is_ats_url, _is_aggregator
 from app.services.jobs_filter import country_filter_codes, job_group_key
@@ -385,6 +386,10 @@ async def list_jobs(
 
     page_ids = [r.job_id for r in page_rows]
     other_postings = {r.job_id: r.postings - 1 for r in page_rows}
+    # Jobs this user's LinkedIn alerts sent them.
+    alert_job_ids = set((await db.execute(
+        select(JobAlertHit.job_id).where(JobAlertHit.user_id == user_id, JobAlertHit.job_id.in_(page_ids))
+    )).scalars().all()) if page_ids else set()
     rows = []
     if page_ids:
         details = (await db.execute(
@@ -447,6 +452,7 @@ async def list_jobs(
             # Other postings of the same job (other cities or sources) that
             # passed the same filters.
             "other_postings": other_postings.get(job.id, 0),
+            "linkedin_alert": job.id in alert_job_ids,
             "score": {
                 "role_path": score.role_path,
                 "overall_fit": score.overall_fit,
@@ -590,6 +596,9 @@ async def get_job(job_id: UUID, user_id: CurrentUserId, db: DbSession):
             AutoApplication.user_id == user_id,
         )
     )).scalar_one_or_none()
+    alert_hit = (await db.execute(
+        select(JobAlertHit).where(JobAlertHit.job_id == job_id, JobAlertHit.user_id == user_id)
+    )).scalar_one_or_none()
 
     return {
         "id": str(job.id),
@@ -614,6 +623,13 @@ async def get_job(job_id: UUID, user_id: CurrentUserId, db: DbSession):
         "seniority": job.seniority,
         "application_type": job.application_type,
         "source_name": job.source.name if job.source else "manual",
+        # When one of this user's LinkedIn job alerts sent them this job.
+        "linkedin_alert": {
+            "search": alert_hit.alert_search,
+            "location": alert_hit.alert_location,
+            "times_sent": alert_hit.times_sent,
+            "last_sent_at": alert_hit.last_sent_at.isoformat() if alert_hit.last_sent_at else None,
+        } if alert_hit else None,
         "status": effective_status(job.status, user_state, tracking_status),
         "raw_description": job.raw_description,
         # English translation when source was non-English.

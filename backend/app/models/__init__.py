@@ -16,6 +16,7 @@ from app.models.job_state import UserJobState
 from app.models.invite_request import InviteRequest
 from app.models.auto_apply import AutoApplication, SavedAnswer
 from app.models.job_rating import JobRating
+from app.models.job_alert import JobAlertEmail, JobAlertHit, JobAlertKey, LinkedInJob
 
 __all__ = [
     "User",
@@ -40,4 +41,8 @@ __all__ = [
     "AutoApplication",
     "SavedAnswer",
     "JobRating",
+    "JobAlertKey",
+    "LinkedInJob",
+    "JobAlertHit",
+    "JobAlertEmail",
 ]

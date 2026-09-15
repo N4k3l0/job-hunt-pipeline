@@ -1130,6 +1130,29 @@ async def cron_expire_stale(
     return outcome
 
 
+@router.get("/job-alert-details")
+async def cron_job_alert_details(
+    authorization: str | None = Header(None),
+    limit: int = 10,
+):
+    """Find full postings for jobs added from LinkedIn alert emails on the
+    companies' own job boards, then rescore the ones that got a
+    description. Free: public job board listings only."""
+    _verify_cron(authorization)
+
+    from app.services.job_alerts.details import fill_alert_job_details
+    from app.workers.scoring_tasks import rescore_jobs_for_all_users
+
+    result = await fill_alert_job_details(limit=max(1, min(limit, 30)))
+    rescored = await rescore_jobs_for_all_users(result.job_ids)
+    return {
+        "checked": result.checked,
+        "postings_found": result.postings_found,
+        "descriptions_found": result.descriptions_found,
+        "scores_updated": rescored,
+    }
+
+
 @router.get("/review-top-matches")
 async def cron_review_top_matches(
     authorization: str | None = Header(None),

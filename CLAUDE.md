@@ -126,6 +126,14 @@ Every job flows: Raw → Normalized → Deduplicated → Enriched → Scored →
 - Resume upload doesn't rescore inline (parse + full rescore can exceed 60s); the frontend calls `POST /candidates/rescore` afterwards
 - Tailoring only triggered by user action or for high-priority (80+) jobs
 
+### LinkedIn job alerts (`services/job_alerts/`, `/api/v1/job-alerts`)
+- Each user runs a Google Apps Script in the Gmail account that gets their LinkedIn job alerts. Profile → Preferences writes it with their key (`frontend/src/lib/linkedin-alert-script.ts`). Every hour it sends new emails from `jobalerts-noreply@linkedin.com` to `POST /job-alerts/linkedin` with `Authorization: Bearer jha_…`. Only the key's SHA-256 is stored (`job_alert_keys`)
+- The script strips every link's query string except `trk`: LinkedIn's links carry one-time sign-in codes (`otpToken`, `midToken`). The backend never stores the email, only the jobs read from it
+- `linkedin.py` reads the jobs from the email: the job id from each `/jobs/view/<id>` link, the section and position from `trk` (`primary_job_list-0-jobcard_body_1_jobid_…`), then title, "Company · Location (Remote)", salary and labels. Parsing lives in the backend so layout changes don't need every user to update their script
+- `ingest.py`: one job row per LinkedIn id for everyone (`linkedin_jobs`); a job the app already has (same link, or same company, title, city and country) is reused and reopened if expired. `job_alert_hits` records per user which jobs their alerts sent; `job_alert_emails` makes a resent email a no-op
+- Alert emails have no description. `/cron/job-alert-details` (every scheduler run) looks each new job up once on the company's own job board (`ats_resolver.resolve_ats_url`, then the Greenhouse/Lever/Ashby posting APIs). Free: no LinkedIn pages, Firecrawl or Claude
+- Rate matches samples up to 10 alert jobs whatever their score and reports how often the user rates them good. "LinkedIn sent it" doesn't change scores until ratings show it should
+
 ### Apply for me (`services/auto_apply/`, `/api/v1/auto-apply`)
 - Supported: jobs whose `apply_url`/`job_url` is on Greenhouse, Lever or Ashby (`ats.py`). Greenhouse and Ashby publish each job's form as JSON; Lever's is read from its apply page (`forms.py`). All three forms carry invisible bot checks (reCAPTCHA / hCaptcha): never build anything that gets around them
 - `prepare_application` reads the form, fills answers from the profile with rules (`answers.py`), then drafts the remaining required questions in one Claude call (`drafting.py`). Every answer records its `source` and whether it's `confirmed`
