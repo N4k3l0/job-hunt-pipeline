@@ -183,6 +183,16 @@ export interface RatingResults extends RatingCounts {
   };
 }
 
+// ── Daily email ──────────────────────────────────────────────────────────
+
+export interface NotificationSettings {
+  daily_email: boolean;
+  email: string;
+  /** Whether the app can send email yet (set up by the admin). */
+  email_configured: boolean;
+  last_sent_at: string | null;
+}
+
 // ── LinkedIn job alert sync ──────────────────────────────────────────────
 
 export interface JobAlertStatus {

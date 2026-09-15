@@ -4,7 +4,8 @@ Each run calls the backend's cron endpoints in order:
 - 06:00–06:29 UTC: discover jobs from company boards and job APIs
 - 06:30–06:59 UTC: discover jobs from remote-work job boards
 - every run: read new jobs with Claude, find full postings for jobs from
-  LinkedIn alert emails, expire closed jobs, and (when
+  LinkedIn alert emails, expire closed jobs, send the daily email (once a
+  day per user, from DIGEST_HOUR_UTC on the backend), and (when
   REVIEWS_PER_USER_PER_DAY is above 0) review each user's best new matches
 
 Environment:
@@ -94,6 +95,7 @@ def main() -> int:
     results.append(call(base_url, secret, f"/api/v1/cron/enrich?limit={jobs_per_run}", TASK_TIMEOUT))
     results.append(call(base_url, secret, "/api/v1/cron/job-alert-details?limit=10", TASK_TIMEOUT))
     results.append(call(base_url, secret, "/api/v1/cron/expire-stale?verify_limit=40", TASK_TIMEOUT))
+    results.append(call(base_url, secret, "/api/v1/cron/send-digests", TASK_TIMEOUT))
     if reviews > 0:
         results.append(call(
             base_url, secret, f"/api/v1/cron/review-top-matches?per_user_daily={reviews}", TASK_TIMEOUT,

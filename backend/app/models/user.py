@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, DateTime, func
+from sqlalchemy import Boolean, String, DateTime, func, text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -18,6 +18,10 @@ class User(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(50), default="user")  # user, admin
     preferences: Mapped[dict | None] = mapped_column(JSONB, default=dict)
+    # The daily email (services/notifications/digest.py): whether the user
+    # wants it, and when it was last sent or found to have nothing new.
+    email_digest: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
+    last_digest_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

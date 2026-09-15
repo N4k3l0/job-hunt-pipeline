@@ -117,6 +117,11 @@ Every job flows: Raw → Normalized → Deduplicated → Enriched → Scored →
 - Resume upload doesn't rescore inline (parse + full rescore can exceed 60s); the frontend calls `POST /candidates/rescore` afterwards
 - Tailoring only triggered by user action or for high-priority (80+) jobs
 
+### Daily email (`services/notifications/`, `/api/v1/notifications`)
+- Each morning (first scheduler run at or after `DIGEST_HOUR_UTC`, default 7) `/cron/send-digests` emails every user with `users.email_digest` on who hasn't had today's: the best new inbox jobs since the last email (inbox filters, score 50+, one posting per job, top 5), Apply for me applications that need answers, tailored applications ready in the last 14 days, and follow-ups due. Days with nothing new send nothing. `users.last_digest_sent_at` makes it once a day
+- Railway's plan blocks SMTP, so email goes out over HTTPS (`email.py`): `EMAIL_PROVIDER=resend` (`RESEND_API_KEY`, `EMAIL_FROM` on a domain verified with Resend) or `EMAIL_PROVIDER=apps_script` (`EMAIL_RELAY_URL`, `EMAIL_RELAY_SECRET`; a Google Apps Script web app in the sending Gmail account, `backend/scripts/email_relay.gs`, 100 recipients a day). Unset: nothing is sent and the cron step is a no-op
+- Profile → Preferences → Daily email: on/off, a preview (rendered, not sent) and a test send. The email's "stop these emails" link is `/notifications/unsubscribe?u=&t=`, an HMAC of the user id keyed on `SUPABASE_JWT_SECRET`; links use `FRONTEND_URL` and `API_PUBLIC_URL` (falls back to `RAILWAY_PUBLIC_DOMAIN`)
+
 ### LinkedIn job alerts (`services/job_alerts/`, `/api/v1/job-alerts`)
 - Each user runs a Google Apps Script in the Gmail account that gets their LinkedIn job alerts. Profile → Preferences writes it with their key (`frontend/src/lib/linkedin-alert-script.ts`). Every hour it sends new emails from `jobalerts-noreply@linkedin.com` to `POST /job-alerts/linkedin` with `Authorization: Bearer jha_…`. Only the key's SHA-256 is stored (`job_alert_keys`)
 - The script strips every link's query string except `trk`: LinkedIn's links carry one-time sign-in codes (`otpToken`, `midToken`). The backend never stores the email, only the jobs read from it
@@ -171,7 +176,7 @@ The website (`NEXT_PUBLIC_API_URL`) uses the Railway backend: no time limit on r
 - Cron endpoints refuse every request until `CRON_SECRET` is set
 
 ### Scheduler on Railway
-Service `scheduler` in the same project is a Railway cron service: every 30 minutes (`*/30 * * * *`) it runs `python scripts/scheduled_tasks.py` from the backend image and exits. That script calls the backend's cron endpoints: discovery at 06:00 (`discover-fast`) and 06:30 UTC (`discover-remote`), and on every run `enrich`, `job-alert-details`, `expire-stale` and, when `REVIEWS_PER_USER_PER_DAY` > 0, `review-top-matches`.
+Service `scheduler` in the same project is a Railway cron service: every 30 minutes (`*/30 * * * *`) it runs `python scripts/scheduled_tasks.py` from the backend image and exits. That script calls the backend's cron endpoints: discovery at 06:00 (`discover-fast`) and 06:30 UTC (`discover-remote`), and on every run `enrich`, `job-alert-details`, `expire-stale`, `send-digests` and, when `REVIEWS_PER_USER_PER_DAY` > 0, `review-top-matches`.
 - **Env vars**: `BACKEND_URL` (`https://${{backend.RAILWAY_PUBLIC_DOMAIN}}`), `CRON_SECRET` (`${{backend.CRON_SECRET}}`), `ENRICH_JOBS_PER_RUN` (25), `REVIEWS_PER_USER_PER_DAY` (0). Both references point at the backend service, so there's one secret to rotate
 - **Run by hand**: `python scripts/scheduled_tasks.py --discovery both` runs discovery regardless of the time. `.github/workflows/scheduled-grading.yml` remains as a manual fallback (workflow_dispatch only)
 - Railway skips a run while the previous one is still going, and each run's log shows every endpoint's response

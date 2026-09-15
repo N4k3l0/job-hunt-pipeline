@@ -13,6 +13,7 @@ import type {
   AutoApplicationDetail,
   AutoApplyValue,
   JobAlertStatus,
+  NotificationSettings,
   Skill,
   SkillCategory,
   WorkHistoryEntry,
@@ -682,6 +683,41 @@ export function useUnrateJob() {
   return useMutation({
     mutationFn: (jobId: string) => api.delete(`/api/v1/ratings/${jobId}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["ratings"] }),
+  });
+}
+
+// ── Daily email ─────────────────────────────────────────────────────────────
+
+export function useNotificationSettings() {
+  return useQuery({
+    queryKey: ["notifications", "settings"],
+    queryFn: () => api.get<NotificationSettings>("/api/v1/notifications/settings"),
+    staleTime: 60 * 1000,
+  });
+}
+
+export function useUpdateNotificationSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (daily_email: boolean) =>
+      api.put<NotificationSettings>("/api/v1/notifications/settings", { daily_email }),
+    onSuccess: (data) => qc.setQueryData(["notifications", "settings"], data),
+  });
+}
+
+/** Today's email for the current user, rendered but not sent. */
+export function useDigestPreview(enabled: boolean) {
+  return useQuery({
+    queryKey: ["notifications", "preview"],
+    queryFn: () => api.get<{ empty: boolean; subject: string; html: string }>("/api/v1/notifications/digest/preview"),
+    enabled,
+    staleTime: 0,
+  });
+}
+
+export function useSendTestDigest() {
+  return useMutation({
+    mutationFn: () => api.post<{ sent_to: string }>("/api/v1/notifications/digest/test"),
   });
 }
 
