@@ -115,6 +115,27 @@ export interface AutoApplicationDetail extends AutoApplication {
   result: Record<string, unknown> | null;
 }
 
+/** What the extension gets to fill in the company's form. */
+export interface AutoApplyFill {
+  application_id: string;
+  ats: "greenhouse" | "lever" | "ashby";
+  form_url: string;
+  job: { title: string | null; company: string | null };
+  fields: {
+    key: string;
+    label: string;
+    type: AutoApplyField["type"];
+    kind: string;
+    required: boolean;
+    group: "application" | "voluntary";
+    options: { label: string; value: string }[] | null;
+    value: AutoApplyValue;
+  }[];
+  resume: { url: string; filename: string; content_type: string } | null;
+  sent_url: string | null;
+  sent_token: string;
+}
+
 // ── Rate matches ─────────────────────────────────────────────────────────
 
 export type JobRatingValue = "good" | "bad";

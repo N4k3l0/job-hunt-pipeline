@@ -4,16 +4,22 @@ import { use, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft, Check, CheckCircle2, Copy, ExternalLink, FileText, Loader2, Pencil, RefreshCw,
+  ArrowLeft, Check, CheckCircle2, Copy, ExternalLink, FileText, Loader2, Pencil, Puzzle, RefreshCw, Wand2,
 } from "lucide-react";
 import {
-  useAutoApplication, useCancelAutoApplication, usePrepareAutoApplication, useSaveAutoApplyAnswers,
+  useAutoApplication, useCancelAutoApplication, useMarkAutoApplicationSent, usePrepareAutoApplication,
+  useSaveAutoApplyAnswers,
 } from "@/hooks/use-api";
+import { useExtensionInstalled } from "@/hooks/use-extension";
 import { useToast } from "@/components/ui/toast";
 import { api } from "@/lib/api-client";
+import { askExtension } from "@/lib/extension";
 import { AutoApplyStatusPill } from "@/components/auto-apply-status";
 import { OperationProgress } from "@/components/operation-progress";
-import type { AutoApplyField, AutoApplyValue } from "@/lib/types";
+import type { AutoApplyField, AutoApplyFill, AutoApplyValue } from "@/lib/types";
+
+// How long the page keeps checking whether the form was sent.
+const WATCH_MS = 20 * 60 * 1000;
 
 const ATS_NAMES: Record<string, string> = { greenhouse: "Greenhouse", lever: "Lever", ashby: "Ashby" };
 
@@ -274,17 +280,31 @@ function Section({ title, hint, children }: { title: string; hint?: string; chil
 
 export default function AutoApplicationPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const { data: application, isLoading, error } = useAutoApplication(id);
+  const [watchingSince, setWatchingSince] = useState<number | null>(null);
+  const watching = watchingSince !== null && Date.now() - watchingSince < WATCH_MS;
+  const { data: application, isLoading, error } = useAutoApplication(id, { watch: watching });
   const save = useSaveAutoApplyAnswers(id);
   const cancel = useCancelAutoApplication(id);
   const prepare = usePrepareAutoApplication();
+  const markSent = useMarkAutoApplicationSent(id);
+  const extensionInstalled = useExtensionInstalled();
   const toast = useToast();
   const qc = useQueryClient();
 
   const [values, setValues] = useState<Record<string, AutoApplyValue>>({});
   const [edited, setEdited] = useState<Set<string>>(new Set());
   const [problemKeys, setProblemKeys] = useState<string[]>([]);
-  const [markingApplied, setMarkingApplied] = useState(false);
+  const [filling, setFilling] = useState(false);
+
+  // The extension reports the form as sent; tell the user once it shows up.
+  useEffect(() => {
+    if (!watching || application?.status !== "submitted") return;
+    setWatchingSince(null);
+    qc.invalidateQueries({ queryKey: ["auto-apply"], exact: true });
+    qc.invalidateQueries({ queryKey: ["jobs"] });
+    qc.invalidateQueries({ queryKey: ["tracking"] });
+    toast.success("Application sent", { description: "Now tracked in Applications." });
+  }, [watching, application?.status, qc, toast]);
 
   // Reset local answers whenever the server copy changes (load, save).
   useEffect(() => {
@@ -360,19 +380,31 @@ export default function AutoApplicationPage({ params }: { params: Promise<{ id: 
     );
   }
 
-  async function markApplied() {
-    setMarkingApplied(true);
+  async function fillInForm() {
+    setFilling(true);
     try {
-      await api.post(`/api/v1/jobs/${application!.job_id}/mark-applied`);
-      qc.invalidateQueries({ queryKey: ["jobs"] });
-      qc.invalidateQueries({ queryKey: ["tracking"] });
-      qc.invalidateQueries({ queryKey: ["analytics"] });
-      toast.success("Marked as applied", { description: "Now tracked in Applications." });
+      const details = await api.get<AutoApplyFill>(`/api/v1/auto-apply/${id}/fill`);
+      // The extension downloads the resume before opening the form.
+      const reply = await askExtension("fill-form", { application: details }, 20000);
+      if (!reply) throw new Error("The extension didn't answer. Reload this page and try again.");
+      if (reply.error) throw new Error(reply.error);
+      setWatchingSince(Date.now());
+      toast.success("Opening the form", { description: "Look over the answers, then press Submit on the form." });
     } catch (e) {
-      toast.error("Couldn't mark as applied", { description: e instanceof Error ? e.message : undefined });
+      toast.error("Couldn't fill in the form", { description: e instanceof Error ? e.message : undefined });
     } finally {
-      setMarkingApplied(false);
+      setFilling(false);
     }
+  }
+
+  function markApplied() {
+    markSent.mutate(undefined, {
+      onSuccess: () => {
+        setWatchingSince(null);
+        toast.success("Marked as sent", { description: "Now tracked in Applications." });
+      },
+      onError: (e) => toast.error("Couldn't mark as sent", { description: e.message }),
+    });
   }
 
   const renderQuestion = (field: AutoApplyField) => (
@@ -419,27 +451,45 @@ export default function AutoApplicationPage({ params }: { params: Promise<{ id: 
           {application.status === "needs_you" && (
             <p>
               <strong>{groups.needsYou.length} of {total}</strong> questions need you. The app filled in the rest from
-              your profile. Check the answers below, then approve them.
+              your profile. Check the answers below and approve them, then the extension fills in the company&apos;s
+              form for you.
             </p>
           )}
           {application.status === "queued" && (
             <div className="space-y-3">
               <p>
                 <CheckCircle2 className="inline h-4 w-4 ds-accent-fg" style={{ marginRight: 6, verticalAlign: -3 }} />
-                Answers approved. Automatic sending isn&apos;t switched on yet: open the form, copy your answers in, then
-                mark the job as applied.
+                {extensionInstalled === false
+                  ? "Answers approved. Add the Job Hunt extension to Chrome and it fills in the company's form for you. You look it over and press Submit."
+                  : "Answers approved. Fill in the form opens the company's form in a new tab with your answers filled in. Look it over, then press Submit there."}
               </p>
               <div className="flex flex-wrap" style={{ gap: 8 }}>
-                {application.form_url && (
-                  <a href={application.form_url} target="_blank" rel="noopener noreferrer" className="ds-btn primary">
-                    <ExternalLink className="h-4 w-4" /> Open the form
-                  </a>
+                {extensionInstalled === false ? (
+                  <Link href="/dashboard/extension" className="ds-btn primary">
+                    <Puzzle className="h-4 w-4" /> Add the extension
+                  </Link>
+                ) : (
+                  <button
+                    type="button"
+                    className="ds-btn primary"
+                    onClick={fillInForm}
+                    disabled={filling || extensionInstalled === null}
+                  >
+                    {filling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
+                    Fill in the form
+                  </button>
                 )}
-                <button type="button" className="ds-btn" onClick={markApplied} disabled={markingApplied}>
-                  {markingApplied ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                  I applied
+                <button type="button" className="ds-btn" onClick={markApplied} disabled={markSent.isPending}>
+                  {markSent.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                  I sent it myself
                 </button>
               </div>
+              {watching && (
+                <p className="ds-dim flex items-center" style={{ fontSize: 13, gap: 6 }}>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Waiting for you to press Submit on the form. This page updates once it&apos;s sent.
+                </p>
+              )}
             </div>
           )}
           {application.status === "submitted" && (
