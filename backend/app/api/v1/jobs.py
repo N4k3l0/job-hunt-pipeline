@@ -19,6 +19,7 @@ from app.models.auto_apply import AutoApplication
 from app.services.auto_apply.ats import detect_ats
 from app.services.discovery.ats_resolver import find_direct_apply, is_ats_url, _is_aggregator
 from app.services.jobs_filter import country_filter_codes, job_group_key
+from app.services.parsing.html_text import strip_html
 from app.services.job_state import (
     APPLIED_TRACKING_STATUSES,
     USER_JOB_STATUSES,
@@ -34,7 +35,6 @@ router = APIRouter()
 # Pre-compiled patterns for the excerpt builder. HTML tags + leading bullets
 # get cleaned, then whitespace gets collapsed. Order matters: strip tags
 # before collapsing whitespace so we don't preserve newlines inside elements.
-_HTML_TAG_RE = re.compile(r"<[^>]+>")
 _BULLET_RE = re.compile(r"^[\s\-•·*▪◦∙]+", re.MULTILINE)
 _WHITESPACE_RE = re.compile(r"\s+")
 EXCERPT_CHARS = 240
@@ -50,7 +50,7 @@ def _make_excerpt(raw: str | None) -> str | None:
     """
     if not raw:
         return None
-    text = _HTML_TAG_RE.sub(" ", raw)
+    text = strip_html(raw)
     text = _BULLET_RE.sub("", text)
     text = _WHITESPACE_RE.sub(" ", text).strip()
     if not text:
