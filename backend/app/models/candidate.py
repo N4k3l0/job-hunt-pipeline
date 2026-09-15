@@ -5,13 +5,6 @@ from sqlalchemy import String, Text, DateTime, Date, Float, Integer, ForeignKey,
 from sqlalchemy.dialects.postgresql import UUID, JSONB, ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-try:
-    from pgvector.sqlalchemy import Vector
-    _HAS_PGVECTOR = True
-except Exception:  # pragma: no cover — falls back when local dev hasn't installed pgvector yet
-    Vector = None  # type: ignore
-    _HAS_PGVECTOR = False
-
 from app.core.database import Base
 
 
@@ -48,13 +41,6 @@ class CandidateProfile(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
-
-    # Semantic-scoring embedding — populated when the resume is parsed
-    # and refreshed whenever target_roles / skills / work history change.
-    # 512-dim Voyage (voyage-3-lite). Nullable so legacy rows survive
-    # until backfilled.
-    if _HAS_PGVECTOR:
-        embedding: Mapped[list[float] | None] = mapped_column(Vector(512), nullable=True)
 
     # Relationships
     user: Mapped["User"] = relationship(back_populates="profile")

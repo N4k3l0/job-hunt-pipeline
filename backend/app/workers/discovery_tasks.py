@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 
 from sqlalchemy import select
 
-from app.workers.celery_app import celery_app
 from app.core.database import create_worker_session
 from app.models.job import Job, JobEntity, JobSource
 from app.models.user import User
@@ -17,17 +16,8 @@ from app.services.parsing.normalizer import (
     get_or_create_source,
     normalize_url,
 )
-from app.services.deduplication.dedup_service import check_duplicate
 
 logger = logging.getLogger(__name__)
-
-
-def _run_async(coro):
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
 
 
 async def _ingest_raw_jobs(jobs: list[dict]) -> tuple[int, int]:
@@ -228,82 +218,7 @@ async def _ingest_raw_jobs(jobs: list[dict]) -> tuple[int, int]:
         await db.commit()
         logger.info("Ingestion complete: %d stored, %d duplicates skipped", stored, skipped)
 
-    # Batched embedding pass for the rows we just inserted. Done in a
-    # SECOND session after commit so the embed API failures can't roll
-    # back the ingest. ~14 batches × 1-2s each for a 1.7k-job catalogue.
-    # No-ops if Voyage isn't configured — scorer falls back to rules.
-    if stored > 0:
-        try:
-            await _embed_unembedded_jobs(limit=stored + 50)
-        except Exception as e:  # noqa: BLE001
-            logger.warning("Post-ingest embedding pass failed: %s", e)
-
     return stored, skipped
-
-
-async def _embed_unembedded_jobs(limit: int = 50) -> int:
-    """Find JobEntity rows with NULL embedding, embed them, write back.
-
-    Uses raw SQL deliberately — earlier ORM-based version had unclear
-    failures during backfill (function returned 'Failed to fetch'
-    without a usable error). Raw SQL sidesteps any SQLAlchemy / pgvector
-    type-mapping issue at the cost of being slightly less typesafe.
-
-    Returns count embedded.
-    """
-    from app.services.scoring.embedder import embed_texts, job_corpus
-    from sqlalchemy import text
-
-    async with create_worker_session()() as db:
-        # Fetch rows missing an embedding via raw SQL — pulls everything
-        # job_corpus needs in one round-trip without depending on the
-        # JobEntity.embedding column type being correctly mapped.
-        q = text("""
-            SELECT je.id AS entity_id,
-                   j.title, j.company, j.raw_description,
-                   je.skills, je.requirements, je.keywords
-            FROM job_entities je
-            JOIN jobs j ON j.id = je.job_id
-            WHERE je.embedding IS NULL
-            LIMIT :limit
-        """)
-        result = await db.execute(q, {"limit": limit})
-        rows = result.fetchall()
-        if not rows:
-            return 0
-
-        corpora = [
-            job_corpus(
-                title=row.title or "",
-                company=row.company or "",
-                description=row.raw_description,
-                skills=row.skills or [],
-                requirements=row.requirements or [],
-                keywords=row.keywords or [],
-            )
-            for row in rows
-        ]
-
-        vectors = await embed_texts(corpora, input_type="document")
-        if vectors is None:
-            return 0  # Voyage unconfigured.
-
-        # Sequential UPDATEs, committed per-row. The earlier batched
-        # VALUES-derived-table version returned "Failed to fetch" on
-        # every iteration — pgvector's cast inside a multi-row VALUES
-        # apparently doesn't play nicely with asyncpg's prepared
-        # statement layer. Per-row UPDATE is slower (~150ms each on the
-        # pooler) but each row that succeeds is persisted, so a mid-
-        # batch failure doesn't lose work.
-        for row, vector in zip(rows, vectors):
-            vec_str = "[" + ",".join(f"{v:.6f}" for v in vector) + "]"
-            await db.execute(
-                text("UPDATE job_entities SET embedding = :vec WHERE id = :id"),
-                {"vec": vec_str, "id": str(row.entity_id)},
-            )
-        await db.commit()
-        logger.info("Embedded %d jobs (sequential UPDATE)", len(rows))
-        return len(rows)
 
 
 async def quick_score_all_users(per_user_timeout: int = 12) -> dict[str, str]:
@@ -315,10 +230,8 @@ async def quick_score_all_users(per_user_timeout: int = 12) -> dict[str, str]:
     caps wall time per user — together they keep a misbehaving user from
     starving the others.
     """
-    import asyncio
     import time
     from app.workers.scoring_tasks import _batch_score_async
-    from app.models.user import User
 
     async with create_worker_session()() as db:
         users_result = await db.execute(select(User.id))
@@ -339,41 +252,6 @@ async def quick_score_all_users(per_user_timeout: int = 12) -> dict[str, str]:
 
     results = await asyncio.gather(*(score_one(uid) for uid in user_ids))
     return dict(results)
-
-
-# ── Apify ────────────────────────────────────────────────────────────────────
-
-
-@celery_app.task(
-    name="app.workers.discovery_tasks.process_apify_results",
-    bind=True,
-    max_retries=3,
-    default_retry_delay=60,
-)
-def process_apify_results(self, actor_run_id: str, actor_type: str = "linkedin"):
-    """Fetch results from an Apify actor run and process them."""
-    try:
-        _run_async(_process_apify_async(actor_run_id, actor_type))
-    except Exception as exc:
-        logger.error("Apify processing failed for run %s: %s", actor_run_id, exc)
-        raise self.retry(exc=exc)
-
-
-async def _process_apify_async(actor_run_id: str, actor_type: str):
-    from app.services.discovery.apify_service import fetch_dataset_items, ACTOR_NORMALIZERS
-
-    items = await fetch_dataset_items(actor_run_id)
-    if not items:
-        logger.warning("No items found for Apify run %s", actor_run_id)
-        return
-
-    normalizer = ACTOR_NORMALIZERS.get(actor_type)
-    if not normalizer:
-        logger.error("Unknown actor type: %s", actor_type)
-        return
-
-    normalized = [normalizer(item) for item in items]
-    await _ingest_raw_jobs(normalized)
 
 
 # ── Keyword Collection ────────────────────────────────────────────────────────
@@ -448,7 +326,7 @@ async def _collect_user_countries() -> list[str]:
     """Union of every user's preferred_countries (2-letter ISO codes),
     deduplicated. Returns empty list when no users / no preferences.
 
-    Used by sources that fan out per-country (Adzuna primarily) so we
+    Used by sources that fan out per-country (Jobberman, MyJobMag) so we
     only spend API budget on countries someone actually targets. If a
     user adds NL to their preferences, the next cron picks it up; if
     the last user wanting CA leaves, CA stops being queried.
@@ -475,8 +353,8 @@ async def _collect_user_countries() -> list[str]:
 async def _collect_user_roles(limit: int = 8) -> list[str]:
     """Just target_roles + custom search_keywords (NO skills). Use for
     sources with a tight query budget where role-precision matters more
-    than coverage breadth — Adzuna fans out per-country so each query
-    multiplies cost, JSearch's RapidAPI free tier is rate-limited, etc.
+    than coverage breadth — JSearch's RapidAPI free tier is rate-limited,
+    and Firecrawl-backed scrapers cost credits per query.
 
     Returns the top `limit` keywords ordered by how many users want
     each one — high-overlap roles first so the budget covers the most
@@ -511,103 +389,7 @@ async def _collect_user_roles(limit: int = 8) -> list[str]:
     return top
 
 
-# ── Adzuna ───────────────────────────────────────────────────────────────────
-
-
-@celery_app.task(name="app.workers.discovery_tasks.run_adzuna_discovery")
-def run_adzuna_discovery():
-    """Run scheduled Adzuna API discovery across all target countries."""
-    _run_async(_run_adzuna_async())
-
-
-async def _run_adzuna_async():
-    """Adzuna's free tier rate-limits aggressively (~25 req/min). With
-    8 countries × N keywords × concurrent fan-out we'd hit that limit
-    instantly and start eating timeouts.
-
-    Constraints we enforce here:
-      - Top 4 most-overlapping user role keywords (no hardcoded set).
-        If 5 users want "Product Manager" and 1 wants "Marketing
-        Manager", we query both — but Product Manager runs first
-        because more users benefit. New roles enter automatically as
-        users join with new target_roles.
-      - Skips entirely when no users have roles set yet (don't waste
-        the API budget on generic searches that won't match anyone).
-      - Concurrent country fan-out throttled with a semaphore to 3 at
-        a time → at most 12 in-flight Adzuna calls (4 keywords × 3
-        countries). Stays inside their rate limit.
-    """
-    import asyncio
-    from app.services.discovery.adzuna_service import fetch_jobs, ADZUNA_COUNTRIES
-
-    # Everything driven by user data — no hardcoded countries OR keywords.
-    # Keywords: top 15 most-overlapping user target_roles.
-    # Countries: intersection of users' preferred_countries with Adzuna's
-    # supported set. If no one targets AU, AU never gets queried.
-    adzuna_keywords = await _collect_user_roles(limit=15)
-    if not adzuna_keywords:
-        logger.info(
-            "Adzuna: skipping — no users have target_roles set yet, "
-            "nothing to search for"
-        )
-        return
-
-    wanted_countries = await _collect_user_countries()
-    if not wanted_countries:
-        logger.info(
-            "Adzuna: skipping — no users have preferred_countries set yet, "
-            "nothing to search for"
-        )
-        return
-
-    # Adzuna only has endpoints for a subset of ISO codes (no NG, JP, etc).
-    # Intersect — anything missing here gets caught by other sources.
-    supported_iso = set(ADZUNA_COUNTRIES.keys())
-    runnable = [
-        (iso, ADZUNA_COUNTRIES[iso])
-        for iso in wanted_countries
-        if iso in supported_iso
-    ]
-    if not runnable:
-        logger.info(
-            "Adzuna: skipping — none of the user-wanted countries (%s) are "
-            "in Adzuna's supported set (%s). Other sources cover them.",
-            wanted_countries, sorted(supported_iso),
-        )
-        return
-
-    logger.info(
-        "Adzuna: querying %d countries × %d keywords = %d calls",
-        len(runnable), len(adzuna_keywords), len(runnable) * len(adzuna_keywords),
-    )
-
-    # Semaphore(2) keeps us safely under the ~25/min rate limit even on
-    # the largest user base configurations.
-    sem = asyncio.Semaphore(2)
-
-    async def run_country(iso: str, code: str) -> list[dict]:
-        async with sem:
-            try:
-                return await fetch_jobs(country_code=code, keywords=adzuna_keywords)
-            except Exception as e:
-                logger.error("Adzuna discovery failed for %s: %s", iso, e)
-                return []
-
-    batches = await asyncio.gather(*[
-        run_country(iso, code) for iso, code in runnable
-    ])
-    all_jobs = [j for batch in batches for j in batch]
-    if all_jobs:
-        await _ingest_raw_jobs(all_jobs)
-
-
 # ── RemoteOK ─────────────────────────────────────────────────────────────────
-
-
-@celery_app.task(name="app.workers.discovery_tasks.run_remoteok_discovery")
-def run_remoteok_discovery():
-    """Run scheduled RemoteOK API discovery."""
-    _run_async(_run_remoteok_async())
 
 
 async def _run_remoteok_async():
@@ -623,12 +405,6 @@ async def _run_remoteok_async():
 
 
 # ── Arbeitnow ────────────────────────────────────────────────────────────────
-
-
-@celery_app.task(name="app.workers.discovery_tasks.run_arbeitnow_discovery")
-def run_arbeitnow_discovery():
-    """Run scheduled Arbeitnow API discovery."""
-    _run_async(_run_arbeitnow_async())
 
 
 async def _run_arbeitnow_async():
@@ -647,12 +423,6 @@ async def _run_arbeitnow_async():
 
 
 # ── JSearch ──────────────────────────────────────────────────────────────────
-
-
-@celery_app.task(name="app.workers.discovery_tasks.run_jsearch_discovery")
-def run_jsearch_discovery():
-    """Run scheduled JSearch API discovery."""
-    _run_async(_run_jsearch_async())
 
 
 async def _run_jsearch_async():
@@ -679,12 +449,6 @@ async def _run_jsearch_async():
 # ── Himalayas (Nigeria-friendly remote board) ────────────────────────────────
 
 
-@celery_app.task(name="app.workers.discovery_tasks.run_himalayas_discovery")
-def run_himalayas_discovery():
-    """Run scheduled Himalayas API discovery — biased toward Nigeria-eligible roles."""
-    _run_async(_run_himalayas_async())
-
-
 async def _run_himalayas_async():
     from app.services.discovery.himalayas_service import fetch_jobs
 
@@ -698,12 +462,6 @@ async def _run_himalayas_async():
 
 
 # ── Remotive (Nigeria-friendly remote board) ─────────────────────────────────
-
-
-@celery_app.task(name="app.workers.discovery_tasks.run_remotive_discovery")
-def run_remotive_discovery():
-    """Run scheduled Remotive API discovery — filters to candidate-location-friendly roles."""
-    _run_async(_run_remotive_async())
 
 
 async def _run_remotive_async():
@@ -721,12 +479,6 @@ async def _run_remotive_async():
 # ── WeWorkRemotely (RSS) ─────────────────────────────────────────────────────
 
 
-@celery_app.task(name="app.workers.discovery_tasks.run_weworkremotely_discovery")
-def run_weworkremotely_discovery():
-    """Run scheduled WeWorkRemotely RSS discovery."""
-    _run_async(_run_weworkremotely_async())
-
-
 async def _run_weworkremotely_async():
     from app.services.discovery.weworkremotely_service import fetch_jobs
 
@@ -737,45 +489,6 @@ async def _run_weworkremotely_async():
             await _ingest_raw_jobs(jobs)
     except Exception as e:
         logger.error("WeWorkRemotely discovery failed: %s", e)
-
-
-# ── Crossover (Firecrawl scrape; small, Nigeria-friendly catalog) ────────────
-
-
-@celery_app.task(name="app.workers.discovery_tasks.run_crossover_discovery")
-def run_crossover_discovery():
-    """Run scheduled Crossover discovery via Firecrawl scraping."""
-    _run_async(_run_crossover_async())
-
-
-async def _run_crossover_async():
-    from app.services.discovery.crossover_service import fetch_jobs
-    from app.services.parsing.normalizer import normalize_url
-
-    keywords = await _collect_all_keywords()
-
-    # Pull URLs we already have for Crossover and skip them — saves Firecrawl
-    # credits since the catalog moves slowly.
-    skip_urls: set[str] = set()
-    async with create_worker_session()() as db:
-        result = await db.execute(
-            select(Job.job_url).join(JobSource, Job.source_id == JobSource.id)
-            .where(JobSource.name == "crossover", Job.job_url.is_not(None))
-        )
-        for row in result.all():
-            normalized = normalize_url(row[0])
-            if normalized:
-                skip_urls.add(normalized)
-
-    try:
-        jobs = await fetch_jobs(
-            keywords=set(keywords) if keywords else None,
-            skip_urls=skip_urls,
-        )
-        if jobs:
-            await _ingest_raw_jobs(jobs)
-    except Exception as e:
-        logger.error("Crossover discovery failed: %s", e)
 
 
 # ── Undutchables (NL specialist recruiter; Firecrawl scrape) ─────────────────
@@ -792,7 +505,7 @@ async def _run_undutchables_async():
     keywords = await _collect_all_keywords()
 
     # Skip URLs already in our DB so we don't re-spend credits on the
-    # same posting every run. Same pattern as Crossover.
+    # same posting every run.
     skip_urls: set[str] = set()
     async with create_worker_session()() as db:
         result = await db.execute(
@@ -845,12 +558,6 @@ async def _run_curated_async():
 # ── DailyRemote (Cloudflare-gated remote board, ld+json scraping) ────────────
 
 
-@celery_app.task(name="app.workers.discovery_tasks.run_dailyremote_discovery")
-def run_dailyremote_discovery():
-    """Run scheduled DailyRemote discovery — scrapes JobPosting JSON-LD."""
-    _run_async(_run_dailyremote_async())
-
-
 async def _run_dailyremote_async():
     from app.services.discovery.dailyremote_service import fetch_jobs
 
@@ -879,47 +586,6 @@ async def _run_workingnomads_async():
             await _ingest_raw_jobs(jobs)
     except Exception as e:
         logger.error("Working Nomads discovery failed: %s", e)
-
-
-# ── Arc.dev (JS SPA via Firecrawl, AI-focused categories) ─────────────────────
-
-
-async def _run_arcdev_async():
-    """Arc.dev curates remote jobs with deep category targeting at
-    /remote-jobs/<slug>. Categories visited are driven by the union of
-    all users' target_roles (mapped to Arc-known slugs). Skips entirely
-    when no user roles map to any Arc category — don't waste Firecrawl
-    credits searching for roles no user wants.
-    Costs ~30 Firecrawl credits/run when active.
-    """
-    from app.services.discovery.arcdev_service import fetch_jobs
-    from app.services.parsing.normalizer import normalize_url
-
-    user_roles = await _collect_user_roles(limit=20)
-    if not user_roles:
-        logger.info("Arc.dev: skipping — no users have target_roles set")
-        return
-
-    # Skip URLs already in our DB to save Firecrawl credits.
-    skip_urls: set[str] = set()
-    async with create_worker_session()() as db:
-        result = await db.execute(
-            select(Job.job_url).join(JobSource, Job.source_id == JobSource.id)
-            .where(JobSource.name == "arcdev", Job.job_url.is_not(None))
-        )
-        for row in result.all():
-            normalized = normalize_url(row[0])
-            if normalized:
-                skip_urls.add(normalized)
-    try:
-        jobs = await fetch_jobs(
-            user_roles=user_roles,
-            skip_urls=skip_urls,
-        )
-        if jobs:
-            await _ingest_raw_jobs(jobs)
-    except Exception as e:
-        logger.error("Arc.dev discovery failed: %s", e)
 
 
 # ── Wellfound (formerly AngelList — startups via Firecrawl) ──────────────────

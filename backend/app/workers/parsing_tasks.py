@@ -1,10 +1,8 @@
-import asyncio
 import logging
 from datetime import datetime, timezone
 
 from sqlalchemy import select
 
-from app.workers.celery_app import celery_app
 from app.core.database import create_worker_session
 from app.models.candidate import Resume, CandidateProfile, CandidateWorkHistory, CandidateSkill, CandidateEducation, CandidateBullet
 from app.services.parsing.resume_parser import parse_resume_content, build_bullets_from_parsed
@@ -12,30 +10,6 @@ from app.services.parsing.job_parser import parse_job_text
 from app.services.storage import download_file, object_path
 
 logger = logging.getLogger(__name__)
-
-
-def _run_async(coro):
-    """Run an async coroutine from a sync Celery task."""
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
-
-
-@celery_app.task(
-    name="app.workers.parsing_tasks.parse_resume",
-    bind=True,
-    max_retries=3,
-    default_retry_delay=30,
-)
-def parse_resume(self, resume_id: str, user_id: str):
-    """Parse an uploaded resume into structured profile data."""
-    try:
-        _run_async(_parse_resume_async(resume_id, user_id))
-    except Exception as exc:
-        logger.error("Resume parsing failed for %s: %s", resume_id, exc)
-        raise self.retry(exc=exc)
 
 
 async def _parse_resume_async(resume_id: str, user_id: str):
@@ -179,23 +153,8 @@ async def _parse_resume_async(resume_id: str, user_id: str):
         await db.commit()
         logger.info("Successfully parsed resume %s for user %s", resume_id, user_id)
 
-        # Embed the freshly-parsed profile for semantic scoring. Failures
-        # are non-fatal — the scorer falls back to the rule-based path if
-        # the embedding is missing. Done after commit so an embed error
-        # can't roll back the parse work.
-        from app.services.scoring.embedder import refresh_profile_embedding
-        if await refresh_profile_embedding(db, profile):
-            await db.commit()
-
-        # Note: rescore is handled by the caller (candidates.upload_resume)
-        # which awaits _batch_score_async directly. The scorer reads the
-        # embedding written above to drive the semantic component.
-
-
-@celery_app.task(name="app.workers.parsing_tasks.parse_job_from_url")
-def parse_job_from_url(url: str):
-    """Fetch a job page via Firecrawl and parse with Claude."""
-    _run_async(_parse_job_from_url_async(url))
+        # Rescoring is left to the caller: parse plus a full rescore can
+        # take longer than one request should.
 
 
 async def _parse_job_from_url_async(url: str):
@@ -246,12 +205,6 @@ async def _parse_job_from_url_async(url: str):
             job_url=url,
         )
         await db.commit()
-
-
-@celery_app.task(name="app.workers.parsing_tasks.parse_job_from_text")
-def parse_job_from_text(text: str, source: str = "manual"):
-    """Parse raw job text with Claude."""
-    _run_async(_parse_job_from_text_async(text, source))
 
 
 async def _parse_job_from_text_async(text: str, source: str) -> str | None:

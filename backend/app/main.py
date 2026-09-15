@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
 from app.api.v1 import (
-    auth, candidates, jobs, scoring, tailoring, tracking, analytics, webhooks, cron, feedback,
+    auth, candidates, jobs, tailoring, tracking, analytics, cron, feedback,
     invite_requests, auto_apply, ratings, job_alerts,
 )
 
@@ -29,11 +29,9 @@ def create_app() -> FastAPI:
     app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
     app.include_router(candidates.router, prefix="/api/v1/candidates", tags=["candidates"])
     app.include_router(jobs.router, prefix="/api/v1/jobs", tags=["jobs"])
-    app.include_router(scoring.router, prefix="/api/v1/scoring", tags=["scoring"])
     app.include_router(tailoring.router, prefix="/api/v1/tailoring", tags=["tailoring"])
     app.include_router(tracking.router, prefix="/api/v1/tracking", tags=["tracking"])
     app.include_router(analytics.router, prefix="/api/v1/analytics", tags=["analytics"])
-    app.include_router(webhooks.router, prefix="/api/webhooks", tags=["webhooks"])
     app.include_router(cron.router, prefix="/api/v1/cron", tags=["cron"])
     app.include_router(feedback.router, prefix="/api/v1/feedback", tags=["feedback"])
     app.include_router(invite_requests.router, prefix="/api/v1/invite-requests", tags=["invite-requests"])
@@ -44,11 +42,6 @@ def create_app() -> FastAPI:
     @app.get("/health")
     async def health_check():
         return {"status": "healthy", "version": "0.1.0"}
-
-    # /trigger-discovery removed — it was an unauthenticated public
-    # endpoint that called .delay() on Celery tasks (silent no-op in
-    # production). Admins can use /api/v1/auth/admin/run-discovery
-    # (authenticated, runs inline) or wait for the daily cron.
 
     @app.get("/health/db")
     async def db_health():

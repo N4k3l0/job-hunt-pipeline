@@ -43,8 +43,8 @@ _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 def _strip_html(text: str | None) -> str:
     """Working Nomads ships descriptions as HTML. We strip tags + unescape
-    entities so the raw_description column has plain text the embedder
-    and scorer can use directly."""
+    entities so the raw_description column has plain text the scorer can
+    use directly."""
     if not text:
         return ""
     return unescape(_HTML_TAG_RE.sub(" ", text)).strip()

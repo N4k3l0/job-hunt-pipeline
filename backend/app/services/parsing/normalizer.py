@@ -490,13 +490,11 @@ async def normalize_and_store_job(
         salary_min=parsed_data.get("salary_min"),
         salary_max=parsed_data.get("salary_max"),
         salary_currency=parsed_data.get("salary_currency"),
-        # Voyage embedder reads raw_description to build the job corpus.
         # If the LLM parse didn't produce a summary (heuristic fallback,
-        # short LLM response, etc.), fall back to the raw scraped content
-        # so the embedder always has something useful to work with.
-        # Without this fallback, heuristic-parsed jobs stored raw_description=NULL,
-        # never got embedded, fell back to rule-based scoring with empty
-        # entity arrays, scored near zero, and got hidden by min_score=50.
+        # short LLM response, etc.), fall back to the raw scraped content.
+        # Without it, heuristic-parsed jobs stored raw_description=NULL,
+        # scored near zero with empty entity arrays, and got hidden by
+        # min_score=50.
         raw_description=raw_description_value,
         raw_description_en=raw_description_en,
         raw_content=raw_content,
@@ -511,10 +509,7 @@ async def normalize_and_store_job(
     db.add(job)
     await db.flush()
 
-    # Create job entities — embedding gets backfilled in a batched pass
-    # AFTER ingest finishes (see _ingest_raw_jobs in discovery_tasks).
-    # Inline per-row embed would mean 1k+ separate API calls during a
-    # discovery batch, blowing Vercel's 60s function budget.
+    # Create job entities.
     entities = JobEntity(
         job_id=job.id,
         skills=parsed_data.get("required_skills", []) or [],

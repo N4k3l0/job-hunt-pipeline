@@ -267,74 +267,6 @@ function RadarRow({
   );
 }
 
-function ActivityFeed({
-  lastSweep,
-  topMatchCount,
-  reviewReady,
-  applicationsSent,
-}: {
-  lastSweep: string | null | undefined;
-  topMatchCount: number;
-  reviewReady: number;
-  applicationsSent: number;
-}) {
-  // Built from analytics + last-sweep timestamp. A richer feed would need a
-  // dedicated activity endpoint; this is enough to be useful today.
-  const items: Array<{ when: string; kind: string; what: string; target?: string; tone?: "accent" | "muted" }> = [];
-  if (lastSweep) {
-    items.push({
-      when: formatSweepTime(lastSweep),
-      kind: "Daily sweep",
-      what: `${topMatchCount} new at 80+`,
-      tone: "accent",
-    });
-  }
-  if (reviewReady > 0) {
-    items.push({
-      when: "today",
-      kind: "Tailored",
-      what: `${reviewReady} application${reviewReady === 1 ? "" : "s"} ready to review`,
-      tone: "accent",
-    });
-  }
-  if (applicationsSent > 0) {
-    items.push({
-      when: "this week",
-      kind: "Sent",
-      what: `${applicationsSent} application${applicationsSent === 1 ? "" : "s"} total`,
-      tone: "muted",
-    });
-  }
-  if (items.length === 0) {
-    items.push({ when: "—", kind: "Activity", what: "Nothing yet. Check back after the next sweep." });
-  }
-
-  return (
-    <section>
-      <div className="ds-mono dash-overline">RECENT ACTIVITY · 24H</div>
-      <h2 className="dash-h2">What&apos;s happened since yesterday.</h2>
-      <div className="dash-activity">
-        {items.map((it, i) => (
-          <div key={i} className="dash-activity-row">
-            <span className="ds-mono dash-activity-when">{it.when}</span>
-            <span className={`dash-activity-dot dash-activity-dot-${it.tone ?? "dim"}`} />
-            <div className="dash-activity-text">
-              <span className="dash-activity-kind">{it.kind}</span>
-              <span className="dash-activity-what">{it.what}</span>
-              {it.target && (
-                <>
-                  <span className="dash-sep">·</span>
-                  <span className="dash-activity-target">{it.target}</span>
-                </>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
 function WaitingCard({ reviewReady, followUps }: { reviewReady: number; followUps: number }) {
   const total = reviewReady + followUps;
   return (
@@ -374,34 +306,6 @@ function WaitingCard({ reviewReady, followUps }: { reviewReady: number; followUp
           </div>
         )}
       </div>
-    </section>
-  );
-}
-
-function SweepStatusCard({ lastSweep }: { lastSweep: string | null | undefined }) {
-  return (
-    <section className="dash-card dash-sweep">
-      <div className="dash-sweep-head">
-        <span className="dash-sweep-dot" />
-        <h3 className="dash-h3">Sweep status</h3>
-      </div>
-      <div className="dash-sweep-rows">
-        <div className="dash-sweep-row">
-          <span className="dash-sweep-key">Last sweep</span>
-          <span className="ds-mono dash-sweep-val">
-            {lastSweep ? formatSweepFull(lastSweep) : "—"}
-          </span>
-        </div>
-        <div className="dash-sweep-row">
-          <span className="dash-sweep-key">Next sweep</span>
-          <span className="ds-mono dash-sweep-val dash-sweep-val-dim">06:00 UTC · daily</span>
-        </div>
-        <div className="dash-sweep-row">
-          <span className="dash-sweep-key">Sources tracked</span>
-          <span className="ds-mono dash-sweep-val">curated boards + careers pages</span>
-        </div>
-      </div>
-      <div className="dash-sweep-foot">All systems nominal. Matcher v2 calibrated.</div>
     </section>
   );
 }
@@ -450,18 +354,6 @@ function formatSweepTime(iso: string | null | undefined): string {
   const hh = String(d.getUTCHours()).padStart(2, "0");
   const mm = String(d.getUTCMinutes()).padStart(2, "0");
   return `${hh}:${mm} UTC`;
-}
-
-function formatSweepFull(iso: string): string {
-  const d = new Date(iso);
-  const sweep = formatSweepTime(iso);
-  const today = new Date();
-  const sameDay = d.toDateString() === today.toDateString();
-  if (sameDay) return `${sweep} · today`;
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
-  if (d.toDateString() === yesterday.toDateString()) return `${sweep} · yesterday`;
-  return `${sweep} · ${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
 }
 
 function formatNumber(n: number | null | undefined): string {

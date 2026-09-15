@@ -128,7 +128,7 @@ function SetupChecklist({
 
 export default function ProfilePage() {
   // Profile data
-  const { data: profile, isLoading: profileLoading } = useProfile();
+  const { data: profile } = useProfile();
   const createProfile = useCreateProfile();
   const updateProfile = useUpdateProfile();
   const { data: currentUser } = useCurrentUser();

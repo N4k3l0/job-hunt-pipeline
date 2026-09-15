@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.job import Job
-from app.models.candidate import CandidateProfile, Resume
+from app.models.candidate import CandidateProfile
 from app.models.scoring import JobScore
 from app.llm.client import llm_client, MODELS
 from app.llm.prompts.deep_score import (
@@ -73,14 +73,6 @@ async def run_deep_score(
         raise ValueError(f"No profile found for user {user_id}")
 
     # Load most recent resume for additional context
-    resume_result = await db.execute(
-        select(Resume)
-        .where(Resume.user_id == user_id)
-        .order_by(Resume.created_at.desc())
-        .limit(1)
-    )
-    resume = resume_result.scalar_one_or_none()
-
     # Build prompt context
     work_history_text = _format_work_history(profile.work_history)
     skills_text = _format_skills(profile.skills)

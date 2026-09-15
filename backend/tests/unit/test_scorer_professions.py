@@ -20,8 +20,7 @@ def _profile(roles, skills, titles, domain_tags=None, remote="any"):
              "skills": [], "domain_tags": domain_tags or []}
             for i, t in enumerate(titles)
         ],
-        "embedding": None,
-    }
+        }
 
 
 def _job(title, skills, description="", seniority=None, remote_type="onsite"):

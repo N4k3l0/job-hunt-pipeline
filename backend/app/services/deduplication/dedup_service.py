@@ -130,25 +130,3 @@ async def check_duplicate(
 
     return False, None
 
-
-async def link_duplicate(
-    db: AsyncSession,
-    job_id: str,
-    duplicate_of_id: str,
-    confidence: float,
-    method: str,
-):
-    """Record a duplicate relationship between two jobs."""
-    dup = JobDuplicate(
-        job_id=job_id,
-        duplicate_of_job_id=duplicate_of_id,
-        confidence=confidence,
-        method=method,
-    )
-    db.add(dup)
-
-    # Update the duplicate job's status
-    result = await db.execute(select(Job).where(Job.id == job_id))
-    job = result.scalar_one_or_none()
-    if job:
-        job.status = "duplicate"

@@ -207,27 +207,6 @@ async def list_users(admin: AdminUser, db: DbSession):
     ]
 
 
-@router.put("/users/{user_id}/role")
-async def update_user_role(
-    user_id: str,
-    admin: AdminUser,
-    db: DbSession,
-    role: str = "user",
-):
-    """Update a user's role (admin only)."""
-    if role not in ("admin", "user"):
-        raise HTTPException(status_code=400, detail="Role must be 'admin' or 'user'")
-
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    user.role = role
-    await db.commit()
-    return {"status": "updated", "user_id": user_id, "role": role}
-
-
 @router.post("/admin/run-discovery")
 async def admin_run_discovery(admin: AdminUser):
     """Kick off every discovery source + a quick-score pass right now.
@@ -349,148 +328,6 @@ async def admin_stale_jobs_cleanup(
     return {"expired": result.rowcount, "days": days}
 
 
-@router.post("/admin/stale-jobs/cleanup-by-source")
-async def admin_stale_jobs_cleanup_by_source(
-    admin: AdminUser,
-    db: DbSession,
-    source: str,
-    days: int = 14,
-):
-    """Source-specific age cleanup. Adzuna's free API only serves recent
-    listings and their postings rotate within ~2–3 weeks, so anything
-    we ingested via Adzuna more than 14 days ago is almost certainly
-    gone from the underlying employer. Same pattern works for any
-    aggregator that anti-bots us (we can't verify their URLs).
-
-    Same safety guarantees as the generic cleanup: never touches jobs
-    in the applied / interviewing / offered / archived buckets.
-    """
-    from sqlalchemy import update, select, func as sa_func, text
-    from app.models.job import Job, JobSource
-
-    pre_applied = ("raw", "normalized", "deduplicated", "enriched",
-                   "scored", "discovered", "shortlisted")
-
-    src_row = (await db.execute(
-        select(JobSource.id).where(JobSource.name == source)
-    )).first()
-    if not src_row:
-        raise HTTPException(status_code=404, detail=f"Source '{source}' not found")
-    source_id = src_row[0]
-
-    stmt = (
-        update(Job)
-        .where(
-            Job.source_id == source_id,
-            Job.status.in_(pre_applied),
-            _not_tracked_by_any_user(),
-            Job.discovered_at < sa_func.now() - text(f"interval '{int(days)} days'"),
-        )
-        .values(status="expired")
-    )
-    result = await db.execute(stmt)
-    await db.commit()
-    return {"expired": result.rowcount, "source": source, "days": days}
-
-
-@router.post("/admin/embeddings/test")
-async def admin_embeddings_test(admin: AdminUser):
-    """Embeds a single short string and returns the result so an
-    operator can confirm VOYAGE_API_KEY is set + the network reaches
-    api.voyageai.com. Surfaces the real error instead of the silent
-    'backfill returned 0' state."""
-    from app.services.scoring.embedder import embed_one
-    try:
-        vec = await embed_one("test connectivity to voyage", input_type="document")
-    except Exception as e:  # noqa: BLE001
-        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
-    if vec is None:
-        return {"ok": False, "error": "VOYAGE_API_KEY not configured (env var missing or empty)"}
-    return {"ok": True, "dim": len(vec), "sample": vec[:5]}
-
-
-@router.post("/admin/embeddings/backfill")
-async def admin_embeddings_backfill(
-    admin: AdminUser,
-    db: DbSession,
-    limit: int = 20,
-):
-    """Embed jobs that don't have a semantic vector yet.
-
-    Internally loops up to a 45s wall-clock budget so a single button-
-    click can clear hundreds of rows without the frontend having to
-    chain. Each iteration embeds `limit` jobs in one batched Voyage
-    call + one batched UPDATE, so the per-iteration cost is mostly
-    Voyage latency (~3-5s) rather than DB round-trips.
-
-    Previous design did one batch per HTTP call and asked the frontend
-    to chain — that paid Vercel cold-start (~3-5s) + connection setup
-    (~500ms) on every call. By batch 3 the third invocation hit a
-    transient slow Voyage response and busted the 60s ceiling.
-    """
-    import asyncio
-    import time
-    from app.workers.discovery_tasks import _embed_unembedded_jobs
-
-    bounded = min(max(int(limit), 1), 50)
-    started = time.monotonic()
-    BUDGET_S = 40.0  # leave 20s buffer under Vercel's 60s ceiling
-    PER_ITER_TIMEOUT_S = 25.0  # cap any one iteration
-
-    total_embedded = 0
-    last_error: str | None = None
-    iters = 0
-    while time.monotonic() - started < BUDGET_S:
-        iters += 1
-        try:
-            # asyncio.wait_for so a single hung Voyage call can't burn
-            # the whole budget — partial progress so far is already
-            # committed by _embed_unembedded_jobs per call.
-            embedded = await asyncio.wait_for(
-                _embed_unembedded_jobs(limit=bounded),
-                timeout=PER_ITER_TIMEOUT_S,
-            )
-        except asyncio.TimeoutError:
-            logger.warning("Backfill iter %d timed out after %ds", iters, PER_ITER_TIMEOUT_S)
-            last_error = f"iteration {iters} exceeded {PER_ITER_TIMEOUT_S}s"
-            break
-        except Exception as e:  # noqa: BLE001
-            logger.exception("Embeddings backfill iter %d failed", iters)
-            last_error = f"{type(e).__name__}: {e}"
-            break
-        if embedded == 0:
-            break  # nothing left to embed
-        total_embedded += embedded
-        # Stop early if we did less than the requested limit (queue drained).
-        if embedded < bounded:
-            break
-        await asyncio.sleep(0.3)
-
-    # Count remaining unembedded rows so the caller knows whether to
-    # click again.
-    from sqlalchemy import select, func
-    from app.models.job import JobEntity
-    remaining_q = (
-        select(func.count(JobEntity.id)).where(JobEntity.embedding.is_(None))
-    )
-    remaining = (await db.execute(remaining_q)).scalar() or 0
-    elapsed = time.monotonic() - started
-
-    if last_error and total_embedded == 0:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Backfill failed: {last_error}",
-        )
-    return {
-        "embedded": total_embedded,
-        "remaining": remaining,
-        "has_more": remaining > 0,
-        "elapsed_s": round(elapsed, 1),
-        "iterations": iters,
-        "last_error": last_error,
-    }
-
-
 @router.get("/admin/debug/source-health")
 async def admin_source_health(admin: AdminUser):
     """Ping every external job source and report whether it's actually
@@ -510,11 +347,6 @@ async def admin_source_health(admin: AdminUser):
     # Tuples of (display_name, callable that returns a list of raw job dicts,
     # required env var to flag if missing).
     probes: list[tuple[str, callable, str | None]] = []
-
-    async def _probe_adzuna():
-        from app.services.discovery.adzuna_service import fetch_jobs
-        return await fetch_jobs(country_code="gb", keywords=["ai engineer"])
-    probes.append(("adzuna", _probe_adzuna, "adzuna_app_key"))
 
     async def _probe_jsearch():
         from app.services.discovery.jsearch_service import fetch_jobs
@@ -550,11 +382,6 @@ async def admin_source_health(admin: AdminUser):
         from app.services.discovery.dailyremote_service import fetch_jobs
         return await fetch_jobs(keywords={"ai", "engineer"})
     probes.append(("dailyremote", _probe_dailyremote, "firecrawl_api_key"))
-
-    # Crossover removed from probe + cron: verified 2026-05 that
-    # crossover.com/jobs is now a JS-rendered SPA — raw HTML has zero
-    # job links. Firecrawl might render it correctly but unverified.
-    # Lives in /discover-slow as a manual escape hatch.
 
     async def _probe_undutchables():
         from app.services.discovery.undutchables_service import fetch_jobs
@@ -720,7 +547,6 @@ async def admin_backfill_description_translations(
     translated = 0
     failed = 0
     skipped_english = 0
-    detected_lang_only = 0
     cost_estimate_usd = 0.0
 
     rows = (await db.execute(
@@ -842,64 +668,6 @@ async def admin_backfill_job_countries(admin: AdminUser, db: DbSession, limit: i
         "by_country": dict(sorted(by_country.items(), key=lambda kv: -kv[1])),
         "more_to_do": len(rows) >= limit,
     }
-
-
-@router.post("/admin/fix/scrub-asset-apply-urls")
-async def admin_scrub_asset_apply_urls(admin: AdminUser, db: DbSession):
-    """Wipe Job.apply_url for any row where the cached value points at a
-    static asset (font / css / image) instead of a job posting.
-
-    Background: the resolver's body-scan accidentally returned font and
-    asset URLs (e.g. metaboldlf-webfont-2017.woff) before the
-    _looks_like_asset filter shipped. The next click on those jobs would
-    re-trigger the popup-downloads-a-font bug. Resetting apply_url here
-    forces the resolver to run again with the fix in place.
-
-    Safe to re-run: only NULLs out rows that match the asset pattern.
-    """
-    from sqlalchemy import text
-    # Use Postgres regex to find apply_url ending in obvious asset
-    # extensions OR containing asset-directory hints.
-    result = await db.execute(text(r"""
-        UPDATE jobs
-           SET apply_url = NULL
-         WHERE apply_url IS NOT NULL
-           AND (
-                apply_url ~* '\.(woff2?|ttf|otf|eot|css|js|mjs|map|png|jpe?g|gif|svg|ico|webp|avif|pdf|zip|gz|xml|json|txt|mp4|webm|mp3|wav)(\?.*)?$'
-                OR apply_url ~* '/(assets|static|fonts|_next|images|img|css|js|build|dist|public|media)/'
-           )
-        RETURNING id
-    """))
-    rows = result.fetchall()
-    await db.commit()
-    return {"scrubbed": len(rows)}
-
-
-@router.post("/admin/fix/raw-description")
-async def admin_fix_raw_description(
-    admin: AdminUser,
-    db: DbSession,
-):
-    """One-shot: copy raw_content → raw_description for any job where
-    raw_description is empty. Fixes jobs that landed via the heuristic
-    parser before the normalizer fallback was shipped — their
-    raw_description was NULL, the Voyage embedder couldn't ingest them,
-    they sat unscored and invisible in the inbox.
-
-    Safe to re-run: only flips rows where raw_description IS NULL.
-    """
-    from sqlalchemy import text
-    result = await db.execute(text("""
-        UPDATE jobs
-           SET raw_description = LEFT(raw_content, 4000)
-         WHERE raw_description IS NULL
-           AND raw_content IS NOT NULL
-           AND length(raw_content) > 50
-        RETURNING id
-    """))
-    rows = result.fetchall()
-    await db.commit()
-    return {"backfilled": len(rows)}
 
 
 @router.get("/admin/debug/country-filter")

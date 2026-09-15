@@ -6,7 +6,6 @@ from sqlalchemy import select, func, and_, or_
 from app.api.deps import CurrentUserId, DbSession
 from app.models.job import Job, JobEntity, JobSource
 from app.models.job_state import UserJobState
-from app.models.scoring import JobScore
 from app.models.tracking import ApplicationTracking
 from app.models.tailoring import TailoredApplication
 from app.models.candidate import CandidateProfile

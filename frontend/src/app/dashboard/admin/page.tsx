@@ -12,7 +12,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import {
   Tabs,
   TabsList,
@@ -38,8 +37,6 @@ import {
   useStaleJobsCleanup,
   useStaleJobsVerifyBatch,
   useStaleJobsVerifyDebug,
-  useCleanupBySource,
-  useEmbeddingsBackfill,
 } from "@/hooks/use-api";
 
 interface UserRecord {
@@ -50,7 +47,6 @@ interface UserRecord {
 }
 
 export default function AdminPage() {
-  const runDiscovery = useRunDiscovery();
   const [email, setEmail] = useState("");
   const [inviteLoading, setInviteLoading] = useState(false);
   const [inviteResult, setInviteResult] = useState<{
@@ -264,10 +260,8 @@ export default function AdminPage() {
             Maintenance &amp; diagnostics
           </CardTitle>
           <CardDescription>
-            Run discovery on demand, top up embeddings, diagnose the
-            country filter, or clean out stale jobs. Each tab is the
-            same tooling you had before — just collapsed so the page
-            doesn&apos;t scroll forever.
+            Run discovery on demand, diagnose the country filter, or clean
+            out stale jobs.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -276,10 +270,6 @@ export default function AdminPage() {
               <TabsTrigger value="discovery">
                 <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
                 Discovery
-              </TabsTrigger>
-              <TabsTrigger value="embeddings">
-                <Sparkles className="h-3.5 w-3.5 mr-1.5" />
-                Embeddings
               </TabsTrigger>
               <TabsTrigger value="diagnostics">
                 <AlertCircle className="h-3.5 w-3.5 mr-1.5" />
@@ -293,9 +283,6 @@ export default function AdminPage() {
 
             <TabsContent value="discovery">
               <RunDiscoveryPanel />
-            </TabsContent>
-            <TabsContent value="embeddings">
-              <EmbeddingsBackfillCard />
             </TabsContent>
             <TabsContent value="diagnostics">
               <CountryFilterDebugCard />
@@ -1082,7 +1069,6 @@ function StaleJobsCard() {
   const cleanup = useStaleJobsCleanup();
   const verify = useStaleJobsVerifyBatch();
   const debug = useStaleJobsVerifyDebug();
-  const cleanupSource = useCleanupBySource();
 
   // Verify mode runs in batches of 100 jobs each so we stay under
   // Vercel's 60s function timeout. Auto-chain until has_more=false so
@@ -1238,40 +1224,6 @@ function StaleJobsCard() {
           )}
         </div>
 
-        {/* ── Anti-bot source cleanup ──────────────────────────── */}
-        <div className="space-y-3 rounded-lg border border-amber-500/15 bg-amber-500/[0.02] p-4">
-          <div className="flex items-start justify-between gap-3 flex-wrap">
-            <div>
-              <p className="text-sm font-semibold flex items-center gap-2">
-                <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-400" />
-                Clean Adzuna jobs older than 14 days
-              </p>
-              <p className="text-xs text-muted-foreground mt-0.5 max-w-md">
-                Adzuna&apos;s API only serves recent listings (postings rotate within ~2–3 weeks)
-                AND their redirect URLs anti-bot our verifier with HTTP 429. We can&apos;t verify them,
-                so we age-cleanup with a tighter 14-day cutoff just for this source.
-              </p>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => cleanupSource.mutate({ source: "adzuna", days: 14 })}
-              disabled={cleanupSource.isPending}
-            >
-              {cleanupSource.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-              {cleanupSource.isPending ? "Cleaning…" : "Expire Adzuna >14d"}
-            </Button>
-          </div>
-          {cleanupSource.isSuccess && cleanupSource.data && (
-            <p className="text-xs text-emerald-400">
-              Expired {cleanupSource.data.expired} {cleanupSource.data.source} jobs older than {cleanupSource.data.days} days.
-            </p>
-          )}
-          {cleanupSource.isError && (
-            <p className="text-xs text-destructive">{cleanupSource.error?.message}</p>
-          )}
-        </div>
-
         {/* ── Time-based cleanup (legacy / quick) ───────────────── */}
         <div className="space-y-3 rounded-lg border border-white/[0.06] p-4">
           <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -1330,185 +1282,6 @@ function StaleJobsCard() {
     </div>
   );
 }
-
-/**
- * Bulk-embed historical jobs that don't yet have a semantic vector.
- * Used as a one-shot after the embeddings migration runs against prod —
- * new jobs ingested after that point get embedded inline during
- * discovery, so this button only matters during the rollout window.
- *
- * Auto-chains batches of 200 until has_more=false, mirroring the
- * verify-URLs flow elsewhere on this page.
- */
-function EmbeddingsBackfillCard() {
-  const backfill = useEmbeddingsBackfill();
-  const [totals, setTotals] = useState<{
-    embedded: number; remaining: number;
-  } | null>(null);
-  const [running, setRunning] = useState(false);
-  const [done, setDone] = useState(false);
-
-  const [runError, setRunError] = useState<string | null>(null);
-
-  const runBackfill = async () => {
-    setRunning(true);
-    setDone(false);
-    setRunError(null);
-    setTotals({ embedded: 0, remaining: 0 });
-    // 200 batches × 10 = 2 k jobs/run — covers the catalogue with
-    // headroom. Was 50/batch but kept timing out the Vercel function
-    // (60s Hobby ceiling) on cold start + Supabase pooler latency +
-    // Voyage round-trip. 10 keeps each call under ~15s even cold.
-    let safetyCap = 200;
-    while (safetyCap-- > 0) {
-      try {
-        const batch = await backfill.mutateAsync({ limit: 10 });
-        setTotals((prev) => ({
-          embedded: (prev?.embedded ?? 0) + batch.embedded,
-          remaining: batch.remaining,
-        }));
-        if (!batch.has_more || batch.embedded === 0) break;
-      } catch (err: any) {
-        // Don't swallow — show the real failure so we can debug
-        // VOYAGE_API_KEY / pgvector / network issues.
-        setRunError(err?.message || String(err) || "Unknown error");
-        break;
-      }
-    }
-    setRunning(false);
-    setDone(true);
-  };
-
-  return (
-    <div className="space-y-3">
-      <p className="text-sm text-muted-foreground leading-relaxed">
-        One-shot setup for the semantic scorer. Embeds every job in your
-        catalogue that doesn&apos;t yet have a vector — needed once after
-        the migration runs. New jobs ingested after this get embedded
-        inline during discovery; this button only matters for the
-        historical catalogue. Test Voyage first if Voyage is freshly
-        configured. Fix orphan descriptions if you bulk-imported before
-        the heuristic-parser fallback shipped.
-      </p>
-        <div className="flex flex-wrap items-center gap-3">
-          <Button onClick={runBackfill} disabled={running}>
-            {running ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Embedding…
-              </>
-            ) : (
-              <>
-                <Sparkles className="h-4 w-4" />
-                {done ? "Run again" : "Run backfill"}
-              </>
-            )}
-          </Button>
-          {totals && (running || done) && (
-            <div className="grid grid-cols-2 gap-2 text-xs font-mono">
-              <Stat label="Embedded" value={totals.embedded} tone="ok" />
-              <Stat label="Remaining" value={totals.remaining} tone="muted" />
-            </div>
-          )}
-        </div>
-        {runError && (
-          <div className="rounded-md border border-destructive/30 bg-destructive/[0.06] p-3 text-xs">
-            <p className="font-semibold text-destructive mb-1 flex items-center gap-1.5">
-              <AlertCircle className="h-3.5 w-3.5" /> Backfill failed
-            </p>
-            <pre className="whitespace-pre-wrap break-words text-destructive/80 font-mono">
-              {runError}
-            </pre>
-            {/* "Failed to fetch" is the browser's generic message when
-                the response never arrives — almost always a Vercel 60s
-                function timeout, not a Voyage / pgvector issue. */}
-            {/Failed to fetch|NetworkError|timeout/i.test(runError) ? (
-              <p className="text-muted-foreground mt-2 leading-relaxed">
-                <span className="text-amber-300">Likely a Vercel function timeout</span> — the
-                batch is running too long. Voyage and pgvector are probably fine
-                (Test Voyage already confirmed). The button has been reduced
-                to batches of 10; clicking <span className="text-foreground">Run again</span> should now
-                succeed and chain through the catalogue.
-              </p>
-            ) : (
-              <p className="text-muted-foreground mt-2 leading-relaxed">
-                Usually one of: VOYAGE_API_KEY not set / wrong / expired,
-                network timeout to Voyage, or pgvector package not installed
-                on the Vercel build. Click <span className="text-foreground">Test Voyage</span> below to ping the embedding API directly and confirm.
-              </p>
-            )}
-          </div>
-        )}
-        {!runError && totals && done && (
-          <p className="text-xs text-muted-foreground">
-            {totals.remaining === 0 && totals.embedded > 0
-              ? "All jobs in the catalogue now have semantic vectors. The new scorer is fully active."
-              : totals.embedded > 0
-                ? `Embedded ${totals.embedded} jobs · ${totals.remaining} still need vectors (likely API rate limit — click Run again).`
-                : "Backfill returned without embedding any jobs. Check Test Voyage below."}
-          </p>
-        )}
-
-        <VoyageTestButton />
-        <RawDescriptionFixButton />
-    </div>
-  );
-}
-
-
-function RawDescriptionFixButton() {
-  const [running, setRunning] = useState(false);
-  const [result, setResult] = useState<{ ok: boolean; detail: string } | null>(null);
-
-  const run = async () => {
-    setRunning(true);
-    setResult(null);
-    try {
-      const r = await api.post<{ backfilled: number }>(
-        "/api/v1/auth/admin/fix/raw-description"
-      );
-      setResult({
-        ok: true,
-        detail:
-          r.backfilled > 0
-            ? `Fixed ${r.backfilled} job(s) — their raw_description was NULL. They can now be embedded.`
-            : "No rows needed fixing. All jobs already have raw_description populated.",
-      });
-    } catch (e: any) {
-      setResult({ ok: false, detail: e?.message || String(e) });
-    } finally {
-      setRunning(false);
-    }
-  };
-
-  return (
-    <div className="pt-3 border-t border-white/[0.04] space-y-2">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <p className="text-xs text-muted-foreground">
-          Copy raw_content → raw_description for jobs the heuristic parser
-          stored before the fallback fix. Run this before backfilling
-          embeddings.
-        </p>
-        <Button variant="ghost" size="sm" onClick={run} disabled={running}>
-          {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-          Fix orphan descriptions
-        </Button>
-      </div>
-      {result && (
-        <div
-          className={
-            result.ok
-              ? "rounded-md border border-emerald-500/30 bg-emerald-500/[0.06] p-2.5 text-xs text-emerald-300"
-              : "rounded-md border border-destructive/30 bg-destructive/[0.06] p-2.5 text-xs text-destructive font-mono whitespace-pre-wrap break-words"
-          }
-        >
-          {result.detail}
-        </div>
-      )}
-    </div>
-  );
-}
-
 
 interface CountryFilterDebugRow {
   job_id: string;
@@ -1707,59 +1480,6 @@ function DebugRow({ row }: { row: CountryFilterDebugRow }) {
           </span></>
         )}
       </div>
-    </div>
-  );
-}
-
-
-function VoyageTestButton() {
-  const [pinging, setPinging] = useState(false);
-  const [result, setResult] = useState<{ ok: boolean; detail: string } | null>(null);
-
-  const ping = async () => {
-    setPinging(true);
-    setResult(null);
-    try {
-      const r = await api.post<{ ok: boolean; dim?: number; sample?: number[]; error?: string }>(
-        "/api/v1/auth/admin/embeddings/test"
-      );
-      if (r.ok) {
-        setResult({
-          ok: true,
-          detail: `Voyage responded — vector dim ${r.dim}, first 3 floats: ${(r.sample ?? []).slice(0, 3).map(n => n.toFixed(3)).join(", ")}`,
-        });
-      } else {
-        setResult({ ok: false, detail: r.error || "Unknown failure" });
-      }
-    } catch (e: any) {
-      setResult({ ok: false, detail: e?.message || String(e) });
-    } finally {
-      setPinging(false);
-    }
-  };
-
-  return (
-    <div className="pt-3 border-t border-white/[0.04] space-y-2">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <p className="text-xs text-muted-foreground">
-          Embeds one test string. Confirms VOYAGE_API_KEY + network reach in &lt;5 s.
-        </p>
-        <Button variant="ghost" size="sm" onClick={ping} disabled={pinging}>
-          {pinging ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-          Test Voyage
-        </Button>
-      </div>
-      {result && (
-        <div
-          className={
-            result.ok
-              ? "rounded-md border border-emerald-500/30 bg-emerald-500/[0.06] p-2.5 text-xs text-emerald-300"
-              : "rounded-md border border-destructive/30 bg-destructive/[0.06] p-2.5 text-xs text-destructive font-mono whitespace-pre-wrap break-words"
-          }
-        >
-          {result.detail}
-        </div>
-      )}
     </div>
   );
 }

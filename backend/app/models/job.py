@@ -2,15 +2,8 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import String, Text, Integer, DateTime, ForeignKey, Float, Index, func
-from sqlalchemy.dialects.postgresql import UUID, JSONB, ARRAY
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-
-try:
-    from pgvector.sqlalchemy import Vector
-    _HAS_PGVECTOR = True
-except Exception:  # pragma: no cover
-    Vector = None  # type: ignore
-    _HAS_PGVECTOR = False
 
 from app.core.database import Base
 
@@ -22,7 +15,7 @@ class JobSource(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     name: Mapped[str] = mapped_column(String(255), unique=True)
-    source_type: Mapped[str] = mapped_column(String(50))  # apify, api, manual
+    source_type: Mapped[str] = mapped_column(String(50))  # api, scraper, email, manual
     config: Mapped[dict | None] = mapped_column(JSONB)
     is_active: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -124,11 +117,6 @@ class JobEntity(Base):
     eligible_countries: Mapped[list[str] | None] = mapped_column(JSONB)
     # Set when the extraction model has read the posting.
     enriched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    # Semantic-scoring embedding — 512-dim Voyage (voyage-3-lite).
-    # Populated at ingest, used by the new scorer for cosine similarity
-    # against the candidate profile vector.
-    if _HAS_PGVECTOR:
-        embedding: Mapped[list[float] | None] = mapped_column(Vector(512), nullable=True)
 
     job: Mapped["Job"] = relationship(back_populates="entities")
 

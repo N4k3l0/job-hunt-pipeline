@@ -10,7 +10,6 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUserId, DbSession
 from app.models.tracking import ApplicationTracking, PipelineEvent
-from app.models.job import Job
 
 router = APIRouter()
 

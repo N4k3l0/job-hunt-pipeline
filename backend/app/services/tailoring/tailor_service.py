@@ -1,13 +1,12 @@
 import logging
 import re
-from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.job import Job
-from app.models.candidate import CandidateProfile, Resume, CandidateBullet, SampleApplication
+from app.models.candidate import CandidateProfile, Resume, SampleApplication
 from app.models.tailoring import TailoredApplication
 from app.llm.client import llm_client
 from app.llm.prompts.tailor_resume import (
