@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from sqlalchemy import exists, or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import defer, selectinload
 
 from app.core.database import create_worker_session
@@ -25,10 +25,6 @@ from app.llm.client import llm_client
 from app.llm.prompts.enrich_job import RECORD_TOOL, SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
 from app.models.job import Job, JobEntity
 from app.models.scoring import JobScore
-
-# The inbox's default minimum score: jobs at or above it for any user are
-# read first, so reading reaches the jobs people actually see.
-INBOX_MIN_SCORE = 50
 
 logger = logging.getLogger(__name__)
 
@@ -204,13 +200,22 @@ async def enrich_pending_jobs(
     per_call_timeout_seconds: float = 30.0,
 ) -> EnrichmentResult:
     """Enrich up to `limit` recent visible jobs that haven't been read yet:
-    jobs in some user's inbox (score at least INBOX_MIN_SCORE) first, then
-    newest first. Stops starting new model calls once the time budget is
-    spent."""
+    the best match for any user first, then newest first. Reading tells
+    the scorer a job's level and skills, and an unread job's score stays low
+    while they're unknown, so the most promising jobs go first rather than
+    only those already in an inbox. Stops starting new model calls once the
+    time budget is spent."""
     started = time.monotonic()
     result = EnrichmentResult()
     cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
-    in_an_inbox = exists().where(JobScore.job_id == Job.id, JobScore.overall_fit >= INBOX_MIN_SCORE)
+    # Looked up per job through ix_job_scores_job_fit; aggregating every
+    # score first took ~3s on the production database.
+    best_score = (
+        select(func.max(JobScore.overall_fit))
+        .where(JobScore.job_id == Job.id)
+        .correlate(Job)
+        .scalar_subquery()
+    )
 
     async with create_worker_session()() as db:
         rows = (await db.execute(
@@ -221,7 +226,7 @@ async def enrich_pending_jobs(
                 Job.discovered_at >= cutoff,
                 or_(JobEntity.id.is_(None), JobEntity.enriched_at.is_(None)),
             )
-            .order_by(in_an_inbox.desc(), Job.discovered_at.desc())
+            .order_by(best_score.desc().nulls_last(), Job.discovered_at.desc())
             .limit(limit)
             .options(defer(Job.raw_content), selectinload(Job.entities))
         )).scalars().all()

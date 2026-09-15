@@ -75,7 +75,7 @@ async def _score_job_async(job_id: str, user_id: str):
             logger.error("Job %s not found for scoring", job_id)
             return
 
-        profile_data = await _load_profile(db, user_id)
+        profile_data = await load_scoring_profile(db, user_id)
         if not profile_data:
             logger.warning("No profile for user %s, skipping scoring", user_id)
             return
@@ -121,7 +121,7 @@ def batch_score_for_user(user_id: str, rescore_all: bool = False):
 
 async def _batch_score_async(user_id: str, rescore_all: bool = False):
     async with create_worker_session()() as db:
-        profile_data = await _load_profile(db, user_id)
+        profile_data = await load_scoring_profile(db, user_id)
         if not profile_data:
             logger.warning("No profile for user %s, skipping batch scoring", user_id)
             return
@@ -200,7 +200,7 @@ async def rescore_jobs_for_all_users(job_ids: list[UUID]) -> int:
         ]
         profiles = {}
         for uid in user_ids:
-            profile = await _load_profile(db, str(uid))
+            profile = await load_scoring_profile(db, str(uid))
             if profile:
                 profiles[uid] = profile
         if not profiles:
@@ -234,7 +234,7 @@ async def rescore_jobs_for_all_users(job_ids: list[UUID]) -> int:
     return written
 
 
-async def _load_profile(db, user_id: str) -> dict | None:
+async def load_scoring_profile(db, user_id: str) -> dict | None:
     """Load a user's candidate profile as a dict for scoring."""
     result = await db.execute(
         select(CandidateProfile)

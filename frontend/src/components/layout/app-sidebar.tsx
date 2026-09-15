@@ -27,6 +27,7 @@ import {
   Settings,
   LogOut,
   MessageSquare,
+  ThumbsUp,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -59,6 +60,7 @@ const PIPELINE_ITEMS: Item[] = [
   { title: "Apply for me", href: "/dashboard/auto-apply", icon: ClipboardCheck, countKey: "needsYou" },
   { title: "Applications", href: "/dashboard/applications", icon: Send, countKey: "applied" },
   { title: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
+  { title: "Rate matches", href: "/dashboard/rate", icon: ThumbsUp },
 ];
 
 const ACCOUNT_ITEMS: Item[] = [

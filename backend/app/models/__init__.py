@@ -15,6 +15,7 @@ from app.models.feedback import Feedback
 from app.models.job_state import UserJobState
 from app.models.invite_request import InviteRequest
 from app.models.auto_apply import AutoApplication, SavedAnswer
+from app.models.job_rating import JobRating
 
 __all__ = [
     "User",
@@ -38,4 +39,5 @@ __all__ = [
     "InviteRequest",
     "AutoApplication",
     "SavedAnswer",
+    "JobRating",
 ]

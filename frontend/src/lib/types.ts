@@ -100,6 +100,72 @@ export interface AutoApplicationDetail extends AutoApplication {
   result: Record<string, unknown> | null;
 }
 
+// ── Rate matches ─────────────────────────────────────────────────────────
+
+export type JobRatingValue = "good" | "bad";
+
+/** A job to rate. Deliberately has no score. */
+export interface JobToRate {
+  id: string;
+  title: string;
+  company: string;
+  location: string | null;
+  remote_type: string | null;
+  seniority: string | null;
+  employment_type: string | null;
+  salary_text: string | null;
+  salary_min: number | null;
+  salary_max: number | null;
+  salary_currency: string | null;
+  job_url: string | null;
+  posted_at: string | null;
+  description: string;
+  skills: string[];
+  requirements: string[];
+}
+
+export interface RatingCounts {
+  rated: number;
+  good: number;
+  target: number;
+}
+
+export interface RatingQueue extends RatingCounts {
+  jobs: JobToRate[];
+}
+
+export interface ScoringMetrics {
+  version: number;
+  rated: number;
+  good: number;
+  /** Share of (good, not good) pairs where the good job scores higher. */
+  ranking_accuracy: number | null;
+  top: { size: number; good: number };
+  /** Rated jobs scoring 50 or more. */
+  inbox: { size: number; good: number };
+  missed_good: number;
+}
+
+export interface RatedJobScores {
+  job_id: string;
+  title: string;
+  company: string;
+  rating: JobRatingValue;
+  /** Score per scoring version, e.g. {"2": 61.5, "3": 44}. */
+  scores: Record<string, number>;
+}
+
+export interface RatingResults extends RatingCounts {
+  min_for_results: number;
+  current: ScoringMetrics;
+  /** Null once the proposed scoring is the one in use. */
+  proposed: ScoringMetrics | null;
+  disagreements: {
+    good_scored_low: RatedJobScores[];
+    bad_scored_high: RatedJobScores[];
+  };
+}
+
 export interface JobEntity {
   skills: string[] | null;
   requirements: string[] | null;
