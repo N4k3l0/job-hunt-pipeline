@@ -53,7 +53,7 @@ LOCATION_RE = re.compile(
 
 def _strip_html(text: str) -> str:
     """Strip tags + collapse whitespace. Used for parsed labels only;
-    raw_description keeps the full markdown for the embedder."""
+    raw_description keeps the full markdown."""
     s = re.sub(r"<[^>]+>", " ", text or "")
     s = re.sub(r"\s+", " ", s)
     return s.strip()

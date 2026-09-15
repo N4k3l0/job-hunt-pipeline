@@ -1,7 +1,6 @@
 import logging
 from uuid import UUID
 
-import httpx
 import jwt
 from jwt import PyJWKClient
 

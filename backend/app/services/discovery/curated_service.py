@@ -285,31 +285,3 @@ async def fetch_jobs(
                 len(companies), len(all_jobs))
     return all_jobs
 
-
-async def probe_companies() -> list[dict]:
-    """Per-company health check used by the /debug-curated endpoint.
-    Returns one row per company: which ATS it's on, did the API return
-    200, how many jobs it surfaced.
-    """
-    companies = _load_companies()
-    sem = asyncio.Semaphore(CONCURRENCY)
-
-    async def probe(client: httpx.AsyncClient, c: dict) -> dict:
-        out: dict = {"name": c.get("name"), "ats": c.get("ats"), "slug": c.get("slug")}
-        fetcher = _FETCHERS.get(c.get("ats") or "")
-        if not fetcher:
-            out["error"] = "no fetcher"
-            return out
-        async with sem:
-            try:
-                jobs = await fetcher(client, c)
-                out["jobs_returned"] = len(jobs)
-                out["sample_title"] = jobs[0]["title"] if jobs else None
-            except Exception as e:  # noqa: BLE001
-                out["error"] = f"{type(e).__name__}: {e}"
-        return out
-
-    headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
-    async with httpx.AsyncClient(timeout=TIMEOUT, headers=headers) as client:
-        results = await asyncio.gather(*(probe(client, c) for c in companies))
-    return results

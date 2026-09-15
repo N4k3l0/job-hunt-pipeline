@@ -1,17 +1,11 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
-  Card, CardContent, CardHeader, CardTitle, CardDescription,
-} from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
-import {
-  ArrowLeft, MapPin, Globe, Building2, Clock, ExternalLink,
-  Briefcase, Star, Sparkles, Loader2, CheckCircle2, AlertCircle, Send,
+  ArrowLeft, MapPin, Globe, ExternalLink, Star, Sparkles, Loader2, CheckCircle2, Send,
 } from "lucide-react";
 import {
   useJob, useShortlistJob, useGenerateTailored, useDeepScore, usePrepareAutoApplication,
@@ -31,72 +25,6 @@ function pct(raw: number | null | undefined, max: number): number {
   if (raw == null || max <= 0) return 0;
   return Math.max(0, Math.min(100, Math.round((raw / max) * 100)));
 }
-
-function ScoreRing({ score, size = 56 }: { score: number; size?: number }) {
-  const strokeWidth = 4;
-  const radius = (size - strokeWidth) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const offset = circumference - (score / 100) * circumference;
-  const color = score >= 85 ? "#34d399" : score >= 70 ? "#fbbf24" : "#6b7280";
-
-  // Spring-style entrance: ring sweeps from empty to its target value once
-  // on mount, and the number counts up to match. Single occurrence per page
-  // (the score ring lives on the detail header only — the inbox uses
-  // ScoreBadge which we leave un-animated since it renders N times per row,
-  // and per Emil's frequency rule, repeated UI shouldn't animate on every
-  // appearance).
-  const [animOffset, setAnimOffset] = useState(circumference);
-  const [displayScore, setDisplayScore] = useState(0);
-
-  useEffect(() => {
-    // Two RAFs to make sure the initial value paints before we transition.
-    const raf1 = requestAnimationFrame(() => {
-      const raf2 = requestAnimationFrame(() => setAnimOffset(offset));
-      return () => cancelAnimationFrame(raf2);
-    });
-    // Number count-up over 700ms with strong ease-out.
-    const start = performance.now();
-    const duration = 700;
-    let frame: number;
-    function tick(now: number) {
-      const t = Math.min(1, (now - start) / duration);
-      const eased = 1 - Math.pow(1 - t, 3);
-      setDisplayScore(Math.round(score * eased));
-      if (t < 1) frame = requestAnimationFrame(tick);
-    }
-    frame = requestAnimationFrame(tick);
-    return () => {
-      cancelAnimationFrame(raf1);
-      cancelAnimationFrame(frame);
-    };
-    // Run only when the score itself changes — re-render ≠ re-animate.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [score]);
-
-  return (
-    <div className="relative" style={{ width: size, height: size }}>
-      <svg width={size} height={size} className="-rotate-90">
-        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="currentColor" strokeWidth={strokeWidth} className="text-white/[0.04]" />
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke={color}
-          strokeWidth={strokeWidth}
-          strokeLinecap="round"
-          strokeDasharray={circumference}
-          strokeDashoffset={animOffset}
-          style={{ transition: "stroke-dashoffset 800ms cubic-bezier(0.23, 1, 0.32, 1)" }}
-        />
-      </svg>
-      <span className="absolute inset-0 flex items-center justify-center font-mono text-sm font-bold tabular-nums">
-        {displayScore}
-      </span>
-    </div>
-  );
-}
-
 
 export default function JobDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);

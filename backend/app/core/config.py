@@ -22,26 +22,10 @@ class Settings(BaseSettings):
     supabase_jwt_secret: str = ""
     supabase_anon_key: str = ""
 
-    # Redis
-    redis_url: str = "redis://localhost:6379/0"
-
     # External APIs
-    apify_api_token: str = ""
-    apify_webhook_secret: str = ""
-    adzuna_app_id: str = ""
-    adzuna_app_key: str = ""
     jsearch_rapidapi_key: str = ""
     firecrawl_api_key: str = ""
     anthropic_api_key: str = ""
-    # Voyage AI for embeddings — drives semantic job scoring. If unset,
-    # the scorer falls back to the rule-based path so the app still works
-    # but loses the semantic match upgrade.
-    voyage_api_key: str = ""
-    # Resume/job embeddings (Voyage) blended into scores. Off: the Voyage
-    # account wasn't working and scores use the rule-based axes. Turn on
-    # with EMBEDDINGS_ENABLED=true plus a working VOYAGE_API_KEY, then
-    # rescore every user.
-    embeddings_enabled: bool = False
 
     # Frontend URL — used to build the magic-link redirect_to in the invite
     # flow. Falls back to the first cors_origin if unset.
@@ -65,7 +49,9 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         return self.environment == "production"
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    # Unknown entries (settings a newer version removed) are ignored rather
+    # than stopping the app from starting.
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 @lru_cache

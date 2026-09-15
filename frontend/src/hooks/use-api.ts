@@ -1,7 +1,6 @@
 import { keepPreviousData, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 import type {
-  Job,
   JobDetail,
   JobListResponse,
   CandidateProfile,
@@ -28,22 +27,6 @@ export function useCurrentUser() {
     queryFn: () => api.get<{ id: string; email: string; name: string; role: string }>("/api/v1/auth/me"),
     retry: false,
     staleTime: 10 * 60 * 1000,
-  });
-}
-
-export function useUsers() {
-  return useQuery({
-    queryKey: ["auth", "users"],
-    queryFn: () => api.get<{ id: string; email: string; name: string; role: string }[]>("/api/v1/auth/users"),
-    staleTime: 10 * 60 * 1000,
-  });
-}
-
-export function useInviteUser() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (email: string) => api.post("/api/v1/auth/invite", { email }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["auth", "users"] }),
   });
 }
 
@@ -95,40 +78,10 @@ export interface StaleVerifyBatch {
   has_more: boolean;
 }
 
-export function useCleanupBySource() {
-  const qc = useQueryClient();
-  return useMutation<{ expired: number; source: string; days: number }, Error, { source: string; days?: number }>({
-    mutationFn: ({ source, days = 14 }) =>
-      api.post(
-        `/api/v1/auth/admin/stale-jobs/cleanup-by-source?source=${encodeURIComponent(source)}&days=${days}`,
-      ),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["jobs"] });
-      qc.invalidateQueries({ queryKey: ["analytics"] });
-      qc.invalidateQueries({ queryKey: ["admin", "stale-jobs"] });
-    },
-  });
-}
-
 export interface EmbeddingsBackfillBatch {
   embedded: number;
   remaining: number;
   has_more: boolean;
-}
-
-export function useEmbeddingsBackfill() {
-  const qc = useQueryClient();
-  return useMutation<EmbeddingsBackfillBatch, Error, { limit?: number }>({
-    // 50 per batch — keeps each Vercel function invocation well under
-    // the 60s timeout (50 jobs ≈ 1 Voyage call ≈ 3-5s total). The
-    // frontend chains batches until done, so total catalogue is still
-    // processed; we just do it in smaller chunks.
-    mutationFn: ({ limit = 50 } = {}) =>
-      api.post(`/api/v1/auth/admin/embeddings/backfill?limit=${limit}`),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["jobs"] });
-    },
-  });
 }
 
 export function useStaleJobsVerifyBatch() {
@@ -421,14 +374,6 @@ export function useBullets() {
   });
 }
 
-export function useAddBullet() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (data: Partial<Bullet>) => api.post("/api/v1/candidates/bullet-bank", data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["bullets"] }),
-  });
-}
-
 // ── Jobs ─────────────────────────────────────────────────────────────────────
 
 export function useJobs(params: {
@@ -503,27 +448,7 @@ export function useShortlistJob() {
   });
 }
 
-export function useDismissJob() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (jobId: string) => api.post(`/api/v1/jobs/${jobId}/dismiss`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["jobs"] }),
-  });
-}
-
 // ── Scoring ──────────────────────────────────────────────────────────────────
-
-export function useScoreJob() {
-  return useMutation({
-    mutationFn: (jobId: string) => api.post(`/api/v1/scoring/run/${jobId}`),
-  });
-}
-
-export function useBatchScore() {
-  return useMutation({
-    mutationFn: () => api.post("/api/v1/scoring/batch"),
-  });
-}
 
 // ── Tailoring ────────────────────────────────────────────────────────────────
 
@@ -611,14 +536,6 @@ export function useApproveTailored() {
       qc.invalidateQueries({ queryKey: ["jobs"] });
       qc.invalidateQueries({ queryKey: ["analytics"] });
     },
-  });
-}
-
-export function useDeleteTailored() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) => api.delete(`/api/v1/tailoring/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["tailoring"] }),
   });
 }
 
@@ -821,20 +738,3 @@ export function useSubmitFeedback() {
   });
 }
 
-export function useFeedbackList(resolved?: boolean) {
-  const qs = resolved !== undefined ? `?resolved=${resolved}` : "";
-  return useQuery({
-    queryKey: ["feedback", { resolved }],
-    queryFn: () => api.get<FeedbackRow[]>(`/api/v1/feedback${qs}`),
-    staleTime: 60 * 1000,
-  });
-}
-
-export function useUpdateFeedback() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, resolved }: { id: string; resolved: boolean }) =>
-      api.patch<{ id: string; resolved: boolean }>(`/api/v1/feedback/${id}`, { resolved }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["feedback"] }),
-  });
-}

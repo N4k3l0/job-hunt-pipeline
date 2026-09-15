@@ -167,9 +167,6 @@ def apply_extraction(job: Job, entity: JobEntity, extracted: dict, now: datetime
         if isinstance(currency, str) and len(currency.strip()) == 3:
             job.salary_currency = currency.strip().upper()
 
-    # The job's text representation changed, so its embedding is stale.
-    if hasattr(entity, "embedding"):
-        entity.embedding = None
     entity.enriched_at = now
 
 

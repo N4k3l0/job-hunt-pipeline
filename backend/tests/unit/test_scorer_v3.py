@@ -18,7 +18,6 @@ PROFILE = {
         {"title": "Senior AI Engineer", "start_date": "2017-01-01", "end_date": None,
          "skills": [], "domain_tags": []},
     ],
-    "embedding": None,
 }
 
 

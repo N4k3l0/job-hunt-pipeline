@@ -3,10 +3,9 @@ import re
 from datetime import datetime, timezone, timedelta
 from uuid import UUID
 
-import httpx
 from fastapi import APIRouter, Query, HTTPException, Response
 from pydantic import BaseModel
-from sqlalchemy import select, func, and_, or_, not_, exists, tuple_, union_all
+from sqlalchemy import select, func, and_, or_, exists, tuple_, union_all
 from sqlalchemy.orm import aliased, defer, selectinload
 
 from app.api.deps import CurrentUserId, DbSession
@@ -495,68 +494,6 @@ async def list_jobs(
     }
 
 
-@router.get("/_diag", include_in_schema=False)
-async def inbox_diag(user_id: CurrentUserId, db: DbSession):
-    """Cheap diagnostic — counts only, no joins, returns in <1s.
-    Helps explain why the inbox might be empty without running the full
-    funnel query that's been timing out.
-    """
-    from app.models.candidate import CandidateProfile as _CP
-
-    # All active jobs in the system the user could see
-    all_active = (await db.execute(
-        select(func.count()).select_from(Job).where(
-            Job.status.notin_(["duplicate", "raw", "expired", "dismissed"])
-        )
-    )).scalar() or 0
-
-    # JobScore rows for this user
-    scored = (await db.execute(
-        select(func.count()).select_from(JobScore).where(JobScore.user_id == user_id)
-    )).scalar() or 0
-
-    scored_ge_50 = (await db.execute(
-        select(func.count()).select_from(JobScore).where(
-            JobScore.user_id == user_id, JobScore.overall_fit >= 50
-        )
-    )).scalar() or 0
-
-    scored_ge_30 = (await db.execute(
-        select(func.count()).select_from(JobScore).where(
-            JobScore.user_id == user_id, JobScore.overall_fit >= 30
-        )
-    )).scalar() or 0
-
-    # Applied / pipeline counts
-    applied_total = (await db.execute(
-        select(func.count()).select_from(ApplicationTracking).where(
-            ApplicationTracking.user_id == user_id
-        )
-    )).scalar() or 0
-
-    # Profile preferences
-    profile_row = (await db.execute(
-        select(
-            _CP.target_roles,
-            _CP.preferred_countries,
-            _CP.remote_preference,
-        ).where(_CP.user_id == user_id)
-    )).first()
-
-    return {
-        "all_active_jobs": all_active,
-        "scored_for_user": scored,
-        "scored_ge_50": scored_ge_50,
-        "scored_ge_30": scored_ge_30,
-        "applied_total": applied_total,
-        "profile": {
-            "target_roles": profile_row[0] if profile_row else None,
-            "preferred_countries": profile_row[1] if profile_row else None,
-            "remote_preference": profile_row[2] if profile_row else None,
-        } if profile_row else None,
-    }
-
-
 @router.get("/{job_id}")
 async def get_job(job_id: UUID, user_id: CurrentUserId, db: DbSession):
     """Get full job details including score and entities."""
@@ -795,39 +732,6 @@ async def search_web_for_jobs(user_id: CurrentUserId, db: DbSession):
     }
 
 
-@router.post("/discover")
-async def trigger_discovery(user_id: CurrentUserId):
-    """Run all free/no-key discovery sources synchronously inside this request.
-
-    Vercel-friendly: returns when each source finishes (or errors). At ~3-8s
-    per source the total stays within the 60s limit. Crossover (slowest) is
-    excluded here because it can blow the limit alone — it has its own cron
-    endpoint at /api/v1/cron/discover-slow."""
-    from app.workers.discovery_tasks import (
-        _run_adzuna_async, _run_remoteok_async, _run_arbeitnow_async,
-        _run_himalayas_async, _run_remotive_async, _run_weworkremotely_async,
-        _run_dailyremote_async,
-    )
-    runners = [
-        ("adzuna", _run_adzuna_async),
-        ("remoteok", _run_remoteok_async),
-        ("arbeitnow", _run_arbeitnow_async),
-        ("himalayas", _run_himalayas_async),
-        ("remotive", _run_remotive_async),
-        ("weworkremotely", _run_weworkremotely_async),
-        ("dailyremote", _run_dailyremote_async),
-    ]
-    results: dict[str, str] = {}
-    for name, runner in runners:
-        try:
-            await runner()
-            results[name] = "ok"
-        except Exception as e:
-            logger.error("Discovery '%s' failed: %s", name, e)
-            results[name] = f"error: {type(e).__name__}: {e}"
-    return {"status": "complete", "results": results}
-
-
 @router.post("/import/url")
 async def import_job_url(request: JobImportURL, user_id: CurrentUserId, db: DbSession):
     """Import a job by URL (Firecrawl + Claude parsing). Runs inline —
@@ -1010,21 +914,6 @@ async def import_bulk_urls(
         except Exception as e:  # noqa: BLE001
             logger.warning("Bulk import failed for %s: %s", url, e)
             results.append({"url": url, "status": "failed", "error": str(e)[:200]})
-
-    # Embed the just-imported jobs FIRST so the semantic scorer has
-    # something to work with. Without this, jobs land with NULL
-    # embedding, fall back to the rule-based path, score near zero
-    # (the heuristic parser can't fill skills/requirements/keywords),
-    # and get hidden by the default min_score=50 inbox filter.
-    # Embedding cost is ~$0.0002/job via Voyage — negligible.
-    try:
-        from app.workers.discovery_tasks import _embed_unembedded_jobs
-        # Cap at a reasonable batch — we only just inserted up to 8 rows
-        # but other historical unembedded rows might also exist; topping
-        # them up doesn't hurt.
-        await _embed_unembedded_jobs(limit=50)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Embedding after bulk import failed: %s", e)
 
     # Score the newly-ingested jobs for this user.
     try:

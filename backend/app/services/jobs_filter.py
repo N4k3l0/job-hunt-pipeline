@@ -5,8 +5,8 @@ Analytics overview. Keeping a single source of truth means the dashboard's
 Profession-agnostic: this module makes NO assumptions about whether the
 user is a Product Manager, AI Engineer, marketer, designer, finance ops,
 nurse, accountant, or anything else. It only knows their target_roles +
-skills, and matches job titles against those. The semantic embedding
-scorer handles relevance ranking after the filter.
+skills, and matches job titles against those. The scorer ranks what the
+filter keeps.
 
 Historical note: earlier versions had hardcoded Product Management and
 AI/ML title exclusions to fix a specific PM-vs-AI inbox cross-leak when

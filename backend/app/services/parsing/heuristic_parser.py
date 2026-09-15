@@ -9,9 +9,8 @@ The trade-off vs. the LLM parser:
 - Title, company, location, raw description: extracted reliably from
   page structure and URL slug.
 - required_skills / requirements / keywords: returned as empty arrays.
-  The semantic scorer can still operate on raw_description (the JD body
-  becomes part of the job's embedding), so the inbox score isn't zero —
-  it's just less specific than the LLM-extracted-entities path.
+  The scorer still searches raw_description for the candidate's skills,
+  and enrichment reads it later, so the job still gets a real score.
 
 A job parsed this way costs ~$0.001 (Firecrawl only) instead of ~$0.012
 (Firecrawl + Sonnet). When the user tops up Anthropic, future imports
@@ -154,15 +153,11 @@ def parse_job_heuristic(*, url: str | None, markdown: str) -> dict:
         title, company, location, remote_type, url,
     )
 
-    # CRITICAL: description_summary is what gets stored as Job.raw_description,
-    # which is what the Voyage embedder ingests for semantic scoring. Leaving
-    # it None means the job never gets an embedding and never gets a score
-    # above ~5pts (since the heuristic parser also can't fill skills /
-    # requirements / keywords). Use the cleaned markdown body as the
-    # description instead — it contains the real JD content, the embedder
-    # handles long inputs gracefully, and the semantic scorer can produce
-    # a useful match score from that alone.
-    description = _trim_markdown_for_embedding(md)
+    # description_summary is stored as Job.raw_description, which scoring
+    # and enrichment read. The heuristic parser can't fill skills or
+    # requirements, so without the cleaned page body the job would score
+    # near zero.
+    description = _trim_markdown(md)
 
     return {
         "title": title,
@@ -193,11 +188,10 @@ def parse_job_heuristic(*, url: str | None, markdown: str) -> dict:
     }
 
 
-def _trim_markdown_for_embedding(md: str) -> str:
+def _trim_markdown(md: str) -> str:
     """Strip Firecrawl-rendered boilerplate (nav links, footer junk, image
-    refs) so the embedded text is mostly real JD content. Caps at 4000
-    chars — Voyage handles longer but the marginal info past that is
-    usually template/footer noise."""
+    refs) so the text is mostly real JD content. Caps at 4000 chars; past
+    that it's usually template or footer noise."""
     if not md:
         return ""
     cleaned = re.sub(r"!\[.*?\]\(.*?\)", "", md)         # image refs

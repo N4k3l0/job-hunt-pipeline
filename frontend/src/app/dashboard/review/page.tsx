@@ -75,7 +75,6 @@ function ContactPanel({
   const { data, isLoading } = useJobContact(jobId);
   const find = useFindJobContact(jobId);
   const contact = find.data?.contact ?? data?.contact ?? null;
-  const noContactYet = !isLoading && !contact;
   const toast = useToast();
   const [linkedInSent, setLinkedInSent] = useState(false);
 

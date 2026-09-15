@@ -1,7 +1,6 @@
 import logging
 
 from app.services.jobs_filter import country_filter_codes
-from app.services.scoring.embedder import cosine_similarity
 from app.services.scoring.geo_scorer import score_geography
 from app.services.scoring.matching import (
     LEVEL_GAP_SCORES,
@@ -33,9 +32,6 @@ STRICT_LEVEL_GAP_SCORES = (1.0, 0.7, 0.2, 0.0)
 # (default minimum 50). Otherwise its score stops here.
 RELEVANCE_MIN = 0.5
 IRRELEVANT_MAX_SCORE = 45.0
-# When both the job and the profile have embeddings, the overall score
-# blends in resume-to-job similarity at this share.
-SEMANTIC_SHARE = 0.4
 
 # Axis maxima the dashboard displays each component against.
 AXIS_MAX = {"title": 20, "skills": 25, "seniority": 15, "domain": 10}
@@ -53,9 +49,9 @@ def compute_job_score(
     Args:
         job_data: title, company, country, remote_type, salary_*, seniority, raw_description
         job_entities: skills, nice_to_have, requirements, keywords, years_experience_min,
-            visa_notes, sponsorship_available, embedding
+            visa_notes, sponsorship_available
         profile: target_roles, preferred_countries, visa_statuses, remote_preference,
-            salary_min, salary_max, skills, work_history, embedding
+            salary_min, salary_max, skills, work_history
         version: 2 gives unknown components a middle score; 3 gives them nothing.
 
     Returns:
@@ -159,21 +155,7 @@ def compute_job_score(
     if not relevant:
         rule_overall = min(rule_overall, IRRELEVANT_MAX_SCORE)
 
-    # pgvector < 0.5 returns numpy arrays, which raise on truthiness
-    # checks — always compare against None.
-    profile_vec = profile.get("embedding")
-    job_vec = job_entities.get("embedding")
-    semantic_mode = profile_vec is not None and job_vec is not None
-    semantic_score = 0.0
-    overall_fit = rule_overall
-    if semantic_mode:
-        semantic_score = cosine_similarity(profile_vec, job_vec)
-        # Voyage cosines for real pairs sit around 0.30-0.85; stretch that
-        # range to 0-1 so it separates weak from strong matches.
-        stretched = max(0.0, min(1.0, (semantic_score - 0.30) / 0.55))
-        overall_fit = (1 - SEMANTIC_SHARE) * rule_overall + SEMANTIC_SHARE * 100.0 * stretched
-
-    overall_fit = max(0.0, min(100.0, overall_fit))
+    overall_fit = max(0.0, min(100.0, rule_overall))
 
     if overall_fit >= 80:
         priority = "high"
@@ -196,13 +178,10 @@ def compute_job_score(
         "remote_score": geo["remote_score"],
         "visa_score": geo["visa_score"],
         "salary_score": salary_score,
-        "semantic_score": round(semantic_score, 4),
         "overall_fit": round(overall_fit, 1),
         "priority": priority,
         "score_version": version,
         "reasoning": {
-            "scoring_mode": "semantic" if semantic_mode else "rule-based",
-            "semantic_cosine": round(semantic_score, 4) if semantic_mode else None,
             "rule_overall": round(rule_overall, 1),
             # Version 3: the components the score is made of, and whether the
             # job matched the candidate's roles or skills.

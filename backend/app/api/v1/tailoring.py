@@ -1,7 +1,6 @@
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -438,21 +437,3 @@ async def regenerate_section(
     await db.commit()
     return {"section": body.section, "content": new_content}
 
-
-@router.get("/{tailored_id}/pdf")
-async def download_pdf(tailored_id: UUID, user_id: CurrentUserId, db: DbSession):
-    """Download the tailored resume as PDF."""
-    result = await db.execute(
-        select(TailoredApplication).where(
-            TailoredApplication.id == tailored_id,
-            TailoredApplication.user_id == user_id,
-        )
-    )
-    app = result.scalar_one_or_none()
-    if not app:
-        raise HTTPException(status_code=404, detail="Tailored application not found")
-    if not app.tailored_resume_url:
-        raise HTTPException(status_code=404, detail="PDF not yet generated")
-
-    from app.services.storage import object_path, signed_url
-    return RedirectResponse(url=await signed_url("resumes", object_path("resumes", app.tailored_resume_url)))

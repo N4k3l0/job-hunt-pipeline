@@ -11,7 +11,6 @@ from app.models.candidate import (
     CandidateProfile,
     CandidateWorkHistory,
     CandidateSkill,
-    CandidateEducation,
     CandidateBullet,
     Resume,
     SampleApplication,
@@ -98,17 +97,9 @@ async def update_profile(data: ProfileUpdate, user_id: CurrentUserId, db: DbSess
     old_roles = sorted(profile.target_roles or [])
     new_roles = sorted(update_data.get("target_roles", profile.target_roles) or [])
     roles_changed = "target_roles" in update_data and old_roles != new_roles
-    corpus_fields = {"target_roles", "headline", "master_summary", "search_keywords"}
-    corpus_changed = any(
-        f in update_data and update_data[f] != getattr(profile, f) for f in corpus_fields
-    )
 
     for field, value in update_data.items():
         setattr(profile, field, value)
-
-    if corpus_changed:
-        from app.services.scoring.embedder import refresh_profile_embedding
-        await refresh_profile_embedding(db, profile)
 
     await db.commit()
     await db.refresh(profile)
@@ -145,7 +136,7 @@ async def auto_suggest_roles(user_id: CurrentUserId, db: DbSession):
     suggest 2-3 target roles, save them, and rescore the whole inbox
     so the change takes effect immediately.
     """
-    from app.models.candidate import CandidateProfile, CandidateWorkHistory, CandidateSkill
+    from app.models.candidate import CandidateProfile
     from sqlalchemy.orm import selectinload
 
     result = await db.execute(

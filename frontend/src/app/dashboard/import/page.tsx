@@ -112,7 +112,7 @@ export default function ImportPage() {
       }
       setUrl(clip);
       handleUrlImport(clip);
-    } catch (e: any) {
+    } catch {
       toast.error("Couldn't read clipboard", {
         description: "Browser blocked it. Paste manually into the field instead.",
       });

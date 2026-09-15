@@ -1,27 +1,17 @@
-import asyncio
 import logging
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import select, and_
+from sqlalchemy import select
 from sqlalchemy.orm import defer, selectinload
 
-from app.workers.celery_app import celery_app
 from app.core.database import create_worker_session
-from app.models.job import Job, JobEntity
+from app.models.job import Job
 from app.models.scoring import JobScore
-from app.models.candidate import CandidateProfile, CandidateSkill, CandidateWorkHistory
+from app.models.candidate import CandidateProfile
 from app.services.scoring.scorer import compute_job_score
 
 logger = logging.getLogger(__name__)
-
-
-def _run_async(coro):
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
 
 
 def job_score_inputs(job: Job) -> tuple[dict, dict]:
@@ -51,72 +41,8 @@ def job_score_inputs(job: Job) -> tuple[dict, dict]:
             "years_experience_min": e.years_experience_min,
             "visa_notes": e.visa_notes,
             "sponsorship_available": e.sponsorship_available,
-            # NULL until embedded; the scorer then uses rules only.
-            "embedding": getattr(e, "embedding", None),
         }
     return job_data, job_entities
-
-
-@celery_app.task(name="app.workers.scoring_tasks.score_job_for_user")
-def score_job_for_user(job_id: str, user_id: str):
-    """Score a single job for a specific user."""
-    _run_async(_score_job_async(job_id, user_id))
-
-
-async def _score_job_async(job_id: str, user_id: str):
-    async with create_worker_session()() as db:
-        result = await db.execute(
-            select(Job)
-            .where(Job.id == job_id)
-            .options(selectinload(Job.entities))
-        )
-        job = result.scalar_one_or_none()
-        if not job:
-            logger.error("Job %s not found for scoring", job_id)
-            return
-
-        profile_data = await load_scoring_profile(db, user_id)
-        if not profile_data:
-            logger.warning("No profile for user %s, skipping scoring", user_id)
-            return
-
-        job_data, job_entities = job_score_inputs(job)
-        scores = compute_job_score(job_data, job_entities, profile_data)
-
-        existing = await db.execute(
-            select(JobScore).where(
-                and_(JobScore.job_id == job_id, JobScore.user_id == user_id)
-            )
-        )
-        job_score = existing.scalars().first()
-
-        if job_score:
-            for key, value in scores.items():
-                setattr(job_score, key, value)
-            job_score.calculated_at = datetime.now(timezone.utc)
-        else:
-            job_score = JobScore(
-                job_id=job_id,
-                user_id=user_id,
-                calculated_at=datetime.now(timezone.utc),
-                **scores,
-            )
-            db.add(job_score)
-
-        if job.status in ("enriched", "normalized"):
-            job.status = "scored"
-
-        await db.commit()
-        logger.info(
-            "Scored job %s for user %s: %.1f (%s)",
-            job_id, user_id, scores["overall_fit"], scores["priority"],
-        )
-
-
-@celery_app.task(name="app.workers.scoring_tasks.batch_score_for_user")
-def batch_score_for_user(user_id: str, rescore_all: bool = False):
-    """Score all unscored jobs for a user. If rescore_all=True, re-score everything."""
-    _run_async(_batch_score_async(user_id, rescore_all))
 
 
 async def _batch_score_async(user_id: str, rescore_all: bool = False):
@@ -257,9 +183,6 @@ async def load_scoring_profile(db, user_id: str) -> dict | None:
         "remote_preference": profile.remote_preference or "any",
         "salary_min": profile.salary_min,
         "salary_max": profile.salary_max,
-        # Cached profile embedding — drives semantic similarity in
-        # compute_job_score. NULL until the resume has been embedded.
-        "embedding": getattr(profile, "embedding", None),
         "skills": [
             {"skill_name": s.skill_name, "category": s.category}
             for s in profile.skills

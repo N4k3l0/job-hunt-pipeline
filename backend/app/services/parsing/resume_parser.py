@@ -1,5 +1,4 @@
 import logging
-from datetime import date
 
 import PyPDF2
 import io

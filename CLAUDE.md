@@ -1,7 +1,7 @@
 # Job Hunt Pipeline
 
 ## Project Overview
-A private, invite-only, multi-user web application that automatically discovers job postings from multiple sources, scores them against user profiles, generates tailored application materials (resume, cover letter, answers, outreach messages), and presents everything for human review before the user applies manually.
+A private, invite-only, multi-user web application that discovers job postings from many sources, scores them against each user's profile, prepares tailored application materials and application-form answers, and presents everything for the user's review. The goal is applying automatically; today the user approves every application and sends it.
 
 **Target roles:** any profession (grading is profession-agnostic)
 **Target geographies:** set per user (preferred countries + home country)
@@ -14,37 +14,37 @@ A private, invite-only, multi-user web application that automatically discovers 
 - **Backend:** Python FastAPI (async)
 - **Database:** PostgreSQL via Supabase (connect via Transaction Mode, port 6543 in prod)
 - **Auth:** Supabase Auth (invite-only, public signups disabled)
-- **Storage:** Supabase Storage (resumes, generated PDFs)
-- **Workers:** Celery + Redis (background jobs + Celery Beat for scheduled tasks)
-- **Job Discovery:** Apify actors (LinkedIn, Indeed, Google Jobs) + Adzuna + RemoteOK + Arbeitnow + JSearch APIs
+- **Storage:** Supabase Storage (resumes, private bucket with signed links)
+- **Scheduled work:** a Railway cron service calls the backend's `/api/v1/cron/*` endpoints (see "Scheduler on Railway"). There is no queue or worker process; `app/workers/` holds plain async functions the endpoints call
+- **Job Discovery:** company job boards (Greenhouse, Lever, Ashby), JSearch, Arbeitnow, RemoteOK, Himalayas, Remotive, We Work Remotely, DailyRemote, Undutchables, Working Nomads, Wellfound, Jobberman, MyJobMag, and users' LinkedIn job alert emails
 - **Page Parsing:** Firecrawl API
-- **AI/LLM:** Claude API (Sonnet for parsing/scoring, Opus for tailoring)
-- **PDF Generation:** WeasyPrint (HTML/CSS → PDF)
-- **Hosting:** Vercel (both frontend AND backend as separate projects) + Supabase (DB/auth/storage). Background jobs run synchronously inside FastAPI request handlers; scheduled discovery runs via Vercel Cron. Celery + Redis are no longer used in production but remain in the codebase for optional local-only use.
+- **AI/LLM:** Claude API (see "LLM Usage")
+- **Tailored resume PDFs:** the browser's print-to-PDF on `/dashboard/review/[id]/print`
+- **Hosting:** frontend on Vercel; backend and scheduler on Railway; Supabase for database, auth and storage. The backend's Vercel project stays deployed as a rollback target
 
 ### Monorepo Structure
 ```
 job-hunt-pipeline/
 ├── frontend/          # Next.js app
-├── backend/           # FastAPI + Celery workers
+├── backend/           # FastAPI
 │   ├── app/
 │   │   ├── api/v1/    # Route handlers
 │   │   ├── models/    # SQLAlchemy ORM models
 │   │   ├── schemas/   # Pydantic schemas
-│   │   ├── services/  # Business logic (discovery, parsing, dedup, scoring, tailoring, pdf, tracking)
-│   │   ├── workers/   # Celery task definitions
+│   │   ├── services/  # Business logic (discovery, parsing, dedup, scoring, tailoring, auto_apply, job_alerts)
+│   │   ├── workers/   # Async discovery, parsing and scoring functions the API calls
 │   │   ├── llm/       # Claude API client + prompt templates
 │   │   └── core/      # Config, database, auth middleware
 │   └── alembic/       # Database migrations
 ├── shared/            # Shared constants
-└── docker-compose.yml # Local dev (Postgres + Redis)
+└── docker-compose.yml # Local dev Postgres (with pgvector, which old migrations need)
 ```
 
 ## Development
 
 ### Local Setup
 ```bash
-# Start Postgres + Redis
+# Start Postgres
 docker-compose up -d
 
 # Backend
@@ -61,16 +61,6 @@ cd frontend
 npm install
 cp .env.example .env.local  # Fill in Supabase keys
 npm run dev
-```
-
-### Running Workers (optional, local-only)
-Production deploys do not use Celery — discovery runs via Vercel Cron and tailoring runs synchronously inside FastAPI requests. The Celery setup remains for local development if you want to keep work off the request thread.
-```bash
-# Celery worker
-celery -A app.workers.celery_app worker --loglevel=info
-
-# Celery Beat (scheduled tasks)
-celery -A app.workers.celery_app beat --loglevel=info
 ```
 
 ### Database Migrations
@@ -115,7 +105,7 @@ Keep a single head: `alembic heads` should print one revision.
 Every job flows: Raw → Normalized → Deduplicated → Enriched → Scored → Inbox
 - Dedup uses canonical hash (normalized company+title+city+country) + description similarity
 - Enrichment: `/api/v1/cron/enrich` reads recent jobs with Haiku (skills, requirements, seniority, salary with its period, sponsorship, `eligible_countries`), then rescores them for every user. The best-scored jobs for any user are read first: an unread job's level and skills are unknown, which keeps its score down
-- Scoring (`services/scoring/scorer.py` + `matching.py`) is the same for every profession: title vs target roles/interests/recent titles, skills overlap, seniority, industry, remote fit; blended with Voyage resume/job embeddings only when `EMBEDDINGS_ENABLED=true` and `VOYAGE_API_KEY` is set (off in production). It must stay fast: a full rescore covers the whole catalog inside 60s
+- Scoring (`services/scoring/scorer.py` + `matching.py`) is the same for every profession: title vs target roles/interests/recent titles, skills overlap, seniority, industry, remote fit. It must stay fast: a full rescore covers the whole catalog inside 60s
 - Scoring versions: `SCORE_VERSION` is what `job_scores` stores; `PROPOSED_SCORE_VERSION` is the next one, not live yet. Version 3 gives nothing for what isn't known (a level or remote policy the job doesn't state counts as 0; a part the profile has nothing for is left out and the other weights share its weight) and holds jobs matching neither the user's roles nor their skills at 45, below the inbox's 50
 - Rate matches (`/dashboard/rate`, `/api/v1/ratings`, `job_ratings`): users say whether jobs fit them without seeing scores. `services/scoring/evaluation.py` scores the rated jobs live with both versions and compares them with the ratings. Measure a scoring change there before it goes live; to switch, set `SCORE_VERSION` to the proposed version, deploy, then rescore every user (`/api/v1/cron/score-backlog?rescore_all=true`)
 - Hard filters (`services/jobs_filter.py`) hide jobs per user: preferred countries, remote preference, remote roles restricted away from the user's home country, no sponsorship where the user needs it, and source-stated salary below the user's minimum. A job that doesn't state a fact is never hidden by it
@@ -145,8 +135,9 @@ Every job flows: Raw → Normalized → Deduplicated → Enriched → Scored →
 ```bash
 cd backend
 pytest tests/unit/
-# Integration tests need a disposable Postgres with pgvector, migrated to
-# head, whose database name contains "test". They TRUNCATE tables.
+# Integration tests need a disposable Postgres with the pgvector extension
+# (an old migration creates vector columns), migrated to head, whose
+# database name contains "test". They TRUNCATE tables.
 TEST_DATABASE_URL=postgresql://user@localhost:5432/jobhunt_test pytest tests/integration/
 ```
 
@@ -156,7 +147,6 @@ See `backend/.env.example` and `frontend/.env.example` for all required variable
 ## Important Notes
 - Public signups are DISABLED in Supabase — users are added via admin invite only
 - In production, connect to Supabase PostgreSQL via Transaction Mode (port 6543). `DB_POOL_SIZE` picks the connection handling (`core/database.py`): `0` opens one per request (Vercel), above `0` keeps connections open (Railway)
-- Apify actors trigger via webhooks to `/api/webhooks/apify` — verify HMAC signature
 - All tailored application materials require human approval before use
 
 ## Deployment (Vercel)
@@ -167,7 +157,7 @@ Both frontend and backend deploy as **separate Vercel projects** pointing at the
 - **Root directory**: `backend`
 - **Region**: `dub1` (Dublin, set in `backend/vercel.json`), next to the Supabase database in AWS eu-west-1. Keep them together: every request opens a fresh database connection
 - **Framework preset**: Other (Vercel auto-detects Python via `vercel.json`)
-- **Required env vars**: `DATABASE_URL` (Supabase pooler, port 6543), `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_KEY`, `SUPABASE_JWT_SECRET`, `ANTHROPIC_API_KEY`, `FIRECRAWL_API_KEY`, `ADZUNA_APP_ID`, `ADZUNA_APP_KEY`, `JSEARCH_RAPIDAPI_KEY`, `CORS_ORIGINS`, `CRON_SECRET`
+- **Required env vars**: `DATABASE_URL` (Supabase pooler, port 6543), `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_KEY`, `SUPABASE_JWT_SECRET`, `ANTHROPIC_API_KEY`, `FIRECRAWL_API_KEY`, `JSEARCH_RAPIDAPI_KEY`, `CORS_ORIGINS`, `CRON_SECRET`
 - **No cron jobs**: scheduled work runs on Railway (below). The Vercel backend stays deployed only as a rollback target
 
 ### Backend on Railway
@@ -177,10 +167,10 @@ The website (`NEXT_PUBLIC_API_URL`) uses the Railway backend: no time limit on r
 - **Service settings** live on Railway, not in the repo (Railway ignores `railway.json` now): region EU West / Amsterdam (`europe-west4-drams3a`), health check `/health`, restart on failure up to 5 times
 - **Env vars**: the same as the Vercel backend, plus `DB_POOL_SIZE=5`
 - **Deploys** automatically from GitHub `main` (root directory `/backend`, watch paths `/backend/**`). `cd backend && railway up --service backend` deploys the local checkout instead
-- Cron endpoints refuse every request until `CRON_SECRET` is set, and the Apify webhook until `APIFY_WEBHOOK_SECRET` is
+- Cron endpoints refuse every request until `CRON_SECRET` is set
 
 ### Scheduler on Railway
-Service `scheduler` in the same project is a Railway cron service: every 30 minutes (`*/30 * * * *`) it runs `python scripts/scheduled_tasks.py` from the backend image and exits. That script calls the backend's cron endpoints: discovery at 06:00 (`discover-fast`) and 06:30 UTC (`discover-remote`), and on every run `enrich`, `expire-stale` and, when `REVIEWS_PER_USER_PER_DAY` > 0, `review-top-matches`.
+Service `scheduler` in the same project is a Railway cron service: every 30 minutes (`*/30 * * * *`) it runs `python scripts/scheduled_tasks.py` from the backend image and exits. That script calls the backend's cron endpoints: discovery at 06:00 (`discover-fast`) and 06:30 UTC (`discover-remote`), and on every run `enrich`, `job-alert-details`, `expire-stale` and, when `REVIEWS_PER_USER_PER_DAY` > 0, `review-top-matches`.
 - **Env vars**: `BACKEND_URL` (`https://${{backend.RAILWAY_PUBLIC_DOMAIN}}`), `CRON_SECRET` (`${{backend.CRON_SECRET}}`), `ENRICH_JOBS_PER_RUN` (25), `REVIEWS_PER_USER_PER_DAY` (0). Both references point at the backend service, so there's one secret to rotate
 - **Run by hand**: `python scripts/scheduled_tasks.py --discovery both` runs discovery regardless of the time. `.github/workflows/scheduled-grading.yml` remains as a manual fallback (workflow_dispatch only)
 - Railway skips a run while the previous one is still going, and each run's log shows every endpoint's response
@@ -197,5 +187,4 @@ DATABASE_URL=<your-supabase-pooler-url> alembic upgrade head
 ```
 
 ### Constraints to know
-- Vercel Hobby function timeout is **60 seconds** — tailoring (3-5 LLM calls) usually fits but ~10% of generations may need a retry. Upgrade to Pro for 5-minute timeouts.
-- PDF generation is removed in this deploy — replaced with `/dashboard/review/[id]/print` (browser print-to-PDF). To restore PDFs, run the backend on a host that supports cairo/pango (Railway, Fly, Render web services).
+- The Vercel rollback backend stops every request after 60 seconds; Railway has no such limit.
