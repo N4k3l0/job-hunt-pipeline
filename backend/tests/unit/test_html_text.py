@@ -34,6 +34,18 @@ def test_escaped_html_is_shown_formatted():
     assert safe_description_html("&amp;lt;p&amp;gt;Twice&amp;lt;/p&amp;gt;") == "<p>Twice</p>"
 
 
+def test_mostly_escaped_html_inside_real_tags_is_decoded():
+    out = safe_description_html(
+        "<p>&lt;div class=&quot;intro&quot;&gt;&lt;p&gt;Grafana Labs&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Go&lt;/li&gt;&lt;/ul&gt;&lt;/div&gt;</p>"
+    )
+    assert "&lt;" not in out and "<li>Go</li>" in out
+
+
+def test_real_html_mentioning_a_tag_is_not_decoded():
+    out = safe_description_html("<p>Know HTML?</p><ul><li>Write &lt;div&gt; layouts</li><li>CSS</li></ul>")
+    assert out == "<p>Know HTML?</p><ul><li>Write &lt;div&gt; layouts</li><li>CSS</li></ul>"
+
+
 def test_escaped_scripts_are_still_removed():
     out = safe_description_html("&lt;p&gt;Hi&lt;/p&gt;&lt;script&gt;steal()&lt;/script&gt;&lt;img src=x onerror=steal()&gt;")
     assert out == "<p>Hi</p>"
