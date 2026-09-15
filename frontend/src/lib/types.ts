@@ -264,6 +264,30 @@ export interface CandidateProfile {
   current_location: string | null;
 }
 
+export interface WorkHistoryEntry {
+  id: string;
+  company: string;
+  title: string;
+  /** ISO dates (YYYY-MM-DD); no end date means the user works there now. */
+  start_date: string | null;
+  end_date: string | null;
+  description: string | null;
+  bullets: string[] | null;
+  skills: string[] | null;
+  domain_tags: string[] | null;
+  sort_order: number;
+}
+
+export type SkillCategory = "technical" | "tool" | "domain" | "soft";
+
+export interface Skill {
+  id: string;
+  skill_name: string;
+  category: SkillCategory | null;
+  proficiency: string | null;
+  years_experience: number | null;
+}
+
 export interface Resume {
   id: string;
   version_name: string;

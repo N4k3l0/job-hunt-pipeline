@@ -1,3 +1,4 @@
+from datetime import date
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, status
@@ -21,6 +22,7 @@ from app.schemas.candidate import (
     ProfileResponse,
     WorkHistoryCreate,
     WorkHistoryResponse,
+    WorkHistoryUpdate,
     SkillCreate,
     SkillResponse,
     BulletCreate,
@@ -257,11 +259,72 @@ async def list_work_history(user_id: CurrentUserId, db: DbSession):
     return result.scalars().all()
 
 
+def _clean_bullets(bullets: list[str] | None) -> list[str] | None:
+    if bullets is None:
+        return None
+    return [b.strip()[:1000] for b in bullets if b and b.strip()]
+
+
+async def _order_work_history(db, profile_id: UUID) -> None:
+    """Current roles first, then the most recent. Scoring reads the first
+    role as the candidate's level, so the order has to follow the dates."""
+    entries = (await db.execute(
+        select(CandidateWorkHistory).where(CandidateWorkHistory.profile_id == profile_id)
+    )).scalars().all()
+    ordered = sorted(
+        entries,
+        key=lambda e: (e.end_date is not None, -(e.end_date or date.max).toordinal(), -(e.start_date or date.min).toordinal()),
+    )
+    for i, entry in enumerate(ordered):
+        entry.sort_order = i
+
+
+async def _own_work_history(db, user_id: UUID, entry_id: UUID) -> tuple[CandidateProfile, CandidateWorkHistory]:
+    profile = await _get_profile(user_id, db)
+    entry = (await db.execute(
+        select(CandidateWorkHistory).where(
+            CandidateWorkHistory.id == entry_id,
+            CandidateWorkHistory.profile_id == profile.id,
+        )
+    )).scalar_one_or_none()
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Role not found")
+    return profile, entry
+
+
+def _check_dates(start: date | None, end: date | None) -> None:
+    if start and end and end < start:
+        raise HTTPException(status_code=422, detail="The end date is before the start date")
+
+
 @router.post("/work-history", response_model=WorkHistoryResponse, status_code=status.HTTP_201_CREATED)
 async def add_work_history(data: WorkHistoryCreate, user_id: CurrentUserId, db: DbSession):
     profile = await _get_profile(user_id, db)
-    entry = CandidateWorkHistory(profile_id=profile.id, **data.model_dump())
+    _check_dates(data.start_date, data.end_date)
+    values = data.model_dump()
+    values.update(company=data.company.strip(), title=data.title.strip(), bullets=_clean_bullets(data.bullets))
+    entry = CandidateWorkHistory(profile_id=profile.id, **values)
     db.add(entry)
+    await db.flush()
+    await _order_work_history(db, profile.id)
+    await db.commit()
+    await db.refresh(entry)
+    return entry
+
+
+@router.put("/work-history/{entry_id}", response_model=WorkHistoryResponse)
+async def update_work_history(entry_id: UUID, data: WorkHistoryUpdate, user_id: CurrentUserId, db: DbSession):
+    profile, entry = await _own_work_history(db, user_id, entry_id)
+    changes = data.model_dump(exclude_unset=True)
+    for field in ("company", "title"):
+        if field in changes and changes[field] is not None:
+            changes[field] = changes[field].strip()
+    if "bullets" in changes:
+        changes["bullets"] = _clean_bullets(changes["bullets"])
+    _check_dates(changes.get("start_date", entry.start_date), changes.get("end_date", entry.end_date))
+    for field, value in changes.items():
+        setattr(entry, field, value)
+    await _order_work_history(db, profile.id)
     await db.commit()
     await db.refresh(entry)
     return entry
@@ -269,13 +332,10 @@ async def add_work_history(data: WorkHistoryCreate, user_id: CurrentUserId, db: 
 
 @router.delete("/work-history/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_work_history(entry_id: UUID, user_id: CurrentUserId, db: DbSession):
-    profile = await _get_profile(user_id, db)
-    await db.execute(
-        delete(CandidateWorkHistory).where(
-            CandidateWorkHistory.id == entry_id,
-            CandidateWorkHistory.profile_id == profile.id,
-        )
-    )
+    profile, entry = await _own_work_history(db, user_id, entry_id)
+    await db.delete(entry)
+    await db.flush()
+    await _order_work_history(db, profile.id)
     await db.commit()
 
 
@@ -294,7 +354,16 @@ async def list_skills(user_id: CurrentUserId, db: DbSession):
 @router.post("/skills", response_model=SkillResponse, status_code=status.HTTP_201_CREATED)
 async def add_skill(data: SkillCreate, user_id: CurrentUserId, db: DbSession):
     profile = await _get_profile(user_id, db)
-    skill = CandidateSkill(profile_id=profile.id, **data.model_dump())
+    name = " ".join(data.skill_name.split())
+    existing = (await db.execute(
+        select(CandidateSkill).where(
+            CandidateSkill.profile_id == profile.id,
+            func.lower(CandidateSkill.skill_name) == name.lower(),
+        )
+    )).scalars().first()
+    if existing is not None:
+        raise HTTPException(status_code=409, detail=f"{existing.skill_name} is already one of your skills")
+    skill = CandidateSkill(profile_id=profile.id, **{**data.model_dump(), "skill_name": name})
     db.add(skill)
     await db.commit()
     await db.refresh(skill)
