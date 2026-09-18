@@ -1,0 +1,14 @@
+# The application sender: the backend plus a real browser.
+# Built from the repo root so it can take the extension's form filler.
+FROM mcr.microsoft.com/playwright/python:v1.63.0-noble
+
+WORKDIR /app
+ENV PYTHONUNBUFFERED=1 PYTHONPATH=/app FORM_FILLER_PATH=/app/form_filler.js
+
+COPY backend/requirements.txt backend/requirements-sender.txt ./
+RUN pip install --no-cache-dir --break-system-packages -r requirements-sender.txt
+
+COPY backend/ ./
+COPY extension/fill.js /app/form_filler.js
+
+CMD ["python", "-m", "app.services.auto_apply.sender"]

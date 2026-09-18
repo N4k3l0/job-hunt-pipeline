@@ -1,0 +1,3 @@
+# The sender runs a real browser, which the API and scheduler don't need.
+-r requirements.txt
+playwright==1.63.0
