@@ -219,6 +219,13 @@ export default function ProfilePage() {
   const [profileSaved, setProfileSaved] = useState(false);
   const [prefsSaved, setPrefsSaved] = useState(false);
   const [activeTab, setActiveTab] = useState<"profile" | "resumes" | "preferences">("profile");
+
+  // Links can point straight at a tab (?tab=preferences). Read after mount
+  // so the server and the first client render still match.
+  useEffect(() => {
+    const wanted = new URLSearchParams(window.location.search).get("tab");
+    if (wanted === "profile" || wanted === "resumes" || wanted === "preferences") setActiveTab(wanted);
+  }, []);
   const [setupDismissed, setSetupDismissed] = useState(false);
 
   // Compute completeness — drives the setup checklist banner. Each step is a
