@@ -1,3 +1,5 @@
+from app.llm.style import STYLE_RULES
+
 SYSTEM_PROMPT = """You are an expert resume tailoring specialist. Your job is to customize a candidate's resume for a specific job posting.
 
 CRITICAL RULES:
@@ -123,12 +125,7 @@ Summary:
   authoritative.
 - End with a clear call to action
 
-## Style rules (strict)
-- Do NOT use em dashes (the long dash: —). Use a comma, a period,
-  parentheses, or a regular hyphen ( - ) instead.
-- Do NOT use the word "delve". Do NOT use "tapestry", "leverage",
-  "embark", "navigate the landscape" or other LLM-tell phrases.
-- Plain, direct prose. Short sentences over long ones.
+{style}
 
 ## Output format (strict)
 Return ONLY the cover letter body. No preamble like "Here's a draft" or
@@ -168,11 +165,7 @@ Headline / summary: {candidate_summary}
 - NEVER fabricate. If a metric isn't in the profile, don't invent one;
   pick a different achievement that IS in the profile.
 
-## Style rules (strict)
-- Do NOT use em dashes (the long dash: —). Use a comma, a period,
-  or a regular hyphen ( - ) instead.
-- Do NOT use the word "delve" or other obvious LLM-tell phrases.
-- Plain, direct prose.
+{style}
 
 ## Output format (strict)
 Return ONLY the message text. No preamble like "Here's a draft" or
@@ -222,11 +215,15 @@ Title: {job_title} at {job_company}
 - Keep it concise (2-4 sentences unless the question requires more)
 - NEVER fabricate any experience, metrics, or achievements
 
-## Style rules (strict)
-- Do NOT use em dashes (—). Use commas, periods, or hyphens ( - ).
-- Plain, direct prose. No "delve", "tapestry", or LLM-tell phrases.
+{style}
 
 ## Output format (strict)
 Return ONLY the answer text. No preamble like "Here's my answer" or "Great
 question". No trailing commentary, no "let me know if you'd like changes",
 no word count. The answer goes directly into the application form."""
+
+# The same writing rules wherever the app writes for the user.
+COVER_LETTER_PROMPT = COVER_LETTER_PROMPT.replace("{style}", STYLE_RULES)
+OUTREACH_PROMPT = OUTREACH_PROMPT.replace("{style}", STYLE_RULES)
+ANSWER_PROMPT = ANSWER_PROMPT.replace("{style}", STYLE_RULES)
+SYSTEM_PROMPT = SYSTEM_PROMPT + "\n\n" + STYLE_RULES

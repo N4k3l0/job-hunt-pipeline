@@ -5,18 +5,19 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.job import Job
-from app.models.candidate import CandidateProfile, Resume, SampleApplication
-from app.models.tailoring import TailoredApplication
 from app.llm.client import llm_client
 from app.llm.prompts.tailor_resume import (
+    ANSWER_PROMPT,
+    COVER_LETTER_PROMPT,
+    OUTREACH_PROMPT,
     SYSTEM_PROMPT,
     TAILOR_RESUME_PROMPT,
     TAILOR_TOOL,
-    COVER_LETTER_PROMPT,
-    OUTREACH_PROMPT,
-    ANSWER_PROMPT,
 )
+from app.llm.style import plain_english
+from app.models.candidate import CandidateProfile, Resume, SampleApplication
+from app.models.job import Job
+from app.models.tailoring import TailoredApplication
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,7 @@ _PREAMBLE_RE = re.compile(
     r"|"
     r"draft\s*\d*\s*[:\-]\s*\n+"
     r")",
-    re.I,
+    re.IGNORECASE,
 )
 _TRAILING_RE = re.compile(
     r"\n+\s*(?:"
@@ -75,8 +76,17 @@ _TRAILING_RE = re.compile(
     r"|"
     r"---+\s*\n+(?:notes?|alt(?:ernative)?s?|variants?)[^$]*"
     r")$",
-    re.I,
+    re.IGNORECASE,
 )
+
+
+def _written_plainly(resume: dict) -> dict:
+    """The resume's own words, in plain English. Everything else in the
+    tool result (keywords, matches) is left alone."""
+    resume["tailored_summary"] = plain_english(resume.get("tailored_summary"))
+    for role in resume.get("selected_experience") or []:
+        role["bullets"] = [plain_english(b) for b in role.get("bullets") or []]
+    return resume
 
 
 def _strip_llm_fluff(text: str) -> str:
@@ -227,6 +237,7 @@ async def generate_tailored_application(
         user_prompt=resume_prompt,
         tools=[TAILOR_TOOL],
     )
+    tailored_resume = _written_plainly(tailored_resume)
 
     # ── Step 2: Generate cover letter ─────────────────────────────────────
     logger.info("Generating cover letter for job %s", job_id)
@@ -263,7 +274,7 @@ async def generate_tailored_application(
             )
         ),
     )
-    cover_letter = _strip_llm_fluff(cover_letter_raw)
+    cover_letter = plain_english(_strip_llm_fluff(cover_letter_raw))
 
     # ── Step 3: Message to a hiring manager ───────────────────────────────
     # Only when asked for: it's written after an application is sent, from
@@ -293,7 +304,7 @@ async def generate_tailored_application(
             ),
             max_tokens=500,
         )
-        outreach = _strip_llm_fluff(outreach_raw)
+        outreach = plain_english(_strip_llm_fluff(outreach_raw))
 
     # ── Step 4: Generate screening answers (if applicable) ────────────────
     short_answers = {}
@@ -317,7 +328,7 @@ async def generate_tailored_application(
             # Strip "Here's the answer:" / "Let me know if..." patterns —
             # screening answers go straight into the application form so
             # any preamble shows up verbatim to the recruiter.
-            short_answers[q] = _strip_llm_fluff(answer)
+            short_answers[q] = plain_english(_strip_llm_fluff(answer))
 
     # ── Store results ─────────────────────────────────────────────────────
     keyword_matches = {

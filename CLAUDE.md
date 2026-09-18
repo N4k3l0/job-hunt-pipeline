@@ -99,6 +99,7 @@ Keep a single head: `alembic heads` should print one revision.
 - **Opus 5** (`claude-opus-5`): nothing today. Tailoring runs on every application now, so it moved to Sonnet — about a fifth of the cost for the same writing. Put a task back on Opus by changing `MODELS`; the server-side fallback is already wired for it
 - Model IDs and per-task effort live only in `llm/client.py` (`MODELS`, `EFFORT`). Don't pass `temperature` — current models and SDK 1.x reject it
 - **HARD RULE:** Never fabricate experience, tools, metrics, or employers in tailored content
+- **HARD RULE:** Everything written for a user (resume, cover letter, message to a hiring manager, form answers, fit analysis) is plain, simple English that sounds like a person, with no em dashes. The rules live once in `llm/style.py` (`STYLE_RULES`, in every writing prompt) and `plain_english()` cleans the output, since a model still slips
 - All generated content validated against candidate's structured profile before showing to user
 - Track token usage per call for cost management
 

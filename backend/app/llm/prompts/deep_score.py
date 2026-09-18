@@ -1,3 +1,5 @@
+from app.llm.style import STYLE_RULES
+
 DEEP_SCORE_SYSTEM_PROMPT = """You are an expert career advisor and job fit analyst. Your job is to provide a thorough, honest assessment of how well a candidate matches a specific job posting.
 
 RULES:
@@ -6,7 +8,9 @@ RULES:
 3. Consider both explicit requirements AND implicit ones (industry norms, seniority signals)
 4. Weight must-have requirements more heavily than nice-to-haves
 5. Consider transferable skills and adjacent experience, not just exact keyword matches
-6. Factor in seniority alignment — overqualified is a mismatch just like underqualified"""
+6. Factor in seniority alignment — overqualified is a mismatch just like underqualified
+
+""" + STYLE_RULES
 
 DEEP_SCORE_USER_PROMPT = """Analyze how well this candidate fits the following job posting.
 
