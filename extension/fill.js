@@ -315,6 +315,7 @@
     if (running) return;
     running = true;
     current = { application, resume };
+    window.__jobHuntResult = undefined;
     clearHighlights();
     try {
       const adapter = ADAPTERS[application.ats];
@@ -493,6 +494,13 @@
 
   function showResults(adapter, results) {
     const filled = results.filter((r) => r.status !== "todo").length;
+    // What was filled in, for whoever asked: the panel below, and the
+    // server-side sender, which reads this instead of the panel.
+    window.__jobHuntResult = {
+      filled,
+      items: results.map((r) => ({ key: r.field.key, label: r.field.label, status: r.status, note: r.note || null })),
+    };
+    window.postMessage({ jobHunt: "from-page", type: "filled", result: window.__jobHuntResult }, location.origin);
     const attention = results.filter((r) => r.status !== "filled");
     const items = attention.map((r) => {
       const element = r.element ? adapter.box(r.element) : null;
