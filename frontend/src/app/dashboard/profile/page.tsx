@@ -36,6 +36,7 @@ import {
 import { useToast } from "@/components/ui/toast";
 import { COUNTRY_OPTIONS } from "@/lib/countries";
 import { HomeCountrySelect } from "@/components/home-country-select";
+import { ApplicationAnswersCard } from "@/components/application-answers-card";
 import { EmailUpdatesCard } from "@/components/email-updates-card";
 import { JobAlertsCard } from "@/components/job-alerts-card";
 import { SkillsCard, WorkHistoryCard } from "@/components/profile-details-editor";
@@ -719,6 +720,8 @@ export default function ProfilePage() {
 
         {/* ── Preferences Tab ────────────────────────────────────── */}
         <TabsContent value="preferences" className="space-y-4 mt-4">
+          <ApplicationAnswersCard />
+
           <EmailUpdatesCard />
 
           <JobAlertsCard />

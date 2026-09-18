@@ -150,17 +150,17 @@ def test_previous_employment_is_suggested_not_confirmed():
 def test_saved_answers_are_reused():
     question = field("q", "How did you hear about this job?", "select",
                      options=[{"label": "LinkedIn", "value": "11"}, {"label": "Job board", "value": "12"}])
-    same_question_elsewhere = field("other", "How did you hear about this job?", "select",
+    same_question_elsewhere = field("other", "Please tell us how you heard about this opportunity.", "select",
                                     options=[{"label": "Job Board", "value": "b"}, {"label": "Referral", "value": "r"}])
     stored = saved_answer_for(question, "12")
     assert stored == {"labels": ["Job board"]}
 
-    saved = {question_key(question): {**stored, "fresh": True}}
+    saved = {question_key(question, "referral_source"): {**stored, "fresh": True}}
     answers = fill([same_question_elsewhere], saved=saved)
     assert answers["other"]["value"] == "b" and answers["other"]["source"] == "saved"
     assert not needs_attention(same_question_elsewhere, answers["other"])
 
-    stale = {question_key(question): {**stored, "fresh": False}}
+    stale = {question_key(question, "referral_source"): {**stored, "fresh": False}}
     answers = fill([same_question_elsewhere], saved=stale)
     assert answers["other"]["value"] == "b" and not answers["other"]["confirmed"]
 
@@ -192,3 +192,46 @@ def test_helpers():
     assert countries_in("Are you authorized to work in the US?") == ["US"]
     assert countries_in("Tell us about yourself") == []
     assert countries_in("Can you work in the United Kingdom or Ireland?") == ["IE", "GB"]
+
+
+# ─── Answers that are facts about the person, not about the job ───────────
+
+
+def test_the_repeated_questions_come_from_the_profile():
+    """Every employer asks these, each in their own words."""
+    applicant = facts(earliest_start="1 month", open_to_relocation=True, languages=["English"],
+                      university="University of Ibadan")
+    form = [
+        field("q1", "When is the earliest you would want to start working with us?"),
+        field("q2", "Are you open to relocation for this role?", "select", options=YES_NO),
+        field("q3", "Language Skill(s) (Check all that apply)", "multiselect",
+              options=[{"label": "English (ENG)", "value": "English (ENG)"},
+                       {"label": "French (FRA)", "value": "French (FRA)"}]),
+        field("q4", "Which university did you last attend?", "select",
+              options=[{"label": "University of Ibadan", "value": "ui"}, {"label": "Other", "value": "other"}]),
+    ]
+    answers = fill(form, applicant)
+    assert answers["q1"]["value"] == "1 month"
+    assert answers["q2"]["value"] == "1"
+    assert answers["q3"]["value"] == ["English (ENG)"]
+    assert answers["q4"]["value"] == "ui"
+    assert all(answers[key]["source"] == "profile" for key in ("q1", "q2", "q3", "q4"))
+
+
+def test_a_standard_answer_is_reused_however_the_next_form_words_it():
+    """The answer is remembered by what the question means, so a differently
+    worded question on the next form doesn't ask the user again."""
+    asked = field("notice", "When is the earliest you would want to start working with us?")
+    saved = {question_key(asked, "start_date"): {"text": "1 month", "fresh": True}}
+
+    asked_differently = field("start", "What is your notice period?")
+    answers = fill([asked_differently], saved=saved)
+    assert answers["start"]["value"] == "1 month"
+    assert answers["start"]["source"] == "saved"
+
+
+def test_a_company_question_is_never_reused_from_another_company():
+    saved = {question_key(field("why", "Why do you want to work at Anthropic?"), "question"):
+             {"text": "Because of the research.", "fresh": True}}
+    answers = fill([field("why2", "Why do you want to work at Palantir?")], saved=saved)
+    assert "why2" not in answers or answers["why2"].get("value") is None

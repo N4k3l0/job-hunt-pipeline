@@ -23,6 +23,7 @@ JOB_A = uuid.UUID("00000000-0000-0000-0000-0000000a0001")
 JOB_B = uuid.UUID("00000000-0000-0000-0000-0000000a0002")
 JOB_UNSUPPORTED = uuid.UUID("00000000-0000-0000-0000-0000000a0003")
 JOB_CLOSED = uuid.UUID("00000000-0000-0000-0000-0000000a0004")
+JOB_BASICS = uuid.UUID("00000000-0000-0000-0000-0000000a0005")
 
 HEAR = {"required": True, "label": "How did you hear about this job?", "fields": [
     {"name": "question_hear", "type": "multi_value_single_select",
@@ -46,6 +47,16 @@ FORMS = {
     ], "compliance": [{"type": "eeoc", "questions": [
         {"required": False, "label": "Gender", "fields": [{"name": "gender", "type": "multi_value_single_select",
          "values": [{"label": "Female", "value": 1}, {"label": "Decline To Self Identify", "value": 3}]}]}]}]},
+    "333": {"questions": [
+        {"required": True, "label": "Will you now or in the future require sponsorship for employment visa status?",
+         "fields": [{"name": "question_sponsor", "type": "multi_value_single_select",
+                     "values": [{"label": "Yes", "value": 1}, {"label": "No", "value": 0}]}]},
+        {"required": True, "label": "When is the earliest you would want to start working with us?",
+         "fields": [{"name": "question_start", "type": "input_text"}]},
+        {"required": True, "label": "Are you open to relocation for this role?",
+         "fields": [{"name": "question_relocate", "type": "multi_value_single_select",
+                     "values": [{"label": "Yes", "value": 1}, {"label": "No", "value": 0}]}]},
+    ]},
     "222": {"questions": [
         {"required": True, "label": "First Name", "fields": [{"name": "first_name", "type": "input_text"}]},
         HEAR,
@@ -94,6 +105,7 @@ async def client(monkeypatch):
             (JOB_B, "https://job-boards.greenhouse.io/acme/jobs/222"),
             (JOB_UNSUPPORTED, "https://www.linkedin.com/jobs/view/1"),
             (JOB_CLOSED, "https://job-boards.greenhouse.io/acme/jobs/404"),
+            (JOB_BASICS, "https://job-boards.greenhouse.io/acme/jobs/333"),
         ):
             await conn.execute(text(
                 "INSERT INTO jobs (id, company, title, status, job_url, country) "
@@ -146,7 +158,9 @@ async def test_prepare_answer_and_queue(client):
     assert body["open_count"] == 5
     # Only questions the rules couldn't answer are drafted. Agreements never
     # are, nor whether the user interviewed there before: no profile says.
-    assert client.drafted_for == [["question_why", "question_hear"]]
+    # Nor where they heard about the job, which is theirs to say once and
+    # is then remembered for every later form.
+    assert client.drafted_for == [["question_why"]]
 
     # Approving with questions still open is refused and names them.
     r = await client.put(f"/api/v1/auto-apply/{app_id}/answers", json={
@@ -232,3 +246,26 @@ async def test_sent_applications_are_left_alone(client):
     r = await client.put(f"/api/v1/auto-apply/{app_id}/answers", json={"answers": {"first_name": "Bo"}})
     assert r.status_code == 422
     assert (await client.post(f"/api/v1/auto-apply/{app_id}/cancel")).status_code == 422
+
+
+async def test_answers_every_form_asks_for_are_kept_on_the_profile(client):
+    """Work rights, start date and relocation are facts about the person.
+    Answered once, they fill themselves in on the next form, whatever
+    words it uses. Work rights are kept per country."""
+    from app.core.database import engine
+
+    app_id = (await client.post(f"/api/v1/auto-apply/jobs/{JOB_BASICS}")).json()["id"]
+    r = await client.put(f"/api/v1/auto-apply/{app_id}/answers", json={
+        "answers": {"question_sponsor": "1", "question_start": "1 month", "question_relocate": "1"},
+        "approve": True,
+    })
+    assert r.status_code == 200 and r.json()["status"] == "queued", r.text
+
+    async with engine.connect() as conn:
+        profile = (await conn.execute(text(
+            "SELECT visa_statuses, earliest_start, open_to_relocation FROM candidate_profiles WHERE user_id = :u"
+        ), {"u": USER})).one()
+    # The job is in the US, so that's the country the answer is about.
+    assert profile.visa_statuses == {"US": "need_sponsorship"}
+    assert profile.earliest_start == "1 month"
+    assert profile.open_to_relocation is True

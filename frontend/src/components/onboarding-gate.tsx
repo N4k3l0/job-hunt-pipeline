@@ -46,6 +46,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 import { COUNTRY_OPTIONS } from "@/lib/countries";
+import { ApplicationAnswersPrompt } from "@/components/application-answers-card";
 import { HomeCountryPrompt, HomeCountrySelect } from "@/components/home-country-select";
 
 // Remembers that this browser's user finished setup, so the page can start
@@ -104,6 +105,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     return (
       <>
         {!hasHomeCountry && <HomeCountryPrompt />}
+        {hasHomeCountry && <ApplicationAnswersPrompt />}
         {children}
       </>
     );
