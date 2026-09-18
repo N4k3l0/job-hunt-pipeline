@@ -197,8 +197,14 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true", default=os.environ.get("SEND_DRY_RUN") == "true")
     args = parser.parse_args()
     if not args.application_id:
-        raise SystemExit("Pass an application id (or set SEND_APPLICATION_ID)")
-    outcome = asyncio.run(send_application(uuid.UUID(args.application_id), dry_run=args.dry_run))
+        logger.info("Nothing to send: no application id. Set SEND_APPLICATION_ID to send one.")
+        return
+    try:
+        outcome = asyncio.run(send_application(uuid.UUID(args.application_id), dry_run=args.dry_run))
+    except SendRefused as e:
+        # A refusal is an answer, not a failure: say it and stop cleanly.
+        logger.info("Not sending: %s", e)
+        return
     logger.info("Outcome: %s", json.dumps(outcome)[:2000])
 
 
