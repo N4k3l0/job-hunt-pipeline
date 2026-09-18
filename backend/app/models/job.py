@@ -113,8 +113,10 @@ class JobEntity(Base):
     years_experience_min: Mapped[int | None] = mapped_column(Integer)
     years_experience_max: Mapped[int | None] = mapped_column(Integer)
     # ISO-2 codes the posting accepts applicants from (e.g. ["US"] for a
-    # US-only remote role). NULL = unrestricted or unknown.
-    eligible_countries: Mapped[list[str] | None] = mapped_column(JSONB)
+    # US-only remote role). NULL = unrestricted or unknown, so None is
+    # stored as SQL NULL: a JSON null here breaks every inbox query
+    # (jsonb_array_length can't read a scalar).
+    eligible_countries: Mapped[list[str] | None] = mapped_column(JSONB(none_as_null=True))
     # Set when the extraction model has read the posting.
     enriched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
