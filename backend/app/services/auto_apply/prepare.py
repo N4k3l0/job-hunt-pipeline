@@ -80,6 +80,10 @@ async def load_applicant(db: AsyncSession, user_id: uuid.UUID) -> tuple[rules.Ap
         salary_min=profile.salary_min if profile else None,
         salary_currency=profile.salary_currency if profile else None,
         has_resume=resume is not None,
+        earliest_start=profile.earliest_start if profile else None,
+        open_to_relocation=profile.open_to_relocation if profile else None,
+        languages=(profile.languages if profile else None) or [],
+        university=next((e.institution for e in (profile.education if profile else []) if e.institution), None),
     )
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=rules.SAVED_ANSWER_FRESH_DAYS)
@@ -318,8 +322,11 @@ async def update_answers(
 
 
 async def _remember_answers(db: AsyncSession, application: AutoApplication) -> None:
-    job = await db.get(Job, application.job_id)
-    job_facts = rules.JobFacts(company=(job.company if job else "") or "")
+    job = await db.get(Job, application.job_id, options=[selectinload(Job.entities)])
+    # The country matters: "do you need sponsorship" has a different answer
+    # per country, so the job's country is part of what gets remembered.
+    job_facts = rules.JobFacts(company=(job.company if job else "") or "",
+                               country=_job_country(job) if job else None)
     kinds = rules.kinds(application.form, job_facts)
     profile = (await db.execute(
         select(CandidateProfile).where(CandidateProfile.user_id == application.user_id)
@@ -330,23 +337,56 @@ async def _remember_answers(db: AsyncSession, application: AutoApplication) -> N
         if not entry or entry.get("source") != "user":
             continue
         kind = kinds[item["key"]]
-        if profile is not None and kind == "phone" and not profile.phone:
-            profile.phone = str(entry["value"])[:40]
-        if profile is not None and kind == "location" and not profile.current_location:
-            profile.current_location = str(entry["value"])[:255]
+        if profile is not None:
+            _remember_on_profile(profile, item, kind, entry["value"], job_facts)
         if kind not in rules.REUSABLE_KINDS:
             continue
         stored = rules.saved_answer_for(item, entry["value"])
         if stored is None:
             continue
         statement = insert(SavedAnswer).values(
-            id=uuid.uuid4(), user_id=application.user_id, question_key=rules.question_key(item),
+            id=uuid.uuid4(), user_id=application.user_id, question_key=rules.question_key(item, kind),
             label=item["label"], answer=stored,
         )
         await db.execute(statement.on_conflict_do_update(
             constraint="uq_saved_answers_user_question",
             set_={"answer": stored, "label": item["label"], "updated_at": datetime.now(timezone.utc)},
         ))
+
+
+def _remember_on_profile(profile: CandidateProfile, item: dict, kind: str, value, job: rules.JobFacts) -> None:
+    """Keep the answers that are facts about the person, not about the job.
+    Work rights are kept per country: the answer for the UK says nothing
+    about the US."""
+    text = str(value)
+    if kind == "phone" and not profile.phone:
+        profile.phone = text[:40]
+    elif kind == "location" and not profile.current_location:
+        profile.current_location = text[:255]
+    elif kind == "start_date" and not profile.earliest_start:
+        profile.earliest_start = _option_label(item, value)[:120]
+    elif kind == "relocation" and profile.open_to_relocation is None:
+        said_yes = rules.normalize_label(_option_label(item, value)) in ("yes", "true")
+        profile.open_to_relocation = value is True or said_yes
+    elif kind == "languages" and not profile.languages:
+        labels = [_option_label(item, v) for v in (value if isinstance(value, list) else [value])]
+        profile.languages = [label for label in labels if label]
+    elif kind in ("work_authorization", "sponsorship"):
+        country = rules.question_country(item, job)
+        statuses = dict(profile.visa_statuses or {})
+        if country and country not in statuses:
+            said_yes = value is True or rules.normalize_label(_option_label(item, value)) in ("yes", "true")
+            needs_sponsorship = said_yes if kind == "sponsorship" else not said_yes
+            statuses[country] = "need_sponsorship" if needs_sponsorship else "work_visa"
+            profile.visa_statuses = statuses
+
+
+def _option_label(item: dict, value) -> str:
+    """What the user picked, as the words on the form."""
+    for option in item.get("options") or []:
+        if option["value"] == value:
+            return option["label"]
+    return str(value)
 
 
 async def cancel_application(db: AsyncSession, application: AutoApplication) -> AutoApplication:

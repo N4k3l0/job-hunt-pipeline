@@ -294,6 +294,10 @@ export interface CandidateProfile {
   /** ISO-2 code of where the candidate lives; hides remote jobs they aren't eligible for. */
   home_country: string | null;
   visa_statuses: Record<string, string> | null;
+  /** Answers every application form asks for, kept once. */
+  earliest_start?: string | null;
+  open_to_relocation?: boolean | null;
+  languages?: string[] | null;
   remote_preference: string | null;
   salary_min: number | null;
   salary_max: number | null;

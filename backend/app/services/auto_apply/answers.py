@@ -60,6 +60,10 @@ class ApplicantFacts:
     salary_min: int | None = None
     salary_currency: str | None = None
     has_resume: bool = False
+    earliest_start: str | None = None
+    open_to_relocation: bool | None = None
+    languages: list[str] = field(default_factory=list)
+    university: str | None = None
 
 
 @dataclass
@@ -77,7 +81,15 @@ def normalize_label(label: str) -> str:
     return text.strip(" ?:.!").strip()
 
 
-def question_key(item: dict) -> str:
+# Questions every employer asks in their own words. One answer covers
+# them all, so they're remembered by meaning instead of by wording.
+STANDARD_KINDS = {"start_date", "relocation", "languages", "university", "referral_source",
+                  "years_experience", "salary"}
+
+
+def question_key(item: dict, kind: str | None = None) -> str:
+    if kind in STANDARD_KINDS:
+        return hashlib.sha256(f"kind:{kind}".encode()).hexdigest()
     family = "choice" if item["type"] in ("select", "multiselect", "boolean") else "text"
     return hashlib.sha256(f"{family}:{normalize_label(item['label'])}".encode()).hexdigest()
 
@@ -108,7 +120,7 @@ def choose_option(item: dict, *wanted: str) -> str | None:
     """Value of the first option whose label starts with one of `wanted`
     as whole words ("no" matches "No, thanks" but not "None")."""
     for w in wanted:
-        pattern = re.compile(rf"{re.escape(w)}(?![a-z0-9])")
+        pattern = re.compile(rf"{re.escape(normalize_label(w))}(?![a-z0-9])")
         for option in item.get("options") or []:
             if pattern.match(normalize_label(option["label"])):
                 return option["value"]
@@ -199,6 +211,16 @@ def classify(item: dict, job: JobFacts) -> str:
         return "previous_company_contact"
     if re.fullmatch(r"(how many )?years of (professional |relevant |work |full.?time )?experience( do you have)?", label):
         return "years_experience"
+    if re.search(r"\b(relocat)", label):
+        return "relocation"
+    if re.search(r"earliest .*(start|available)|when (can|could|would) you (be able to )?start|start date|notice period|availability to start", label):
+        return "start_date"
+    if re.search(r"\blanguages?\b", label):
+        return "languages"
+    if re.search(r"\b(university|college)\b|school (you )?(attend|last attended|graduated)", label):
+        return "university"
+    if re.search(r"how (did |do )?you (hear|heard) about|where did you (hear|find out) about|how were you referred", label):
+        return "referral_source"
     if re.search(r"\b(salary|compensation|pay) (expectation|requirement)s?|expected (salary|compensation)|desired (salary|compensation)", label):
         return "salary"
     if key == "pronouns" or label == "pronouns":
@@ -209,18 +231,17 @@ def classify(item: dict, job: JobFacts) -> str:
 # ─── Rules ──────────────────────────────────────────────────────────────────
 
 
-def _question_country(item: dict, job: JobFacts) -> str | None:
+def question_country(item: dict, job: JobFacts) -> str | None:
+    """Which country a work-rights question is about. A question naming one
+    country means that one; naming several means the app can't tell. A
+    question naming none is about the job's own country, which is how the
+    applicant reads it too."""
     named = countries_in(f"{item['label']} {item.get('description') or ''}")
     if len(named) == 1:
         return named[0]
     if named:
         return None
-    if re.search(
-        r"(where|in which) (the|this) (job|role|position)|in this country|for this (job|role|position)|the job'?s? location",
-        normalize_label(item["label"]),
-    ):
-        return job.country
-    return None
+    return job.country
 
 
 def _country_option(item: dict, code: str) -> str | None:
@@ -257,6 +278,36 @@ def _from_profile(item: dict, kind: str, facts: ApplicantFacts, job: JobFacts) -
             return None
         return answer(value, "profile")
 
+    if kind == "relocation" and facts.open_to_relocation is not None:
+        value = yes_no(item, facts.open_to_relocation)
+        if value is not None:
+            return answer(value, "profile")
+        return None
+
+    if kind == "start_date" and facts.earliest_start:
+        if item["type"] in ("select", "multiselect"):
+            chosen = choose_option(item, facts.earliest_start)
+            return answer(chosen, "profile") if chosen else None
+        return answer(facts.earliest_start, "profile")
+
+    if kind == "languages" and facts.languages:
+        if item["type"] in ("select", "multiselect"):
+            chosen = [
+                option["value"]
+                for option in item.get("options") or []
+                if any(normalize_label(option["label"]).startswith(normalize_label(lang)) for lang in facts.languages)
+            ]
+            if not chosen:
+                return None
+            return answer(chosen if item["type"] == "multiselect" else chosen[0], "profile")
+        return answer(", ".join(facts.languages), "profile")
+
+    if kind == "university" and facts.university:
+        if item["type"] in ("select", "multiselect"):
+            chosen = choose_option(item, facts.university)
+            return answer([chosen] if item["type"] == "multiselect" else chosen, "profile") if chosen else None
+        return answer(facts.university, "profile")
+
     if kind == "resume":
         return answer("resume", "profile") if facts.has_resume else {
             "value": None, "source": None, "confirmed": False, "note": "Upload your resume first."}
@@ -270,7 +321,7 @@ def _from_profile(item: dict, kind: str, facts: ApplicantFacts, job: JobFacts) -
         return answer(COUNTRY_NAMES.get(facts.home_country, facts.home_country), "profile")
 
     if kind in ("work_authorization", "sponsorship"):
-        country = _question_country(item, job)
+        country = question_country(item, job)
         if not country:
             return None
         status = (facts.visa_statuses or {}).get(country)
@@ -296,11 +347,11 @@ def _from_profile(item: dict, kind: str, facts: ApplicantFacts, job: JobFacts) -
     return None
 
 
-def _saved(item: dict, saved: dict[str, dict]) -> dict | None:
+def _saved(item: dict, saved: dict[str, dict], kind: str | None = None) -> dict | None:
     """The user's earlier answer to the same question. Answers older than
     SAVED_ANSWER_FRESH_DAYS are offered for confirmation instead, since
     things like start dates and salary change."""
-    stored = saved.get(question_key(item))
+    stored = saved.get(question_key(item, kind))
     if not stored:
         return None
     source = "saved" if stored.get("fresh") else "suggested"
@@ -344,7 +395,7 @@ def saved_answer_for(item: dict, value) -> dict | None:
     return {"text": str(value)}
 
 
-REUSABLE_KINDS = {"question", "previous_company_contact", "years_experience", "salary", "sponsorship", "work_authorization"}
+REUSABLE_KINDS = {"question", "previous_company_contact", "sponsorship", "work_authorization"} | STANDARD_KINDS
 
 
 def fill_answers(
@@ -360,7 +411,7 @@ def fill_answers(
         kind = classify(item, job)
         result = _from_profile(item, kind, facts, job)
         if (result is None or result.get("value") is None) and kind in REUSABLE_KINDS:
-            result = _saved(item, saved) or result
+            result = _saved(item, saved, kind) or result
 
         if result is None and kind == "voluntary":
             value = None

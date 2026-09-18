@@ -23,6 +23,9 @@ class ProfileBase(BaseModel):
     salary_max: int | None = None
     salary_currency: str = "USD"
     links: dict | None = None
+    earliest_start: str | None = None
+    open_to_relocation: bool | None = None
+    languages: list[str] | None = None
     phone: str | None = None
     current_location: str | None = None
     # Interests / custom search terms. Also feed job discovery.

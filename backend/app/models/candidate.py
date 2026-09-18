@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, date
 
-from sqlalchemy import String, Text, DateTime, Date, Float, Integer, ForeignKey, Index, func
+from sqlalchemy import Boolean, String, Text, DateTime, Date, Float, Integer, ForeignKey, Index, func
 from sqlalchemy.dialects.postgresql import UUID, JSONB, ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -35,6 +35,11 @@ class CandidateProfile(Base):
     # Contact details application forms ask for.
     phone: Mapped[str | None] = mapped_column(String(40))
     current_location: Mapped[str | None] = mapped_column(String(255))  # e.g. "Lagos, Nigeria"
+    # Answers application forms ask for again and again. Filled in once,
+    # here or on the first form that asks, then reused everywhere.
+    earliest_start: Mapped[str | None] = mapped_column(String(120))  # e.g. "Immediately", "1 month"
+    open_to_relocation: Mapped[bool | None] = mapped_column(Boolean)
+    languages: Mapped[list[str] | None] = mapped_column(ARRAY(String))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
