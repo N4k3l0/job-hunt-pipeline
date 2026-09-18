@@ -19,7 +19,7 @@ A private, invite-only, multi-user web application that discovers job postings f
 - **Job Discovery:** company job boards (Greenhouse, Lever, Ashby), JSearch, Arbeitnow, RemoteOK, Himalayas, Remotive, We Work Remotely, DailyRemote, Undutchables, Working Nomads, Wellfound, Jobberman, MyJobMag, and users' LinkedIn job alert emails
 - **Page Parsing:** Firecrawl API
 - **AI/LLM:** Claude API (see "LLM Usage")
-- **Tailored resume PDFs:** the browser's print-to-PDF on `/dashboard/review/[id]/print`
+- **Tailored resume PDFs:** drawn by the backend with fpdf2 (`services/auto_apply/resume_pdf.py`) so applications can attach them; `/dashboard/review/[id]/print` stays for saving one by hand
 - **Hosting:** frontend on Vercel; backend and scheduler on Railway; Supabase for database, auth and storage. The backend's Vercel project stays deployed as a rollback target
 
 ### Monorepo Structure
