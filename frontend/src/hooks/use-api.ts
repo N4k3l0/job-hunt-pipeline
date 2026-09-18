@@ -620,6 +620,16 @@ export function useApplicationDocuments(id: string, enabled = true) {
   });
 }
 
+/** Draft a message to a person about a sent application. Costs a Claude
+ *  call, so it only runs when the user asks. */
+export function useDraftFollowUp(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<{ message: string; drafted_at: string }>(`/api/v1/auto-apply/${id}/follow-up`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["auto-apply", id] }),
+  });
+}
+
 /** The user sent the application themselves. */
 export function useMarkAutoApplicationSent(id: string) {
   const qc = useQueryClient();

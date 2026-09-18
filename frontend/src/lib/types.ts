@@ -113,6 +113,8 @@ export interface AutoApplication {
 export interface AutoApplicationDetail extends AutoApplication {
   fields: AutoApplyField[];
   result: Record<string, unknown> | null;
+  /** The message drafted after sending, when the user asked for one. */
+  follow_up: { message: string; drafted_at: string } | null;
 }
 
 /** The files an application attaches. */

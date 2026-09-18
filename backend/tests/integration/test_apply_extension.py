@@ -204,3 +204,36 @@ async def test_a_tailored_resume_and_cover_letter_are_attached(client):
         assert path.startswith(f"applications/{USER}/{app_id}-")
         assert content.startswith(b"%PDF")
     assert all(len(content) > 800 for content in written.values())
+
+
+async def test_a_follow_up_is_written_only_after_the_application_is_sent(client, monkeypatch):
+    """The message to a hiring manager comes after sending, when the user
+    asks for it. Nothing is written for applications nobody sent."""
+    from app.services.outreach import follow_up as follow_up_service
+
+    prompts: list[str] = []
+
+    class FakeLLM:
+        async def generate(self, task_type, system_prompt, user_prompt, **kwargs):
+            prompts.append(user_prompt)
+            return "Hi Dana, I applied for the Product Manager role \u2014 I led the payments work at Acme. Ada"
+
+    monkeypatch.setattr(follow_up_service, "llm_client", FakeLLM(), raising=False)
+    monkeypatch.setattr("app.llm.client.llm_client", FakeLLM())
+
+    app_id = (await client.post(f"/api/v1/auto-apply/jobs/{JOB}")).json()["id"]
+    r = await client.post(f"/api/v1/auto-apply/{app_id}/follow-up")
+    assert r.status_code == 409 and "Send the application first" in r.json()["detail"]
+
+    await client.post(f"/api/v1/auto-apply/{app_id}/sent")
+    r = await client.post(f"/api/v1/auto-apply/{app_id}/follow-up")
+    assert r.status_code == 200, r.text
+    message = r.json()["message"]
+    # Written in plain English: the em dash the model produced is gone.
+    assert "\u2014" not in message and "Hi Dana," in message
+    assert r.json()["drafted_at"]
+
+    # It's kept on the application, and the prompt knew the job.
+    body = (await client.get(f"/api/v1/auto-apply/{app_id}")).json()
+    assert body["follow_up"]["message"] == message
+    assert "Product Manager" in prompts[0] and "Stripe" in prompts[0]
