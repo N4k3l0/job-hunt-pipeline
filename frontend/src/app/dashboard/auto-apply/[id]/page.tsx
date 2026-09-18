@@ -4,11 +4,12 @@ import { use, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft, Check, CheckCircle2, Copy, ExternalLink, FileText, Loader2, Pencil, Puzzle, RefreshCw, Wand2,
+  ArrowLeft, Check, CheckCircle2, Copy, ExternalLink, FileText, Loader2, Pencil, Puzzle, RefreshCw, Sparkles,
+  Wand2,
 } from "lucide-react";
 import {
-  useAutoApplication, useCancelAutoApplication, useMarkAutoApplicationSent, usePrepareAutoApplication,
-  useSaveAutoApplyAnswers,
+  useApplicationDocuments, useAutoApplication, useCancelAutoApplication, useMarkAutoApplicationSent,
+  usePrepareAutoApplication, useSaveAutoApplyAnswers,
 } from "@/hooks/use-api";
 import { useExtensionInstalled } from "@/hooks/use-extension";
 import { useToast } from "@/components/ui/toast";
@@ -74,8 +75,10 @@ function FieldInput({
       <div className="ds-muted flex items-center" style={{ gap: 6, fontSize: 13 }}>
         <FileText className="h-4 w-4" />
         {field.kind === "resume"
-          ? isEmpty(value) ? "Upload your resume on your profile first." : "Your latest resume is attached."
-          : "The app can't attach this file yet. Open the form to add it yourself."}
+          ? isEmpty(value) ? "Upload your resume on your profile first." : "Attached — see What gets sent above."
+          : field.kind === "cover_letter"
+            ? "Attached when the app has written one for this job."
+            : "The app can't attach this file. Open the form to add it yourself."}
       </div>
     );
   }
@@ -275,6 +278,66 @@ function Section({ title, hint, children }: { title: string; hint?: string; chil
         <div style={{ marginTop: -1 }}>{children}</div>
       </div>
     </section>
+  );
+}
+
+/** What goes to the employer: the resume, and the cover letter when the
+ *  form asks for one. Both are written for this job when tailoring ran. */
+function Documents({ id }: { id: string }) {
+  const { data, isLoading } = useApplicationDocuments(id);
+  if (isLoading || !data || (!data.resume && !data.cover_letter)) return null;
+
+  const files = [
+    data.resume && {
+      ...data.resume,
+      label: "Resume",
+      note: data.tailored ? "Written for this job" : "The one on your profile",
+      tailored: data.tailored,
+    },
+    data.cover_letter && {
+      ...data.cover_letter,
+      label: "Cover letter",
+      note: "Written for this job, because the form asks for one",
+      tailored: true,
+    },
+  ].filter(Boolean) as ({ url: string; filename: string; label: string; note: string; tailored: boolean })[];
+
+  return (
+    <Section title="What gets sent" hint="Attached to the application">
+      <div className="space-y-2">
+        {files.map((file) => (
+          <div
+            key={file.label}
+            className="flex flex-wrap items-center justify-between"
+            style={{ gap: 8, padding: "10px 0", borderTop: "1px solid var(--ds-line)" }}
+          >
+            <div className="flex items-center" style={{ gap: 10, minWidth: 0 }}>
+              <FileText className="h-4 w-4 ds-dim" />
+              <div style={{ minWidth: 0 }}>
+                <div className="flex items-center" style={{ gap: 6, fontSize: 14, fontWeight: 500 }}>
+                  {file.label}
+                  {file.tailored && (
+                    <span className="ds-pill accent" style={{ fontSize: 11 }}>
+                      <Sparkles className="h-3 w-3" /> Tailored
+                    </span>
+                  )}
+                </div>
+                <div className="ds-dim truncate" style={{ fontSize: 12 }}>{file.note}</div>
+              </div>
+            </div>
+            <a href={file.url} target="_blank" rel="noopener noreferrer" className="ds-btn ghost">
+              <ExternalLink className="h-3.5 w-3.5" /> Open
+            </a>
+          </div>
+        ))}
+      </div>
+      {data.tailored_id && (
+        <p className="ds-dim" style={{ fontSize: 12, marginTop: 10 }}>
+          <Link href="/dashboard/review" className="ds-accent-fg">Change the wording</Link> of the tailored resume or
+          cover letter.
+        </p>
+      )}
+    </Section>
   );
 }
 
@@ -534,6 +597,8 @@ export default function AutoApplicationPage({ params }: { params: Promise<{ id: 
             ]}
           />
         </div>
+
+        <Documents id={id} />
 
         {groups.needsYou.length > 0 && (
           <Section title="Needs you" hint="Answer these, or confirm what's suggested">

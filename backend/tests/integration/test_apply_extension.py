@@ -1,6 +1,7 @@
 """The browser extension: the fill-in it gets once answers are approved,
 and marking the application sent, from the extension or the app page."""
 
+import json
 import uuid
 
 import httpx
@@ -67,10 +68,17 @@ async def client(monkeypatch):
     async def fake_signed_url(bucket, path, expires_in=600):
         return f"https://storage.test/{bucket}/{path}?token=signed"
 
+    uploaded: dict[str, bytes] = {}
+
+    async def fake_upload(bucket, path, content, content_type):
+        uploaded[path] = content
+        return path
+
     monkeypatch.setattr(prepare, "http_client", lambda: httpx.AsyncClient(
         transport=httpx.MockTransport(lambda request: httpx.Response(200, json=FORM))))
     monkeypatch.setattr(prepare, "draft_answers", no_drafts)
     monkeypatch.setattr(extension, "signed_url", fake_signed_url)
+    monkeypatch.setattr(extension, "upload_file", fake_upload)
     monkeypatch.setattr(extension, "api_public_url", lambda: "https://api.test")
     monkeypatch.setattr(get_settings(), "supabase_jwt_secret", "test-secret")
 
@@ -81,6 +89,7 @@ async def client(monkeypatch):
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test", headers={"x-test-user": str(USER)},
     ) as c:
+        c.uploaded = uploaded
         yield c
     app.dependency_overrides.clear()
 
@@ -114,7 +123,7 @@ async def test_fill_in_then_the_extension_reports_it_sent(client):
     assert fields["resume"]["kind"] == "resume" and fields["cover_letter"]["kind"] == "cover_letter"
     assert fill["resume"] == {
         "url": "https://storage.test/resumes/ada/abc.pdf?token=signed",
-        "filename": "Ada Resume.pdf",
+        "filename": "Ada Obi Resume.pdf",
         "content_type": "application/pdf",
     }
     assert fill["sent_url"] == f"https://api.test/api/v1/auto-apply/{app_id}/sent-by-extension"
@@ -158,3 +167,40 @@ async def test_user_marks_it_sent_themselves(client):
     r = await client.post(f"/api/v1/auto-apply/{cancelled}/sent")
     assert r.status_code == 422
     assert await _tracking(JOB_2) == []
+
+
+TAILORED = {
+    "tailored_summary": "I build LLM systems that ship.",
+    "selected_experience": [
+        {"company": "Acme", "title": "Product Manager", "dates": "2019 - Present",
+         "bullets": ["Shipped the payments rewrite."]}
+    ],
+    "highlighted_skills": ["Python", "LLMs"],
+}
+
+
+async def test_a_tailored_resume_and_cover_letter_are_attached(client):
+    """When the job has a tailored resume, that's what goes to the employer
+    — as a PDF the app draws itself — with the cover letter the form asks for."""
+    app_id = (await client.post(f"/api/v1/auto-apply/jobs/{JOB}")).json()["id"]
+
+    from app.core.database import engine
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "INSERT INTO tailored_applications (id, job_id, user_id, tailored_resume_json, tailored_summary, "
+            "cover_letter, approval_status) VALUES (gen_random_uuid(), :j, :u, CAST(:r AS jsonb), :s, :c, 'ready')"
+        ), {"j": JOB, "u": USER, "r": json.dumps(TAILORED), "s": TAILORED["tailored_summary"],
+            "c": "Dear hiring team,\n\nI'd like to apply.\n\nAda"})
+
+    documents = (await client.get(f"/api/v1/auto-apply/{app_id}/documents")).json()
+    assert documents["tailored"] is True
+    assert documents["resume"]["filename"] == "Ada Obi Resume.pdf"
+    assert documents["cover_letter"]["filename"] == "Ada Obi Cover Letter.pdf"
+
+    # Both are PDFs the app generated, not the file on the profile.
+    written = client.uploaded
+    assert len(written) == 2
+    for path, content in written.items():
+        assert path.startswith(f"applications/{USER}/{app_id}-")
+        assert content.startswith(b"%PDF")
+    assert all(len(content) > 800 for content in written.values())

@@ -137,6 +137,24 @@ def _status_for(form: list[dict], answers: dict) -> str:
     return "needs_you" if any(rules.needs_attention(f, answers.get(f["key"])) for f in form) else "queued"
 
 
+async def _tailor_for(db: AsyncSession, user_id: uuid.UUID, job_id: uuid.UUID) -> None:
+    """Write a resume for this job (and a cover letter) unless one is
+    already waiting. Never blocks the application: if it fails, the
+    profile's own resume is attached instead."""
+    from app.core.config import get_settings
+    from app.services.auto_apply.resume_pdf import tailored_for_job
+    from app.services.tailoring.tailor_service import generate_tailored_application
+
+    if not get_settings().anthropic_api_key:
+        return
+    if await tailored_for_job(db, user_id, job_id) is not None:
+        return
+    try:
+        await generate_tailored_application(db, str(job_id), str(user_id), with_outreach=False)
+    except Exception as e:  # noqa: BLE001 — an application without a tailored resume still works
+        logger.warning("Couldn't tailor the resume for job %s: %s", job_id, e)
+
+
 async def prepare_application(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -144,6 +162,7 @@ async def prepare_application(
     *,
     client: httpx.AsyncClient | None = None,
     drafter=None,
+    tailor: bool = False,
 ) -> AutoApplication:
     drafter = drafter or draft_answers
     job = (await db.execute(
@@ -219,6 +238,9 @@ async def prepare_application(
     application.error = None
     application.status = _status_for(form, answers)
     await db.commit()
+
+    if tailor:
+        await _tailor_for(db, user_id, job_id)
     return application
 
 

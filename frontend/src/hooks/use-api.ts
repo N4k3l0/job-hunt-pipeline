@@ -11,6 +11,7 @@ import type {
   AnalyticsOverview,
   AutoApplication,
   AutoApplicationDetail,
+  AutoApplyDocuments,
   AutoApplyValue,
   JobAlertStatus,
   NotificationSettings,
@@ -605,6 +606,17 @@ export function useAutoApplication(id: string, { watch = false }: { watch?: bool
     queryFn: () => api.get<AutoApplicationDetail>(`/api/v1/auto-apply/${id}`),
     enabled: !!id,
     refetchInterval: watch ? 5000 : false,
+  });
+}
+
+/** The resume and cover letter this application attaches. The links are
+ *  signed and short-lived, so this isn't cached for long. */
+export function useApplicationDocuments(id: string, enabled = true) {
+  return useQuery({
+    queryKey: ["auto-apply", id, "documents"],
+    queryFn: () => api.get<AutoApplyDocuments>(`/api/v1/auto-apply/${id}/documents`),
+    enabled: enabled && !!id,
+    staleTime: 60 * 1000,
   });
 }
 

@@ -86,7 +86,7 @@ function watchForSubmit() {
     await sleep(500);
     reply = await ask({ type: "form-page" });
   }
-  const { application, resume } = reply;
+  const { application, resume, coverLetter } = reply;
   if (!application) return;
 
   const jobId = (new URL(application.form_url).pathname.match(JOB_ID) || [])[0];
@@ -103,6 +103,6 @@ function watchForSubmit() {
   }
   // The page only needs the questions and answers, not the report link.
   const { sent_url: _url, sent_token: _token, ...forPage } = application;
-  toPage({ type: "fill", application: forPage, resume });
+  toPage({ type: "fill", application: forPage, resume, coverLetter });
   watchForSubmit();
 })();
