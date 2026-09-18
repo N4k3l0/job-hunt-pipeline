@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import re as _re
 
-from sqlalchemy import Text, any_, cast, exists, func, literal, not_, or_
+from sqlalchemy import Text, and_, any_, cast, exists, func, literal, not_, or_
 from sqlalchemy.dialects.postgresql import ARRAY, array
 from sqlalchemy.orm import aliased
 
@@ -390,11 +390,17 @@ def apply_user_filters(
     # fact (NULL), so missing data never hides a job.
     work_from = work_eligible_countries(home_country, visa_statuses)
     if work_from:
+        # Only ask for the length of a real array: a row holding anything
+        # else (a JSON null slipped in through ingest) made the whole
+        # query fail with "cannot get array length of a scalar", which
+        # emptied every user's inbox.
+        is_list = func.jsonb_typeof(JobEntity.eligible_countries) == "array"
         query = query.where(
             or_(
                 JobEntity.eligible_countries.is_(None),
-                func.jsonb_array_length(JobEntity.eligible_countries) == 0,
-                JobEntity.eligible_countries.op("?|")(cast(array(work_from), ARRAY(Text))),
+                not_(is_list),
+                and_(is_list, func.jsonb_array_length(JobEntity.eligible_countries) == 0),
+                and_(is_list, JobEntity.eligible_countries.op("?|")(cast(array(work_from), ARRAY(Text)))),
             )
         )
 
