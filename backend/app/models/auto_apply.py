@@ -63,6 +63,9 @@ class AutoApplication(Base):
     # Set while a sender is working on this application.
     locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The message to a person about this application, drafted after it was
+    # sent: {"message", "drafted_at"}. Written only when the user asks.
+    follow_up: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
