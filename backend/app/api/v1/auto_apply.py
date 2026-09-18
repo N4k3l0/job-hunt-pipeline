@@ -17,7 +17,7 @@ from app.api.deps import CurrentUserId, DbSession
 from app.models.auto_apply import AutoApplication
 from app.models.job import Job
 from app.services.auto_apply import answers as rules
-from app.services.auto_apply.extension import fill_details, mark_sent, valid_sent_token
+from app.services.auto_apply.extension import application_files, fill_details, mark_sent, valid_sent_token
 from app.services.auto_apply.prepare import (
     AnswerError,
     cancel_application,
@@ -104,12 +104,25 @@ async def list_applications(user_id: CurrentUserId, db: DbSession, job_id: UUID 
 
 
 @router.post("/jobs/{job_id}")
-async def prepare_for_job(job_id: UUID, user_id: CurrentUserId, db: DbSession):
-    """Prepare (or re-prepare) the application for a job."""
+async def prepare_for_job(
+    job_id: UUID,
+    user_id: CurrentUserId,
+    db: DbSession,
+    tailor: bool = Query(True, description="Also write a resume for this job"),
+):
+    """Prepare (or re-prepare) the application for a job: read the form,
+    answer what the profile answers, and tailor the resume."""
     if await db.get(Job, job_id) is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    application = await prepare_application(db, user_id, job_id)
+    application = await prepare_application(db, user_id, job_id, tailor=tailor)
     return serialize(await _load(db, user_id, application.id), detail=True)
+
+
+@router.get("/{application_id}/documents")
+async def documents(application_id: UUID, user_id: CurrentUserId, db: DbSession):
+    """The files this application will attach, for the user to look at."""
+    application = await _load(db, user_id, application_id)
+    return await application_files(db, application)
 
 
 @router.get("/{application_id}")

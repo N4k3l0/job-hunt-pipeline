@@ -67,7 +67,11 @@ async def test_extraction_uses_haiku_without_effort_or_thinking_headroom():
     assert "output_config" not in call
 
 
-async def test_opus_tasks_use_server_side_fallbacks():
+async def test_opus_tasks_use_server_side_fallbacks(monkeypatch):
+    """Whatever task is put on Opus gets the server-side fallback, so a
+    busy Opus doesn't fail the call. No task uses Opus today: writing runs
+    on Sonnet, which costs a fifth as much for the same job."""
+    monkeypatch.setitem(llm_module.MODELS, "tailoring", "claude-opus-5")
     llm, messages, beta_messages = _client_with(
         _response(SimpleNamespace(type="text", text="ok"), model="claude-opus-5")
     )

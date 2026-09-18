@@ -115,6 +115,15 @@ export interface AutoApplicationDetail extends AutoApplication {
   result: Record<string, unknown> | null;
 }
 
+/** The files an application attaches. */
+export interface AutoApplyDocuments {
+  resume: { url: string; filename: string; content_type: string } | null;
+  cover_letter: { url: string; filename: string; content_type: string } | null;
+  /** Whether the resume was written for this job. */
+  tailored: boolean;
+  tailored_id: string | null;
+}
+
 /** What the extension gets to fill in the company's form. */
 export interface AutoApplyFill {
   application_id: string;
@@ -132,6 +141,7 @@ export interface AutoApplyFill {
     value: AutoApplyValue;
   }[];
   resume: { url: string; filename: string; content_type: string } | null;
+  cover_letter: { url: string; filename: string; content_type: string } | null;
   sent_url: string | null;
   sent_token: string;
 }

@@ -29,7 +29,7 @@ async function saveEntry(tabId, entry) {
     await chrome.storage.session.set({ [tabKey(tabId)]: entry });
   } catch {
     // Too big to keep with the resume attached: keep the answers.
-    await chrome.storage.session.set({ [tabKey(tabId)]: { ...entry, resume: null } });
+    await chrome.storage.session.set({ [tabKey(tabId)]: { ...entry, resume: null, coverLetter: null } });
   }
 }
 
@@ -51,7 +51,7 @@ function toBase64(buffer) {
   return btoa(binary);
 }
 
-async function downloadResume(resume) {
+async function downloadFile(resume) {
   if (!resume || !resume.url) return null;
   try {
     const response = await fetch(resume.url);
@@ -70,14 +70,17 @@ async function openForm(application, sender) {
   if (!application || !isFormUrl(application.form_url) || !Array.isArray(application.fields)) {
     throw new Error("This application can't be filled in");
   }
-  // Fetch the resume first: its link only works for a few minutes.
-  const resume = await downloadResume(application.resume);
+  // Fetch the files first: their links only work for a few minutes.
+  const [resume, coverLetter] = await Promise.all([
+    downloadFile(application.resume),
+    downloadFile(application.cover_letter),
+  ]);
   const tab = await chrome.tabs.create({
     url: application.form_url,
     index: sender.tab ? sender.tab.index + 1 : undefined,
     openerTabId: sender.tab ? sender.tab.id : undefined,
   });
-  await saveEntry(tab.id, { application, resume, submitClicked: false, sent: false });
+  await saveEntry(tab.id, { application, resume, coverLetter, submitClicked: false, sent: false });
   return { ok: true };
 }
 
@@ -113,7 +116,13 @@ async function handle(message, sender) {
     case "form-page": {
       const entry = tabId !== undefined ? await getEntry(tabId) : null;
       if (!entry) return {};
-      return { application: entry.application, resume: entry.resume, sent: entry.sent, submitClicked: entry.submitClicked };
+      return {
+        application: entry.application,
+        resume: entry.resume,
+        coverLetter: entry.coverLetter,
+        sent: entry.sent,
+        submitClicked: entry.submitClicked,
+      };
     }
     case "submit-clicked": {
       const entry = await getEntry(tabId);

@@ -13,14 +13,14 @@ settings = get_settings()
 
 # Model selection per task type. Haiku for high-volume field extraction
 # from every incoming job; Sonnet for parsing, scoring and web search
-# (mechanical, cost-sensitive); Opus for tailoring and outreach
+# (mechanical, cost-sensitive); Sonnet for tailoring and outreach
 # (creative, accuracy-sensitive).
 MODELS = {
     "extraction": "claude-haiku-4-5",
     "parsing": "claude-sonnet-5",
     "scoring": "claude-sonnet-5",
     "search": "claude-sonnet-5",
-    "tailoring": "claude-opus-5",
+    "tailoring": "claude-sonnet-5",
     "applying": "claude-sonnet-5",
 }
 

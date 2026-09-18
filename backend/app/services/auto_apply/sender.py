@@ -22,17 +22,11 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+import httpx
+
 from app.core.database import create_worker_session
 from app.models.auto_apply import AutoApplication
-from app.models.candidate import Resume
-from app.models.user import User
 from app.services.auto_apply.extension import fill_details, mark_sent
-from app.services.auto_apply.resume_pdf import (
-    render_pdf,
-    resume_html,
-    tailored_resume_data,
-)
-from app.services.storage import download_file, object_path
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("sender")
@@ -48,38 +42,31 @@ class SendRefused(RuntimeError):
     """The application can't be sent: the caller shouldn't retry as-is."""
 
 
-async def _resume_file(db, application: AutoApplication, page) -> dict | None:
-    """The resume to attach: the tailored one for this job when there is
-    one, else the file on the user's profile."""
-    tailored = await tailored_resume_data(db, application.user_id, application.job_id)
-    user = await db.get(User, application.user_id)
-    first_name = ((user.name if user else "") or "").strip().split(" ")[0]
-    if tailored:
-        pdf = await render_pdf(page, resume_html(tailored))
-        logger.info("Attaching the tailored resume (%d KB)", len(pdf) // 1024)
-        return {"name": f"{first_name + ' ' if first_name else ''}Resume.pdf", "type": "application/pdf",
-                "base64": base64.b64encode(pdf).decode()}
-
-    resume = await db.get(Resume, application.resume_id) if application.resume_id else None
-    if resume is None:
+async def _attachment(file: dict | None) -> dict | None:
+    """Download what the app prepared (tailored resume, cover letter), the
+    same files the extension attaches."""
+    if not file:
         return None
-    content = await download_file("resumes", object_path("resumes", resume.file_url))
-    extension = (resume.source_type or "pdf").lower()
-    types = {"pdf": "application/pdf",
-             "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
-    logger.info("Attaching the profile resume (%d KB)", len(content) // 1024)
-    return {"name": f"{first_name + ' ' if first_name else ''}Resume.{extension}", "type": types.get(extension, "application/pdf"),
-            "base64": base64.b64encode(content).decode()}
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.get(file["url"])
+    if response.status_code != 200:
+        logger.warning("Couldn't download %s (%s)", file["filename"], response.status_code)
+        return None
+    logger.info("Attaching %s (%d KB)", file["filename"], len(response.content) // 1024)
+    return {"name": file["filename"], "type": file["content_type"],
+            "base64": base64.b64encode(response.content).decode()}
 
 
-async def _fill(page, payload: dict, resume: dict | None) -> dict:
+async def _fill(page, payload: dict, files: dict) -> dict:
     """Run the extension's filler on the open form and return what it did."""
     # Wrapped in a function so Playwright runs the filler rather than
     # trying to read it as one.
     await page.evaluate("() => {" + FILLER_PATH.read_text() + "}")
     await page.evaluate(
-        "([application, resume]) => window.postMessage({ jobHunt: 'to-page', type: 'fill', application, resume }, location.origin)",
-        [payload, resume],
+        "([application, files]) => window.postMessage("
+        "{ jobHunt: 'to-page', type: 'fill', application, resume: files.resume, coverLetter: files.coverLetter },"
+        " location.origin)",
+        [payload, files],
     )
     await page.wait_for_function("window.__jobHuntResult !== undefined", timeout=FILL_TIMEOUT_MS)
     return await page.evaluate("window.__jobHuntResult")
@@ -149,10 +136,13 @@ async def send_application(application_id: uuid.UUID, *, dry_run: bool) -> dict:
             context = await browser.new_context(viewport={"width": 1280, "height": 1600})
             page = await context.new_page()
             try:
-                resume = await _resume_file(db, application, page)
+                files = {
+                    "resume": await _attachment(payload.get("resume")),
+                    "coverLetter": await _attachment(payload.get("cover_letter")),
+                }
                 logger.info("Opening %s", payload["form_url"])
                 await page.goto(payload["form_url"], wait_until="domcontentloaded", timeout=60_000)
-                filled = await _fill(page, payload, resume)
+                filled = await _fill(page, payload, files)
                 missing = [item for item in filled["items"] if item["status"] == "todo"]
                 logger.info("Filled in %d answers; %d need a person", filled["filled"], len(missing))
                 for item in missing:

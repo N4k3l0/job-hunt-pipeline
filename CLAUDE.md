@@ -95,8 +95,8 @@ Keep a single head: `alembic heads` should print one revision.
 
 ### LLM Usage
 - **Haiku 4.5** (`claude-haiku-4-5`) for: reading every incoming job (`services/enrichment/job_enricher.py`)
-- **Sonnet 5** (`claude-sonnet-5`) for: job parsing, resume parsing, deep reviews, web search, drafting application-form answers (`applying`)
-- **Opus 5** (`claude-opus-5`) for: resume tailoring, cover letters, outreach messages
+- **Sonnet 5** (`claude-sonnet-5`) for: job parsing, resume parsing, deep reviews, web search, drafting application-form answers (`applying`), resume tailoring and cover letters (`tailoring`)
+- **Opus 5** (`claude-opus-5`): nothing today. Tailoring runs on every application now, so it moved to Sonnet — about a fifth of the cost for the same writing. Put a task back on Opus by changing `MODELS`; the server-side fallback is already wired for it
 - Model IDs and per-task effort live only in `llm/client.py` (`MODELS`, `EFFORT`). Don't pass `temperature` — current models and SDK 1.x reject it
 - **HARD RULE:** Never fabricate experience, tools, metrics, or employers in tailored content
 - All generated content validated against candidate's structured profile before showing to user
@@ -116,7 +116,8 @@ Every job flows: Raw → Normalized → Deduplicated → Enriched → Scored →
 - Freshness: ingest sets `jobs.last_seen_at` whenever a source lists a job again. `/api/v1/cron/expire-stale` expires jobs gone from full company boards (`curated`, unseen 5 days) and jobs older than 45 days that no source has listed for 30 days, then probes a batch of links (`last_checked_at`, 404/410 → expired). Jobs a user applied to or tailored for are never expired; old shortlisted ones are kept
 - Users edit their roles and skills on Profile (`/candidates/work-history`, `/candidates/skills`). Roles are kept in date order, current ones first (`_order_work_history`): `seniority_match` reads the first role as the candidate's level. Edits don't rescore; the page offers "Update my matches" (`POST /candidates/rescore`)
 - Resume upload doesn't rescore inline (parse + full rescore can exceed 60s); the frontend calls `POST /candidates/rescore` afterwards
-- Tailoring only triggered by user action or for high-priority (80+) jobs
+- Tailoring runs as part of preparing an application (`prepare_application(tailor=True)`, the default from the API) and on the user's own "Tailor application" button. It writes the resume and cover letter; the message to a hiring manager is written later, from the sent application, not for every job
+- Applications attach files the app draws itself (`services/auto_apply/resume_pdf.py`, fpdf2): the tailored resume when the job has one, else the profile's uploaded file, plus a cover letter when the form asks for one. Both are stored under `applications/<user>/<application>-*.pdf` in the resumes bucket and handed to the extension and the sender as short-lived signed links
 
 ### Daily email (`services/notifications/`, `/api/v1/notifications`)
 - Each morning (first scheduler run at or after `DIGEST_HOUR_UTC`, default 7) `/cron/send-digests` emails every user with `users.email_digest` on who hasn't had today's: the best new inbox jobs since the last email (inbox filters, score 50+, one posting per job, top 5), Apply for me applications that need answers, tailored applications ready in the last 14 days, and follow-ups due. Days with nothing new send nothing. `users.last_digest_sent_at` makes it once a day

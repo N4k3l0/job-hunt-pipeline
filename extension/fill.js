@@ -289,12 +289,18 @@
   let current = null;
   let running = false;
 
-  async function fillFile(adapter, field, resume) {
-    const hasAnswer = !isEmpty(field.value);
-    if (field.kind !== "resume" || !hasAnswer) {
+  async function fillFile(adapter, field, files) {
+    const resume = field.kind === "cover_letter" ? files.coverLetter : files.resume;
+    const what = field.kind === "cover_letter" ? "cover letter" : "resume";
+    if (field.kind !== "resume" && field.kind !== "cover_letter") {
       return field.required ? result(field, "todo", null, "Attach this file on the form.") : null;
     }
-    if (!resume) return result(field, "todo", null, "Attach your resume on the form.");
+    if (field.kind === "resume" && isEmpty(field.value)) {
+      return field.required ? result(field, "todo", null, "Attach your resume on the form.") : null;
+    }
+    if (!resume) {
+      return field.required ? result(field, "todo", null, `Attach your ${what} on the form.`) : null;
+    }
     // The upload can fail while the page is still setting up (Greenhouse):
     // check the file's name shows, and try again if it doesn't.
     let area = null;
@@ -308,13 +314,13 @@
       }
       await sleep(2000);
     }
-    return result(field, "todo", area, "Attach your resume on the form.");
+    return result(field, "todo", area, `Attach your ${what} on the form.`);
   }
 
-  async function fill(application, resume) {
+  async function fill(application, files) {
     if (running) return;
     running = true;
-    current = { application, resume };
+    current = { application, files };
     window.__jobHuntResult = undefined;
     clearHighlights();
     try {
@@ -335,7 +341,7 @@
       // The resume goes first: Lever and Ashby read it and fill in some
       // boxes themselves, which the approved answers then replace.
       for (const field of application.fields.filter((f) => f.type === "file")) {
-        const outcome = await fillFile(adapter, field, resume);
+        const outcome = await fillFile(adapter, field, files);
         if (outcome) results.push(outcome);
       }
       if (results.some((r) => r.status === "filled")) await sleep(2500);
@@ -513,18 +519,18 @@
         ? ["Before you press Submit, look at these:"]
         : ["Everything's filled in. Look it over, then press Submit on the form."],
       items,
-      actions: [{ label: "Fill in again", onClick: () => current && fill(current.application, current.resume) }],
+      actions: [{ label: "Fill in again", onClick: () => current && fill(current.application, current.files) }],
       footer: "Job Hunt never presses Submit. If the form asks you to prove you're human, do that too.",
     });
   }
 
   window.addEventListener("message", (event) => {
     if (event.source !== window || !event.data || event.data.jobHunt !== "to-page") return;
-    const { type, application, resume } = event.data;
+    const { type, application, resume, coverLetter } = event.data;
     if (type === "hello") {
       window.postMessage({ jobHunt: "filler-ready" }, location.origin);
     } else if (type === "fill" && application) {
-      fill(application, resume);
+      fill(application, { resume, coverLetter });
     } else if (type === "sent") {
       clearHighlights();
       showPanel({ title: "Sent", lines: ["Job Hunt marked this job as applied."] });

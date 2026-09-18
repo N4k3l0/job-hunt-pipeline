@@ -144,12 +144,17 @@ async def generate_tailored_application(
     user_id: str,
     tailored_id: str | None = None,
     progress_callback=None,
+    *,
+    with_outreach: bool = True,
 ) -> TailoredApplication:
     """Run the full tailoring pipeline for a job.
 
     If `tailored_id` is provided, updates that placeholder row in-place instead
     of inserting a new one. `progress_callback(step: str)` is awaited between
     major steps so the UI can show live progress.
+
+    `with_outreach=False` skips the message to a hiring manager, which is
+    written on demand after the application is sent, not for every job.
     """
     async def _step(label: str):
         if progress_callback:
@@ -260,34 +265,35 @@ async def generate_tailored_application(
     )
     cover_letter = _strip_llm_fluff(cover_letter_raw)
 
-    # ── Step 3: Generate recruiter outreach ───────────────────────────────
-    logger.info("Generating outreach for job %s", job_id)
-    await _step("Drafting outreach")
-
-    # candidate_name already loaded above (used for both cover letter
-    # + outreach). Same value flows to OUTREACH_PROMPT here.
-    outreach_raw = await llm_client.generate(
-        task_type="tailoring",
-        system_prompt=SYSTEM_PROMPT,
-        user_prompt=(
-            _style_examples_block(samples_by_kind.get("outreach", []), "outreach message")
-            + OUTREACH_PROMPT.format(
-                job_title=job.title,
-                job_company=job.company,
-                candidate_name=candidate_name,
-                candidate_summary=(
-                    tailored_resume.get("tailored_summary")
-                    or profile.master_summary
-                    or profile.headline
-                    or ""
-                ),
-                top_experience=top_exp,
-                strongest_matches="; ".join(tailored_resume.get("strongest_matches", [])),
-            )
-        ),
-        max_tokens=500,
-    )
-    outreach = _strip_llm_fluff(outreach_raw)
+    # ── Step 3: Message to a hiring manager ───────────────────────────────
+    # Only when asked for: it's written after an application is sent, from
+    # the application's Follow up section, not for every tailoring.
+    outreach = ""
+    if with_outreach:
+        logger.info("Generating outreach for job %s", job_id)
+        await _step("Drafting outreach")
+        outreach_raw = await llm_client.generate(
+            task_type="tailoring",
+            system_prompt=SYSTEM_PROMPT,
+            user_prompt=(
+                _style_examples_block(samples_by_kind.get("outreach", []), "outreach message")
+                + OUTREACH_PROMPT.format(
+                    job_title=job.title,
+                    job_company=job.company,
+                    candidate_name=candidate_name,
+                    candidate_summary=(
+                        tailored_resume.get("tailored_summary")
+                        or profile.master_summary
+                        or profile.headline
+                        or ""
+                    ),
+                    top_experience=top_exp,
+                    strongest_matches="; ".join(tailored_resume.get("strongest_matches", [])),
+                )
+            ),
+            max_tokens=500,
+        )
+        outreach = _strip_llm_fluff(outreach_raw)
 
     # ── Step 4: Generate screening answers (if applicable) ────────────────
     short_answers = {}
