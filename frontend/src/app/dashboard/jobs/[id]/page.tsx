@@ -16,6 +16,8 @@ import { useToast } from "@/components/ui/toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 import { OperationProgress } from "@/components/operation-progress";
+import { ClosedNote } from "@/components/closed-note";
+import { jobFreshness } from "@/lib/freshness";
 
 /** Normalize an axis sub-score (raw 0..max) to a 0–100 percentage so
  *  the bars render consistently against the overall_fit scale. Each
@@ -567,6 +569,8 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
                 </span>
               )}
             </div>
+            <div className="ds-dim" style={{ fontSize: 12.5, marginTop: 10 }}>{jobFreshness(job).long}</div>
+            {job.closed_note && <ClosedNote note={job.closed_note} />}
           </div>
           {score && (
             <ScoreHero score={overallFit} variant="ring" />
@@ -962,9 +966,17 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
                     </span>
                   </div>
                 )}
+                {job.posted_at && (
+                  <div className="flex justify-between">
+                    <span className="ds-muted">Posted</span>
+                    <span className="ds-mono ds-dim" style={{ fontSize: 12 }}>
+                      {new Date(job.posted_at).toLocaleDateString()}
+                    </span>
+                  </div>
+                )}
                 {job.discovered_at && (
                   <div className="flex justify-between">
-                    <span className="ds-muted">Discovered</span>
+                    <span className="ds-muted">Found</span>
                     <span className="ds-mono ds-dim" style={{ fontSize: 12 }}>
                       {new Date(job.discovered_at).toLocaleDateString()}
                     </span>

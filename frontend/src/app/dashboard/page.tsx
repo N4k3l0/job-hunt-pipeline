@@ -20,6 +20,8 @@ import {
   useCurrentUser,
 } from "@/hooks/use-api";
 import { ScoreRing } from "@/components/ds/score";
+import { ClosedNote } from "@/components/closed-note";
+import { jobFreshness } from "@/lib/freshness";
 
 /* ============================================================
    Dashboard overview — v2 command-center layout.
@@ -53,7 +55,8 @@ export default function DashboardOverview() {
       title: (j.title_en || j.title) as string,
       location: (j.location ?? "—") as string,
       salary: j.salary_text as string | null,
-      time: j.discovered_at ? timeAgo(j.discovered_at) : "",
+      time: jobFreshness(j).short,
+      closedNote: (j.closed_note ?? null) as string | null,
       score: j.score?.overall_fit != null ? Math.round(j.score.overall_fit) : null,
     }));
     return list
@@ -249,7 +252,7 @@ function RadarSection({
   failed,
   onRetry,
 }: {
-  radar: Array<{ id: string; company: string; title: string; location: string; salary: string | null; time: string; score: number | null }>;
+  radar: Array<{ id: string; company: string; title: string; location: string; salary: string | null; time: string; closedNote: string | null; score: number | null }>;
   totalScored: number | null;
   lastSweep: string | null | undefined;
   loading: boolean;
@@ -309,7 +312,10 @@ function RadarSection({
 function RadarRow({
   job,
 }: {
-  job: { id: string; company: string; title: string; location: string; salary: string | null; time: string; score: number | null };
+  job: {
+    id: string; company: string; title: string; location: string; salary: string | null;
+    time: string; closedNote: string | null; score: number | null;
+  };
 }) {
   const top = (job.score ?? 0) >= 80;
   return (
@@ -330,7 +336,11 @@ function RadarRow({
               <span className="ds-mono dash-radar-salary">{job.salary}</span>
             </>
           )}
-          {job.time && <span className="ds-mono dash-radar-time">{job.time}</span>}
+          {job.closedNote ? (
+            <span className="dash-radar-time"><ClosedNote note={job.closedNote} compact /></span>
+          ) : (
+            job.time && <span className="ds-mono dash-radar-time">{job.time}</span>
+          )}
         </div>
       </div>
       <ArrowUpRight size={15} className="dash-radar-arrow" />
@@ -407,17 +417,6 @@ function QuickActions() {
 /* ============================================================
    Helpers
    ============================================================ */
-
-function timeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const m = Math.floor(diff / 60000);
-  if (m < 1) return "now";
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  const d = Math.floor(h / 24);
-  return `${d}d ago`;
-}
 
 function formatSweepTime(iso: string | null | undefined): string {
   if (!iso) return "—";
