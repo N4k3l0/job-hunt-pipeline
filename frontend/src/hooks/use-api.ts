@@ -853,6 +853,42 @@ export interface FeedbackRow {
   created_at: string;
 }
 
+/** Admin: every feedback item, newest first. */
+export function useFeedbackList(resolved?: boolean) {
+  return useQuery({
+    queryKey: ["admin", "feedback", resolved ?? "all"],
+    queryFn: () =>
+      api.get<FeedbackRow[]>(`/api/v1/feedback${resolved === undefined ? "" : `?resolved=${resolved}`}`),
+    staleTime: 60 * 1000,
+  });
+}
+
+export function useSetFeedbackResolved() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, resolved }: { id: string; resolved: boolean }) =>
+      api.patch<{ id: string; resolved: boolean }>(`/api/v1/feedback/${id}`, { resolved }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin", "feedback"] }),
+  });
+}
+
+export interface InviteRequestRow {
+  id: string;
+  email: string;
+  /** Which form on the homepage they used. */
+  source: string | null;
+  created_at: string | null;
+}
+
+/** Admin: people who asked for an invite on the homepage. */
+export function useInviteRequests() {
+  return useQuery({
+    queryKey: ["admin", "invite-requests"],
+    queryFn: () => api.get<InviteRequestRow[]>("/api/v1/invite-requests"),
+    staleTime: 60 * 1000,
+  });
+}
+
 export function useSubmitFeedback() {
   return useMutation({
     mutationFn: (body: FeedbackPayload) =>

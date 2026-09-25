@@ -19,6 +19,7 @@ import {
 import {
   LayoutDashboard,
   Inbox,
+  PlusCircle,
   Send,
   BarChart3,
   User,
@@ -53,6 +54,8 @@ type Item = {
 const PIPELINE_ITEMS: Item[] = [
   { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { title: "Inbox", href: "/dashboard/jobs", icon: Inbox },
+  // For jobs found elsewhere: a link, a description or a job alert email.
+  { title: "Add a job", href: "/dashboard/import", icon: PlusCircle },
   // One place for applying: what needs you, what's ready, what's sent.
   { title: "Applications", href: "/dashboard/applications", icon: Send, countKey: "waiting" },
   { title: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
