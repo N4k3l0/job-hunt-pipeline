@@ -98,6 +98,7 @@ _OTHER_SYSTEMS = (
     ("smartrecruiters.com", "SmartRecruiters"),
     ("workable.com", "Workable"),
     ("teamtailor.com", "Teamtailor"),
+    ("breezy.hr", "Breezy HR"),
     ("bamboohr.com", "BambooHR"),
     ("icims.com", "iCIMS"),
     ("successfactors.com", "SuccessFactors"),

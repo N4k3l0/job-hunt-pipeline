@@ -426,7 +426,7 @@ async def normalize_and_store_job(
     from app.services.deduplication.dedup_service import check_duplicate
     is_dup, dup_job_id = await check_duplicate(db, canonical_hash, parsed_data.get("description_summary", ""))
     if is_dup:
-        logger.info("Duplicate job found: %s at %s (duplicate of %s)", title, company, dup_job_id)
+        logger.debug("Duplicate job found: %s at %s (duplicate of %s)", title, company, dup_job_id)
         return None
 
     # Get or create source
@@ -524,5 +524,5 @@ async def normalize_and_store_job(
     )
     db.add(entities)
 
-    logger.info("Stored job: %s at %s [%s] (id=%s)", title, company, source_name, job.id)
+    logger.debug("Stored job: %s at %s [%s] (id=%s)", title, company, source_name, job.id)
     return job

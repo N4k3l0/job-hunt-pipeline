@@ -103,6 +103,7 @@ Keep a single head: `alembic heads` should print one revision.
 - **HARD RULE:** Everything written for a user (resume, cover letter, message to a hiring manager, form answers, fit analysis) is plain, simple English that sounds like a person, with no em dashes. The rules live once in `llm/style.py` (`STYLE_RULES`, in every writing prompt) and `plain_english()` cleans the output, since a model still slips
 - All generated content validated against candidate's structured profile before showing to user
 - Track token usage per call for cost management
+- Logs: `app/core/logging.py` sends the app's own messages to stdout at `LOG_LEVEL` (INFO), which is what Railway shows. Before 2026-09-25 nothing but uvicorn's lines reached the logs. httpx and friends stay at WARNING because they log full URLs, signed links included. Use `logger.debug` for anything logged once per job
 
 ### Job Pipeline
 Every job flows: Raw → Normalized → Deduplicated → Enriched → Scored → Inbox

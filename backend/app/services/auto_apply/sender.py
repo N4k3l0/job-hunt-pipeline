@@ -25,10 +25,10 @@ from pathlib import Path
 import httpx
 
 from app.core.database import create_worker_session
+from app.core.logging import setup_logging
 from app.models.auto_apply import AutoApplication
 from app.services.auto_apply.extension import fill_details, mark_sent
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("sender")
 
 FILLER_PATH = Path(os.environ.get("FORM_FILLER_PATH", Path(__file__).parents[4] / "extension" / "fill.js"))
@@ -192,6 +192,7 @@ async def _watch_after_submit(page) -> str:
 
 
 def main() -> None:
+    setup_logging()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("application_id", nargs="?", default=os.environ.get("SEND_APPLICATION_ID"))
     parser.add_argument("--dry-run", action="store_true", default=os.environ.get("SEND_DRY_RUN") == "true")
