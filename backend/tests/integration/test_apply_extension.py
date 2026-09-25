@@ -39,6 +39,10 @@ async def client(monkeypatch):
     from app.core.database import engine
     from app.main import app
     from app.services.auto_apply import extension, prepare
+    from app.services.tailoring import tailor_service
+
+    async def no_tailoring(db, job_id, user_id, with_outreach=True):
+        return None
 
     async with engine.begin() as conn:
         await conn.execute(text(
@@ -77,6 +81,8 @@ async def client(monkeypatch):
     monkeypatch.setattr(prepare, "http_client", lambda: httpx.AsyncClient(
         transport=httpx.MockTransport(lambda request: httpx.Response(200, json=FORM))))
     monkeypatch.setattr(prepare, "draft_answers", no_drafts)
+    # Never the real model in tests (conftest sets a fake API key).
+    monkeypatch.setattr(tailor_service, "generate_tailored_application", no_tailoring)
     monkeypatch.setattr(extension, "signed_url", fake_signed_url)
     monkeypatch.setattr(extension, "upload_file", fake_upload)
     monkeypatch.setattr(extension, "api_public_url", lambda: "https://api.test")

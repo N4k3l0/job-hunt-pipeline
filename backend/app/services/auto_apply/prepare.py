@@ -155,7 +155,11 @@ async def _tailor_for(db: AsyncSession, user_id: uuid.UUID, job_id: uuid.UUID) -
         return
     try:
         await generate_tailored_application(db, str(job_id), str(user_id), with_outreach=False)
+        # It only flushes, and the request's session closes without
+        # committing: without this the tailored resume was thrown away.
+        await db.commit()
     except Exception as e:  # noqa: BLE001 — an application without a tailored resume still works
+        await db.rollback()
         logger.warning("Couldn't tailor the resume for job %s: %s", job_id, e)
 
 
@@ -245,6 +249,7 @@ async def prepare_application(
 
     if tailor:
         await _tailor_for(db, user_id, job_id)
+        await db.refresh(application)  # a failed tailoring rolls back, which expires it
     return application
 
 
