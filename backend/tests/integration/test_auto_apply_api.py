@@ -77,6 +77,7 @@ async def client(monkeypatch):
     from app.api.deps import get_current_user_id
     from app.core.database import engine
     from app.services.auto_apply import prepare
+    from app.services.tailoring import tailor_service
 
     async with engine.begin() as conn:
         await conn.execute(text(
@@ -119,8 +120,13 @@ async def client(monkeypatch):
         assert "Product Manager at Acme" in facts_text
         return {"question_why": answer("I led payments work at Acme.", "drafted", "Drafted from your profile.")}
 
+    async def no_tailoring(db, job_id, user_id, with_outreach=True):
+        return None
+
     monkeypatch.setattr(prepare, "http_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(ats_handler)))
     monkeypatch.setattr(prepare, "draft_answers", fake_drafter)
+    # Never the real model in tests (conftest sets a fake API key).
+    monkeypatch.setattr(tailor_service, "generate_tailored_application", no_tailoring)
 
     async def fake_user_id(x_test_user: str = Header()) -> uuid.UUID:
         return uuid.UUID(x_test_user)
@@ -212,6 +218,60 @@ async def test_prepare_answer_and_queue(client):
     body = r.json()
     assert body["status"] == "queued"
     assert by_key(body)["question_why"]["answer"]["source"] == "user"
+
+
+async def _tailored_count(job_id) -> int:
+    from app.core.database import engine
+    async with engine.connect() as conn:
+        return (await conn.execute(text(
+            "SELECT count(*) FROM tailored_applications WHERE job_id = :j AND approval_status = 'ready'"
+        ), {"j": job_id})).scalar()
+
+
+async def test_prepare_saves_the_tailored_resume(client, monkeypatch):
+    from app.core.config import get_settings
+    from app.models.tailoring import TailoredApplication
+    from app.services.tailoring import tailor_service
+
+    async def fake_tailor(db, job_id, user_id, with_outreach=True):
+        # Like the real one: adds the row and flushes, never commits.
+        application = TailoredApplication(
+            job_id=job_id, user_id=user_id, approval_status="ready",
+            tailored_resume_json={"tailored_summary": "Written for Stripe."},
+            tailored_summary="Written for Stripe.", cover_letter="Hi,",
+        )
+        db.add(application)
+        await db.flush()
+        return application
+
+    monkeypatch.setattr(get_settings(), "anthropic_api_key", "test-key")
+    monkeypatch.setattr(tailor_service, "generate_tailored_application", fake_tailor)
+
+    r = await client.post(f"/api/v1/auto-apply/jobs/{JOB_A}")
+    assert r.status_code == 200, r.text
+    assert await _tailored_count(JOB_A) == 1
+
+    # Preparing again reuses it rather than paying to write another.
+    r = await client.post(f"/api/v1/auto-apply/jobs/{JOB_A}")
+    assert r.status_code == 200, r.text
+    assert await _tailored_count(JOB_A) == 1
+
+
+async def test_prepare_still_works_when_tailoring_fails(client, monkeypatch):
+    from app.core.config import get_settings
+    from app.llm.client import LLMCreditsExhausted
+    from app.services.tailoring import tailor_service
+
+    async def out_of_credits(db, job_id, user_id, with_outreach=True):
+        raise LLMCreditsExhausted()
+
+    monkeypatch.setattr(get_settings(), "anthropic_api_key", "test-key")
+    monkeypatch.setattr(tailor_service, "generate_tailored_application", out_of_credits)
+
+    r = await client.post(f"/api/v1/auto-apply/jobs/{JOB_A}")
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "needs_you"
+    assert await _tailored_count(JOB_A) == 0
 
 
 async def test_unsupported_closed_and_private(client):
