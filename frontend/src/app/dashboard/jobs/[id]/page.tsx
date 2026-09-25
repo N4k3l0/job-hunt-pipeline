@@ -81,6 +81,8 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
   // the new tab.
   const hasUrl = !!(job.apply_url || job.job_url);
   const isAlreadyApplied = job.status === "applied";
+  const existingApplication = job.auto_apply?.application_id ?? null;
+  const canApplyForMe = !!job.auto_apply?.supported && !isAlreadyApplied && !existingApplication;
 
   async function handleApply() {
     if (applying) return;
@@ -566,29 +568,18 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
             <ScoreHero score={overallFit} variant="ring" />
           )}
         </div>
-        {/* Primary action row — ds-btn buttons, primary CTA in teal */}
+        {/* One main action. Apply for me when the app can fill in the form;
+            otherwise the company's own site. Everything else is secondary. */}
         <div className="flex flex-wrap items-center" style={{ gap: 8, marginTop: 22 }}>
-          {hasUrl && (
+          {existingApplication ? (
+            <Link href={`/dashboard/auto-apply/${existingApplication}`} className="ds-btn primary">
+              <Send className="h-4 w-4" />
+              Continue your application · {AUTO_APPLY_STATUS_LABELS[job.auto_apply?.status ?? "preparing"]}
+            </Link>
+          ) : canApplyForMe ? (
             <button
               type="button"
               className="ds-btn primary"
-              onClick={handleApply}
-              disabled={applying}
-              title="Opens the company's direct ATS posting when available."
-            >
-              {applying ? <Loader2 className="h-4 w-4 animate-spin" /> : <ExternalLink className="h-4 w-4" />}
-              {applying ? "Opening…" : "Apply directly"}
-            </button>
-          )}
-          {job.auto_apply?.application_id ? (
-            <Link href={`/dashboard/auto-apply/${job.auto_apply.application_id}`} className="ds-btn">
-              <Send className="h-4 w-4" />
-              Apply for me: {AUTO_APPLY_STATUS_LABELS[job.auto_apply.status ?? "preparing"]}
-            </Link>
-          ) : job.auto_apply?.supported && !isAlreadyApplied ? (
-            <button
-              type="button"
-              className="ds-btn"
               onClick={() =>
                 prepareApplication.mutate(id, {
                   onSuccess: (application) => router.push(`/dashboard/auto-apply/${application.id}`),
@@ -596,31 +587,36 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
                 })
               }
               disabled={prepareApplication.isPending}
-              title="Fills in the company's application form from your profile. You check it before anything is sent."
+              title="Writes a resume for this job and fills in the company's form. You check it before anything is sent."
             >
               {prepareApplication.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               {prepareApplication.isPending ? "Preparing…" : "Apply for me"}
             </button>
+          ) : hasUrl && !isAlreadyApplied ? (
+            <button type="button" className="ds-btn primary" onClick={handleApply} disabled={applying}>
+              {applying ? <Loader2 className="h-4 w-4 animate-spin" /> : <ExternalLink className="h-4 w-4" />}
+              {applying ? "Opening…" : "Apply on their site"}
+            </button>
           ) : null}
-          <button
-            type="button"
-            className="ds-btn"
-            onClick={() =>
-              generateTailored.mutate(id, {
-                onSuccess: () => {
-                  toast.success("Tailoring started", {
-                    description: "Live progress in the Review Queue.",
-                  });
-                  router.push("/dashboard/review");
-                },
-                onError: (e: any) => toast.error("Couldn't queue tailoring", { description: e?.message }),
-              })
-            }
-            disabled={generateTailored.isPending}
-          >
-            {generateTailored.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-            {generateTailored.isPending ? "Generating…" : "Tailor application"}
-          </button>
+          {!canApplyForMe && !existingApplication && !isAlreadyApplied && (
+            <button
+              type="button"
+              className="ds-btn"
+              onClick={() =>
+                generateTailored.mutate(id, {
+                  onSuccess: () => toast.success("Writing your resume for this job", {
+                    description: "It shows under Applications when it's ready.",
+                  }),
+                  onError: (e: any) => toast.error("Couldn't start the resume", { description: e?.message }),
+                })
+              }
+              disabled={generateTailored.isPending}
+              title="A resume written for this job, from your real experience, to attach on their site."
+            >
+              {generateTailored.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+              {generateTailored.isPending ? "Starting…" : "Write a resume for this job"}
+            </button>
+          )}
           <button
             type="button"
             className="ds-btn"
@@ -659,6 +655,23 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
             </button>
           )}
         </div>
+        {(canApplyForMe || existingApplication) && hasUrl && !isAlreadyApplied && (
+          <button
+            type="button"
+            className="ds-dim"
+            onClick={handleApply}
+            disabled={applying}
+            style={{ fontSize: 13, marginTop: 10, background: "none", border: 0, padding: 0, cursor: "pointer", textDecoration: "underline" }}
+          >
+            {applying ? "Opening…" : "Or apply on their site yourself"}
+          </button>
+        )}
+        {!job.auto_apply?.supported && !existingApplication && !isAlreadyApplied && hasUrl && (
+          <p className="ds-dim" style={{ fontSize: 13, marginTop: 10, maxWidth: 560 }}>
+            The app can&apos;t fill in this company&apos;s application form, so you apply on their site. It can still
+            write you a resume for this job to attach there.
+          </p>
+        )}
         <OperationProgress
           active={prepareApplication.isPending}
           title="Preparing your application"
@@ -680,7 +693,7 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
           fontSize: 13,
         }}>
           <CheckCircle2 className="h-4 w-4" />
-          Tailored application is being generated. Check the Review Queue shortly.
+          Your resume for this job is being written. It shows under Applications when it&apos;s ready.
         </div>
       )}
 

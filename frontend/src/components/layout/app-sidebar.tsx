@@ -19,8 +19,6 @@ import {
 import {
   LayoutDashboard,
   Inbox,
-  ClipboardList,
-  ClipboardCheck,
   Send,
   BarChart3,
   User,
@@ -39,7 +37,6 @@ import {
 import { createClient } from "@/lib/supabase";
 import {
   useCurrentUser,
-  useAnalytics,
   useReviewQueue,
   useAutoApplications,
 } from "@/hooks/use-api";
@@ -50,15 +47,14 @@ type Item = {
   title: string;
   href: string;
   icon: React.ComponentType<{ size?: number; className?: string }>;
-  countKey?: "review" | "applied" | "needsYou";
+  countKey?: "waiting";
 };
 
 const PIPELINE_ITEMS: Item[] = [
   { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { title: "Inbox", href: "/dashboard/jobs", icon: Inbox },
-  { title: "Review Queue", href: "/dashboard/review", icon: ClipboardList, countKey: "review" },
-  { title: "Apply for me", href: "/dashboard/auto-apply", icon: ClipboardCheck, countKey: "needsYou" },
-  { title: "Applications", href: "/dashboard/applications", icon: Send, countKey: "applied" },
+  // One place for applying: what needs you, what's ready, what's sent.
+  { title: "Applications", href: "/dashboard/applications", icon: Send, countKey: "waiting" },
   { title: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
   { title: "Rate matches", href: "/dashboard/rate", icon: ThumbsUp },
 ];
@@ -71,14 +67,22 @@ export function AppSidebar() {
   const pathname = usePathname();
   const { setOpenMobile, isMobile } = useSidebar();
   const { data: currentUser } = useCurrentUser();
-  const { data: analytics } = useAnalytics();
   const { data: reviewQueue } = useReviewQueue();
   const { data: autoApplications } = useAutoApplications();
 
+  // The count is what's waiting on the user, the same things the page
+  // lists under Needs you and Ready to send.
+  const withApplication = new Set((autoApplications ?? []).map((a) => a.job_id));
+  const monthAgo = Date.now() - 30 * 86_400_000;
   const counts = {
-    review: (reviewQueue ?? []).filter((r: { approval_status?: string }) => r.approval_status === "ready").length,
-    applied: analytics?.applications_sent ?? 0,
-    needsYou: (autoApplications ?? []).filter((a) => a.status === "needs_you").length,
+    waiting:
+      (autoApplications ?? []).filter((a) => ["needs_you", "queued"].includes(a.status)).length +
+      (reviewQueue ?? []).filter(
+        (r: { approval_status?: string; job_id?: string; updated_at?: string }) =>
+          r.approval_status === "ready" &&
+          !withApplication.has(r.job_id ?? "") &&
+          new Date(r.updated_at ?? 0).getTime() > monthAgo,
+      ).length,
   };
 
   // Auto-collapse the mobile sheet whenever the route changes.
@@ -88,7 +92,10 @@ export function AppSidebar() {
   }, [pathname]);
 
   const renderItem = (item: Item) => {
-    const isActive = pathname === item.href;
+    const isActive =
+      pathname === item.href ||
+      (item.href === "/dashboard/applications" &&
+        ["/dashboard/auto-apply", "/dashboard/review", "/dashboard/extension"].some((p) => pathname.startsWith(p)));
     const count = item.countKey ? counts[item.countKey] : undefined;
     return (
       <SidebarMenuItem key={item.href}>

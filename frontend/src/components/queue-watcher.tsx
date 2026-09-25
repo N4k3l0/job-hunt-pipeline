@@ -27,14 +27,14 @@ export function QueueWatcher() {
       const next = item.approval_status;
       if (prev && prev !== next) {
         if (prev === "generating" && next === "ready") {
-          toast.success("Tailoring complete", {
+          toast.success("Your resume for this job is ready", {
             description: item.job?.title
               ? `${item.job.company} — ${item.job.title}`
-              : "Open Review Queue to view.",
+              : "It's under Applications.",
           });
         } else if (prev === "generating" && next === "failed") {
-          toast.error("Tailoring failed", {
-            description: item.progress_step ?? "Open Review Queue to retry.",
+          toast.error("Couldn't write the resume", {
+            description: item.progress_step ?? "Try again from the job's page.",
           });
         }
       }

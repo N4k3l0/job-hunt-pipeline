@@ -13,6 +13,7 @@ import {
 
 import {
   useAnalytics,
+  useAutoApplications,
   useJobs,
   useReviewQueue,
   useReminders,
@@ -37,6 +38,7 @@ export default function DashboardOverview() {
   const statsLoading = analyticsQuery.isPending;
   const statsFailed = analyticsQuery.isError && !analytics;
   const { data: reviewQueue } = useReviewQueue();
+  const { data: autoApplications } = useAutoApplications();
   const { data: reminders } = useReminders();
   const { data: currentUser } = useCurrentUser();
 
@@ -70,13 +72,21 @@ export default function DashboardOverview() {
   const dayLine = now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
 
   // Hint logic — show the most-pressing single thing
-  const reviewReady = (reviewQueue ?? []).filter((r: any) => r.approval_status === "ready").length;
+  // What's waiting on the user in Applications: questions to answer,
+  // applications ready to send, and recent resumes to check.
+  const withApplication = new Set((autoApplications ?? []).map((a) => a.job_id));
+  const monthAgo = now.getTime() - 30 * 86_400_000;
+  const reviewReady =
+    (autoApplications ?? []).filter((a) => ["needs_you", "queued"].includes(a.status)).length +
+    (reviewQueue ?? []).filter(
+      (r: any) => r.approval_status === "ready" && !withApplication.has(r.job_id) && new Date(r.updated_at).getTime() > monthAgo,
+    ).length;
   const followUps = (reminders ?? []).length;
   const hint = (() => {
     if (reviewReady > 0) {
       return {
-        text: `${reviewReady} tailored application${reviewReady === 1 ? "" : "s"} ready to review`,
-        href: "/dashboard/review",
+        text: `${reviewReady} application${reviewReady === 1 ? "" : "s"} waiting on you`,
+        href: "/dashboard/applications",
         tone: "accent" as const,
       };
     }
@@ -113,9 +123,9 @@ export default function DashboardOverview() {
           : "0 shortlisted",
     },
     {
-      label: "REVIEW QUEUE",
-      value: reviewReady > 0 ? String(reviewReady) : "—",
-      sub: "awaiting review",
+      label: "WAITING ON YOU",
+      value: String(reviewReady),
+      sub: "in Applications",
     },
     {
       label: "APPLIED",
@@ -338,13 +348,13 @@ function WaitingCard({ reviewReady, followUps }: { reviewReady: number; followUp
       </header>
       <div>
         {reviewReady > 0 && (
-          <Link href="/dashboard/review" className="dash-waiting-row">
+          <Link href="/dashboard/applications" className="dash-waiting-row">
             <span className="dash-waiting-dot dash-waiting-dot-urgent" />
             <div className="dash-waiting-body">
               <div className="dash-waiting-label">
-                {reviewReady === 1 ? "Review tailored application" : `${reviewReady} tailored applications`}
+                {reviewReady === 1 ? "1 application" : `${reviewReady} applications`}
               </div>
-              <div className="dash-waiting-target">in your review queue</div>
+              <div className="dash-waiting-target">need your answers or are ready to send</div>
             </div>
             <span className="ds-mono dash-waiting-time">now</span>
           </Link>
@@ -374,7 +384,7 @@ function WaitingCard({ reviewReady, followUps }: { reviewReady: number; followUp
 function QuickActions() {
   const actions: Array<{ label: string; href: string; icon: React.ReactNode }> = [
     { label: "Import a job URL", href: "/dashboard/import", icon: <LinkIcon size={15} /> },
-    { label: "Tailor an application", href: "/dashboard/review", icon: <Sparkles size={15} /> },
+    { label: "Your applications", href: "/dashboard/applications", icon: <Sparkles size={15} /> },
     { label: "Update profile", href: "/dashboard/profile", icon: <UserIcon size={15} /> },
     { label: "Adjust matcher weights", href: "/dashboard/profile", icon: <Sliders size={15} /> },
   ];

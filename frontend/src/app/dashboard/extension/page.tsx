@@ -47,8 +47,8 @@ export default function ExtensionPage() {
   return (
     <div className="ds-root ds-page-fade" style={{ background: "var(--ds-bg)" }}>
       <div className="space-y-6" style={{ maxWidth: 720, margin: "0 auto", paddingBottom: 64 }}>
-        <Link href="/dashboard/auto-apply" className="ds-btn ghost" style={{ paddingLeft: 0, width: "fit-content" }}>
-          <ArrowLeft className="h-3.5 w-3.5" /> Apply for me
+        <Link href="/dashboard/applications" className="ds-btn ghost" style={{ paddingLeft: 0, width: "fit-content" }}>
+          <ArrowLeft className="h-3.5 w-3.5" /> Applications
         </Link>
 
         <div className="space-y-2">
@@ -70,7 +70,7 @@ export default function ExtensionPage() {
               <CheckCircle2 className="h-4 w-4 ds-accent-fg" />
               <span>
                 Installed. Open an approved application in{" "}
-                <Link href="/dashboard/auto-apply" className="ds-accent-fg">Apply for me</Link> and press Fill in the form.
+                <Link href="/dashboard/applications" className="ds-accent-fg">Applications</Link> and press Fill in the form.
               </span>
             </>
           ) : (
