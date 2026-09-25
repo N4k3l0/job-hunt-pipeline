@@ -1,5 +1,8 @@
 import logging
+import os
+import tempfile
 import time
+from pathlib import Path
 from typing import Any
 
 from app.core.config import get_settings
@@ -74,7 +77,14 @@ PAUSED_MESSAGE = (
     "Please try again later."
 )
 
-_credits_paused_until = 0.0
+# The backend runs several worker processes in one container. The pause is
+# kept in a small file in the container's temp folder as well as in memory,
+# so a pause one worker hits holds for all of them, and the admin notice
+# agrees whichever worker answers. A deploy starts a new container, which
+# clears it.
+PAUSE_FILE = Path(os.environ.get("AI_PAUSE_FILE") or Path(tempfile.gettempdir()) / "job-hunt-ai-paused-until")
+
+_credits_paused_until = 0.0  # wall clock, so every process reads it the same way
 
 
 class LLMCreditsExhausted(RuntimeError):
@@ -85,8 +95,20 @@ class LLMCreditsExhausted(RuntimeError):
 
 
 def credits_paused() -> bool:
-    """True while AI calls are paused because the credits ran out."""
-    return time.monotonic() < _credits_paused_until
+    """True while AI calls are paused because the credits ran out, by this
+    worker or another."""
+    global _credits_paused_until
+    now = time.time()
+    if now < _credits_paused_until:
+        return True
+    try:
+        until = float(PAUSE_FILE.read_text())
+    except (OSError, ValueError):
+        return False
+    if now < until:
+        _credits_paused_until = until
+        return True
+    return False
 
 
 async def _guarded(call, **kwargs):
@@ -132,7 +154,21 @@ def _pause_for_credits() -> None:
     global _credits_paused_until
     if not credits_paused():
         logger.warning("Anthropic credits have run out: pausing AI calls for %d minutes", CREDITS_PAUSE_SECONDS // 60)
-    _credits_paused_until = time.monotonic() + CREDITS_PAUSE_SECONDS
+    _credits_paused_until = time.time() + CREDITS_PAUSE_SECONDS
+    # Written whole then renamed, so another worker never reads half a number.
+    staging = PAUSE_FILE.with_name(f"{PAUSE_FILE.name}.{os.getpid()}")
+    try:
+        staging.write_text(repr(_credits_paused_until))
+        os.replace(staging, PAUSE_FILE)
+    except OSError as e:
+        logger.warning("Couldn't share the AI pause with other workers: %s", e)
+
+
+def end_credits_pause() -> None:
+    """Turn AI back on now, in every worker, instead of waiting out the pause."""
+    global _credits_paused_until
+    _credits_paused_until = 0.0
+    PAUSE_FILE.unlink(missing_ok=True)
 
 
 def model_for(task_type: str) -> str:

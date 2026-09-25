@@ -18,9 +18,6 @@ CREDIT_ERROR = (
 )
 
 
-@pytest.fixture(autouse=True)
-def _credits_not_paused(monkeypatch):
-    monkeypatch.setattr(llm_module, "_credits_paused_until", 0.0)
 
 
 def _response(*blocks, stop_reason="end_turn", model="claude-sonnet-5", stop_details=None):
@@ -164,12 +161,12 @@ async def test_running_out_of_credits_pauses_every_ai_call():
 
 async def test_calls_go_through_again_once_the_pause_ends(monkeypatch):
     llm, messages, _ = _client_with(_response(SimpleNamespace(type="text", text="back")))
-    monkeypatch.setattr(llm_module, "_credits_paused_until", llm_module.time.monotonic() + 60)
+    monkeypatch.setattr(llm_module, "_credits_paused_until", llm_module.time.time() + 60)
     with pytest.raises(LLMCreditsExhausted):
         await llm.generate("parsing", "sys", "hi", max_tokens=100)
     assert messages.calls == []
 
-    monkeypatch.setattr(llm_module, "_credits_paused_until", llm_module.time.monotonic() - 1)
+    monkeypatch.setattr(llm_module, "_credits_paused_until", llm_module.time.time() - 1)
     assert await llm.generate("parsing", "sys", "hi", max_tokens=100) == "back"
     assert await llm.client.messages.create(model="claude-haiku-4-5", max_tokens=10, messages=[])
     assert len(messages.calls) == 2
@@ -198,3 +195,28 @@ async def test_api_answers_in_plain_words_while_paused():
     assert r.status_code == 503
     assert r.json()["detail"] == llm_module.PAUSED_MESSAGE
     assert "Anthropic" not in r.json()["detail"]
+
+
+async def test_a_pause_one_worker_hits_holds_for_the_others(monkeypatch):
+    llm, messages = _failing_client(RuntimeError(CREDIT_ERROR))
+    with pytest.raises(LLMCreditsExhausted):
+        await llm.generate("parsing", "sys", "hi", max_tokens=100)
+
+    # Another worker process: same pause file, nothing in memory.
+    monkeypatch.setattr(llm_module, "_credits_paused_until", 0.0)
+    other, other_messages = _failing_client(RuntimeError("should not be called"))
+    assert credits_paused()
+    with pytest.raises(LLMCreditsExhausted):
+        await other.generate("parsing", "sys", "hi", max_tokens=100)
+    assert other_messages.calls == []
+
+    llm_module.end_credits_pause()
+    assert not credits_paused()
+    assert not llm_module.PAUSE_FILE.exists()
+
+
+def test_an_unreadable_or_old_pause_file_does_not_pause():
+    llm_module.PAUSE_FILE.write_text("not a number")
+    assert not credits_paused()
+    llm_module.PAUSE_FILE.write_text(repr(llm_module.time.time() - 5))
+    assert not credits_paused()

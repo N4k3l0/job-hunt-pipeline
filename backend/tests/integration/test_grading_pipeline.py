@@ -187,7 +187,7 @@ async def test_enrich_pauses_when_credits_run_out(client, monkeypatch):
     assert body["selected"] == 0
     assert tried == [US_ONLY]
 
-    monkeypatch.setattr(llm_module, "_credits_paused_until", 0.0)
+    llm_module.end_credits_pause()
     monkeypatch.setattr(job_enricher, "extract_job_details", lambda job: _extracted())
     body = (await client.get("/api/v1/cron/enrich", params={"limit": 10})).json()
     assert body["paused"] is False
