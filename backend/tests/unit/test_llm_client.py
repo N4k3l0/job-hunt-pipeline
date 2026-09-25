@@ -3,7 +3,24 @@ from types import SimpleNamespace
 import pytest
 
 from app.llm import client as llm_module
-from app.llm.client import LLMClient, LLMRefusalError, THINKING_HEADROOM_TOKENS
+from app.llm.client import (
+    LLMClient,
+    LLMCreditsExhausted,
+    LLMRefusalError,
+    THINKING_HEADROOM_TOKENS,
+    credits_paused,
+)
+
+CREDIT_ERROR = (
+    "Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', "
+    "'message': 'Your credit balance is too low to access the Anthropic API. "
+    "Please go to Plans & Billing to upgrade or purchase credits.'}}"
+)
+
+
+@pytest.fixture(autouse=True)
+def _credits_not_paused(monkeypatch):
+    monkeypatch.setattr(llm_module, "_credits_paused_until", 0.0)
 
 
 def _response(*blocks, stop_reason="end_turn", model="claude-sonnet-5", stop_details=None):
@@ -107,3 +124,77 @@ async def test_generate_structured_without_tool_or_text_raises():
     llm, _, _ = _client_with(_response(SimpleNamespace(type="thinking", thinking="")))
     with pytest.raises(RuntimeError, match="no tool_use"):
         await llm.generate_structured("parsing", "sys", "hi", tools=[])
+
+
+class FailingMessages(FakeMessages):
+    def __init__(self, error: Exception):
+        super().__init__(None)
+        self.error = error
+
+    async def create(self, **kwargs):
+        self.calls.append(kwargs)
+        raise self.error
+
+
+def _failing_client(error: Exception) -> tuple[LLMClient, FailingMessages]:
+    messages = FailingMessages(error)
+    llm = LLMClient()
+    llm._client = SimpleNamespace(messages=messages, beta=SimpleNamespace(messages=messages))
+    return llm, messages
+
+
+async def test_running_out_of_credits_pauses_every_ai_call():
+    llm, messages = _failing_client(RuntimeError(CREDIT_ERROR))
+
+    with pytest.raises(LLMCreditsExhausted):
+        await llm.generate("parsing", "sys", "hi", max_tokens=100)
+    assert credits_paused()
+    assert len(messages.calls) == 1
+
+    # While paused, nothing is sent: not through generate, generate_structured,
+    # or callers that build their own requests.
+    with pytest.raises(LLMCreditsExhausted):
+        await llm.generate("tailoring", "sys", "hi", max_tokens=100)
+    with pytest.raises(LLMCreditsExhausted):
+        await llm.generate_structured("extraction", "sys", "hi", tools=[], max_tokens=100)
+    with pytest.raises(LLMCreditsExhausted):
+        await llm.client.messages.create(model="claude-haiku-4-5", max_tokens=10, messages=[])
+    assert len(messages.calls) == 1
+
+
+async def test_calls_go_through_again_once_the_pause_ends(monkeypatch):
+    llm, messages, _ = _client_with(_response(SimpleNamespace(type="text", text="back")))
+    monkeypatch.setattr(llm_module, "_credits_paused_until", llm_module.time.monotonic() + 60)
+    with pytest.raises(LLMCreditsExhausted):
+        await llm.generate("parsing", "sys", "hi", max_tokens=100)
+    assert messages.calls == []
+
+    monkeypatch.setattr(llm_module, "_credits_paused_until", llm_module.time.monotonic() - 1)
+    assert await llm.generate("parsing", "sys", "hi", max_tokens=100) == "back"
+    assert await llm.client.messages.create(model="claude-haiku-4-5", max_tokens=10, messages=[])
+    assert len(messages.calls) == 2
+
+
+async def test_other_errors_do_not_pause():
+    llm, messages = _failing_client(RuntimeError("Error code: 529 - overloaded_error"))
+    with pytest.raises(RuntimeError, match="overloaded"):
+        await llm.generate("parsing", "sys", "hi", max_tokens=100)
+    assert not credits_paused()
+
+
+async def test_api_answers_in_plain_words_while_paused():
+    import httpx
+
+    from app.main import create_app
+
+    app = create_app()
+
+    async def needs_ai():
+        raise LLMCreditsExhausted()
+
+    app.add_api_route("/needs-ai", needs_ai)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.get("/needs-ai")
+    assert r.status_code == 503
+    assert r.json()["detail"] == llm_module.PAUSED_MESSAGE
+    assert "Anthropic" not in r.json()["detail"]

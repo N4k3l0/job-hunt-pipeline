@@ -1,4 +1,5 @@
 import logging
+import time
 from typing import Any
 
 from app.core.config import get_settings
@@ -57,6 +58,83 @@ class LLMRefusalError(RuntimeError):
     """The model (and any fallback) declined the request."""
 
 
+# When the Anthropic account runs out of credits, every call fails the same
+# way. Rather than keep asking (the job reader alone failed 25 times every
+# scheduler run), all AI calls pause, then try once more after this long.
+# Topping up turns AI back on within half an hour.
+CREDITS_PAUSE_SECONDS = 30 * 60
+# For the admin: what happened and how to fix it.
+CREDITS_MESSAGE = (
+    "The Anthropic credits have run out, so AI features are paused. "
+    "They turn back on by themselves within half an hour of topping up."
+)
+# For everyone else: users can't top up, so they only need to know to wait.
+PAUSED_MESSAGE = (
+    "Our AI helper is paused for a little while, so this can't be done right now. "
+    "Please try again later."
+)
+
+_credits_paused_until = 0.0
+
+
+class LLMCreditsExhausted(RuntimeError):
+    """The Anthropic account is out of credits. No call is sent while paused."""
+
+    def __init__(self, message: str = PAUSED_MESSAGE):
+        super().__init__(message)
+
+
+def credits_paused() -> bool:
+    """True while AI calls are paused because the credits ran out."""
+    return time.monotonic() < _credits_paused_until
+
+
+async def _guarded(call, **kwargs):
+    """Make one API call, unless the credits are known to be out."""
+    if credits_paused():
+        raise LLMCreditsExhausted()
+    try:
+        return await call(**kwargs)
+    except Exception as e:
+        if _is_out_of_credits(e):
+            _pause_for_credits()
+            raise LLMCreditsExhausted() from e
+        raise
+
+
+class _GuardedMessages:
+    def __init__(self, messages):
+        self._messages = messages
+
+    async def create(self, **kwargs):
+        return await _guarded(self._messages.create, **kwargs)
+
+
+class _GuardedClient:
+    """What `llm_client.client` hands out: the SDK client, with the credit
+    pause on `messages.create` for the callers that build requests
+    themselves (web search, translation)."""
+
+    def __init__(self, client):
+        self._client = client
+        self.messages = _GuardedMessages(client.messages)
+
+    def __getattr__(self, name):
+        return getattr(self._client, name)
+
+
+def _is_out_of_credits(error: Exception) -> bool:
+    text = str(error).lower()
+    return "credit balance is too low" in text or "billing_error" in text
+
+
+def _pause_for_credits() -> None:
+    global _credits_paused_until
+    if not credits_paused():
+        logger.warning("Anthropic credits have run out: pausing AI calls for %d minutes", CREDITS_PAUSE_SECONDS // 60)
+    _credits_paused_until = time.monotonic() + CREDITS_PAUSE_SECONDS
+
+
 def model_for(task_type: str) -> str:
     return MODELS.get(task_type, MODELS["parsing"])
 
@@ -90,8 +168,8 @@ class LLMClient:
 
     @property
     def client(self):
-        # Backwards-compat for any caller still touching .client directly.
-        return self._client_lazy()
+        # For callers that build their own requests (web search, translation).
+        return _GuardedClient(self._client_lazy())
 
     async def _create(self, task_type: str, **kwargs: Any):
         model = model_for(task_type)
@@ -102,11 +180,12 @@ class LLMClient:
             kwargs["output_config"] = {"effort": effort}
         client = self._client_lazy()
         if model in FALLBACK_MODELS:
-            response = await client.beta.messages.create(
-                **kwargs, betas=[FALLBACK_BETA], fallbacks="default"
+            response = await _guarded(
+                client.beta.messages.create,
+                **kwargs, betas=[FALLBACK_BETA], fallbacks="default",
             )
         else:
-            response = await client.messages.create(**kwargs)
+            response = await _guarded(client.messages.create, **kwargs)
 
         usage = response.usage
         logger.info(

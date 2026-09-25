@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUserId, DbSession
+from app.llm.client import LLMCreditsExhausted
 from app.models.tailoring import TailoredApplication
 from app.models.job import Job
 from app.schemas.job import TailoredApplicationResponse, TailoredApplicationUpdate
@@ -88,6 +89,8 @@ async def generate_tailored_materials(
         placeholder.approval_status = "failed"
         placeholder.progress_step = str(e)[:500]
         await db.commit()
+        if isinstance(e, LLMCreditsExhausted):
+            raise
         raise HTTPException(status_code=502, detail=f"Tailoring failed: {e}") from e
 
     return {

@@ -158,6 +158,48 @@ async def test_enrich_endpoint_reads_recent_jobs_and_rescores(client):
     assert all(v == SCORE_VERSION and path == "general" for v, path, _ in scores)
 
 
+async def test_enrich_pauses_when_credits_run_out(client, monkeypatch):
+    from app.llm import client as llm_module
+    from app.llm.client import LLMCreditsExhausted
+    from app.services.enrichment import job_enricher
+
+    monkeypatch.setattr(llm_module, "_credits_paused_until", 0.0)
+    tried = []
+
+    async def out_of_credits(job):
+        tried.append(job.id)
+        llm_module._pause_for_credits()
+        raise LLMCreditsExhausted()
+
+    monkeypatch.setattr(job_enricher, "extract_job_details", out_of_credits)
+
+    body = (await client.get("/api/v1/cron/enrich", params={"limit": 10})).json()
+    assert body["paused"] is True
+    assert body["message"] == llm_module.CREDITS_MESSAGE
+    assert body["failed"] == 0
+    assert body["enriched"] == 0
+    assert body["pending"] == 1  # still waiting to be read, not marked as done
+    assert tried == [US_ONLY]
+
+    # The next run doesn't even pick jobs until the pause ends.
+    body = (await client.get("/api/v1/cron/enrich", params={"limit": 10})).json()
+    assert body["paused"] is True
+    assert body["selected"] == 0
+    assert tried == [US_ONLY]
+
+    monkeypatch.setattr(llm_module, "_credits_paused_until", 0.0)
+    monkeypatch.setattr(job_enricher, "extract_job_details", lambda job: _extracted())
+    body = (await client.get("/api/v1/cron/enrich", params={"limit": 10})).json()
+    assert body["paused"] is False
+    assert body["message"] is None
+    assert body["enriched"] == 1
+    assert body["pending"] == 0
+
+
+async def _extracted():
+    return {"required_skills": ["SQL"], "nice_to_have_skills": [], "requirements": [], "keywords": []}
+
+
 async def test_hard_filters_are_per_user(client):
     await client.get("/api/v1/cron/enrich", params={"limit": 10})
 

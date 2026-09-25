@@ -1,7 +1,9 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.core.config import get_settings
+from app.llm.client import LLMCreditsExhausted
 from app.api.v1 import (
     auth, candidates, jobs, tailoring, tracking, analytics, cron, feedback,
     invite_requests, auto_apply, ratings, job_alerts, notifications,
@@ -24,6 +26,11 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.exception_handler(LLMCreditsExhausted)
+    async def ai_paused(request: Request, exc: LLMCreditsExhausted):
+        # A plain "try again later" rather than a 500 while the credits are out.
+        return JSONResponse(status_code=503, content={"detail": str(exc)})
 
     # API routes
     app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])

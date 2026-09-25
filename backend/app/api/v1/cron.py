@@ -265,6 +265,7 @@ async def cron_enrich(
     from sqlalchemy import func, or_, select
     from app.core.database import create_worker_session
     from app.models.job import Job, JobEntity
+    from app.llm.client import CREDITS_MESSAGE
     from app.services.enrichment.job_enricher import enrich_pending_jobs
     from app.workers.scoring_tasks import rescore_jobs_for_all_users
 
@@ -292,6 +293,8 @@ async def cron_enrich(
         "errors": result.errors[:5],
         "scores_updated": rescored,
         "pending": pending,
+        "paused": result.paused,
+        "message": CREDITS_MESSAGE if result.paused else None,
     }
 
 

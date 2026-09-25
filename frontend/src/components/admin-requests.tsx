@@ -1,11 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle2, Inbox, Loader2, Mail, MessageSquare, RotateCcw } from "lucide-react";
+import { AlertCircle, CheckCircle2, Inbox, Loader2, Mail, MessageSquare, RotateCcw } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
-import { useFeedbackList, useInviteRequests, useSetFeedbackResolved } from "@/hooks/use-api";
+import { useAiStatus, useFeedbackList, useInviteRequests, useSetFeedbackResolved } from "@/hooks/use-api";
 
 function ago(iso: string | null | undefined) {
   if (!iso) return "";
@@ -14,6 +14,21 @@ function ago(iso: string | null | undefined) {
   if (days === 1) return "yesterday";
   if (days < 30) return `${days} days ago`;
   return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
+/** Shown only while AI is paused because the Anthropic credits ran out. */
+export function AiPausedNotice() {
+  const { data } = useAiStatus();
+  if (!data?.paused) return null;
+  return (
+    <div
+      role="status"
+      className="flex items-start gap-2 rounded-lg border border-amber-400/40 bg-amber-400/10 px-4 py-3 text-sm"
+    >
+      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+      <span>{data.message}</span>
+    </div>
+  );
 }
 
 /** People who asked for an invite on the homepage. Each one can be invited
