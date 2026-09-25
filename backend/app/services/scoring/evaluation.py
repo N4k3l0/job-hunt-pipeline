@@ -30,7 +30,7 @@ from app.models.scoring import JobScore
 from app.models.tracking import ApplicationTracking
 from app.services.job_state import APPLIED_TRACKING_STATUSES
 from app.services.jobs_filter import apply_user_filters, job_group_key, user_filter_kwargs
-from app.services.scoring.scorer import PROPOSED_SCORE_VERSION, SCORE_VERSION, compute_job_score
+from app.services.scoring.scorer import KNOWN_VERSIONS, PROPOSED_SCORE_VERSION, SCORE_VERSION, compute_job_score
 
 TARGET_RATINGS = 50
 # Fewer ratings than this don't say much; the page asks for more first.
@@ -146,9 +146,11 @@ async def rating_queue(db, user_id: UUID, limit: int) -> list[UUID]:
     return [job_id for job_id, _ in ordered if job_id not in rated][:limit]
 
 
-async def evaluate(db, user_id: UUID) -> dict:
+async def evaluate(db, user_id: UUID, compare: list[int] | None = None) -> dict:
     """Metrics for the current and the proposed scoring on the user's rated
-    jobs, and the rated jobs the proposed scoring disagrees with most."""
+    jobs, and the rated jobs the proposed scoring disagrees with most.
+    `compare` adds other versions to weigh up before choosing the next one;
+    their metrics come back under "compared"."""
     from app.workers.scoring_tasks import job_score_inputs, load_scoring_profile
 
     ratings = dict((await db.execute(
@@ -159,6 +161,7 @@ async def evaluate(db, user_id: UUID) -> dict:
     )).scalars().all())
     profile = await load_scoring_profile(db, str(user_id))
     versions = [SCORE_VERSION] + ([PROPOSED_SCORE_VERSION] if PROPOSED_SCORE_VERSION != SCORE_VERSION else [])
+    extra = [v for v in dict.fromkeys(compare or []) if v in KNOWN_VERSIONS and v not in versions]
     rows: list[dict] = []
     if ratings and profile:
         jobs = (await db.execute(
@@ -177,7 +180,7 @@ async def evaluate(db, user_id: UUID) -> dict:
                 "linkedin_alert": job.id in alert_job_ids,
                 "scores": {
                     str(v): compute_job_score(job_data, job_entities, profile, version=v)["overall_fit"]
-                    for v in versions
+                    for v in versions + extra
                 },
             })
 
@@ -205,6 +208,7 @@ async def evaluate(db, user_id: UUID) -> dict:
         "min_for_results": MIN_RATINGS_FOR_RESULTS,
         "current": metrics(SCORE_VERSION),
         "proposed": metrics(PROPOSED_SCORE_VERSION) if len(versions) > 1 else None,
+        **({"compared": {str(v): metrics(v) for v in versions + extra}} if extra else {}),
         # How often the user rates jobs their LinkedIn alerts sent as good,
         # next to every other rated job.
         "linkedin_alerts": {

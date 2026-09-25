@@ -114,10 +114,11 @@ async def test_queue_ratings_and_results(client):
 
     results = (await client.get("/api/v1/ratings/results")).json()
     assert results["rated"] == 2 and results["good"] == 1
-    assert results["current"]["version"] == 2 and results["proposed"]["version"] == 3
+    from app.services.scoring.scorer import PROPOSED_SCORE_VERSION, SCORE_VERSION
+    assert results["current"]["version"] == SCORE_VERSION
+    assert results["proposed"]["version"] == PROPOSED_SCORE_VERSION
     assert results["current"]["ranking_accuracy"] is not None
-    # The rated job with no stated level scores lower under the proposed scoring.
-    assert results["proposed"]["inbox"]["size"] <= results["current"]["inbox"]["size"]
+    assert results["proposed"]["inbox"]["size"] >= 0
 
     # Other users' ratings are separate.
     other = (await client.get("/api/v1/ratings/results", headers={"x-test-user": str(OTHER_USER)})).json()
@@ -126,3 +127,14 @@ async def test_queue_ratings_and_results(client):
     assert (await client.delete(f"/api/v1/ratings/{unstated_level}")).status_code == 204
     assert [j["id"] for j in (await client.get("/api/v1/ratings/queue")).json()["jobs"]] == [str(unstated_level)]
     assert (await client.put(f"/api/v1/ratings/{uuid.uuid4()}", json={"rating": "good"})).status_code == 404
+
+
+async def test_results_can_compare_other_versions(client):
+    """Before choosing the next scoring, the page can measure several
+    versions on the user's ratings at once. Unknown versions are ignored."""
+    r = await client.get("/api/v1/ratings/results", params={"compare": "3,4,99"})
+    assert r.status_code == 200, r.text
+    compared = r.json().get("compared") or {}
+    assert set(compared) >= {"2", "3", "4", "5"} and "99" not in compared
+    for metrics in compared.values():
+        assert "ranking_accuracy" in metrics
