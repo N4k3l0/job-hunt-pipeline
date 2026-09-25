@@ -383,7 +383,7 @@ function WaitingCard({ reviewReady, followUps }: { reviewReady: number; followUp
 
 function QuickActions() {
   const actions: Array<{ label: string; href: string; icon: React.ReactNode }> = [
-    { label: "Import a job URL", href: "/dashboard/import", icon: <LinkIcon size={15} /> },
+    { label: "Add a job you found", href: "/dashboard/import", icon: <LinkIcon size={15} /> },
     { label: "Your applications", href: "/dashboard/applications", icon: <Sparkles size={15} /> },
     { label: "Update profile", href: "/dashboard/profile", icon: <UserIcon size={15} /> },
     { label: "Adjust matcher weights", href: "/dashboard/profile", icon: <Sliders size={15} /> },
