@@ -96,6 +96,9 @@ def main() -> int:
     results.append(call(base_url, secret, "/api/v1/cron/job-alert-details?limit=10", TASK_TIMEOUT))
     results.append(call(base_url, secret, "/api/v1/cron/expire-stale?verify_limit=40", TASK_TIMEOUT))
     results.append(call(base_url, secret, "/api/v1/cron/send-digests", TASK_TIMEOUT))
+    # After a scoring change, users whose scores are from the old version
+    # are rescored a couple at a time until none are left.
+    results.append(call(base_url, secret, "/api/v1/cron/rescore-outdated?max_users=2", TASK_TIMEOUT))
     if reviews > 0:
         results.append(call(
             base_url, secret, f"/api/v1/cron/review-top-matches?per_user_daily={reviews}", TASK_TIMEOUT,

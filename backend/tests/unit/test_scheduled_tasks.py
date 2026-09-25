@@ -52,6 +52,7 @@ def test_run_calls_endpoints_in_order(monkeypatch):
         ("https://backend.example.app", "/api/v1/cron/job-alert-details?limit=10"),
         ("https://backend.example.app", "/api/v1/cron/expire-stale?verify_limit=40"),
         ("https://backend.example.app", "/api/v1/cron/send-digests"),
+        ("https://backend.example.app", "/api/v1/cron/rescore-outdated?max_users=2"),
         ("https://backend.example.app", "/api/v1/cron/review-top-matches?per_user_daily=2"),
     ]
 

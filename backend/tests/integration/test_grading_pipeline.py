@@ -154,7 +154,8 @@ async def test_enrich_endpoint_reads_recent_jobs_and_rescores(client):
     assert short_enriched is True
     assert old_entity == 0
     assert len(scores) == 2
-    assert all(v == 2 and path == "general" for v, path, _ in scores)
+    from app.services.scoring.scorer import SCORE_VERSION
+    assert all(v == SCORE_VERSION and path == "general" for v, path, _ in scores)
 
 
 async def test_hard_filters_are_per_user(client):
@@ -246,3 +247,29 @@ async def test_best_matches_are_read_first(client, monkeypatch):
     result = await job_enricher.enrich_pending_jobs(limit=1)
     assert client.extracted_calls == [UK_NO_SPONSOR]
     assert result.enriched == 1
+
+
+async def test_scores_from_an_old_version_are_redone_on_their_own(client):
+    """After the scoring changes, the scheduler's rescore step finds users
+    whose scores are from the old version and rescores them fully."""
+    from app.core.database import engine
+    from app.services.scoring.scorer import SCORE_VERSION
+
+    await client.get("/api/v1/cron/enrich", params={"limit": 10})
+    async with engine.begin() as conn:
+        await conn.execute(text("UPDATE job_scores SET score_version = 2"))
+
+    r = await client.get("/api/v1/cron/rescore-outdated", params={"max_users": 10})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["version"] == SCORE_VERSION
+    assert body["rescored"] and all(v.startswith("ok") for v in body["rescored"].values())
+    assert body["still_outdated"] == 0
+
+    async with engine.connect() as conn:
+        versions = set((await conn.execute(text("SELECT DISTINCT score_version FROM job_scores"))).scalars())
+    assert versions == {SCORE_VERSION}
+
+    # Nothing left to do on the next run.
+    again = (await client.get("/api/v1/cron/rescore-outdated")).json()
+    assert again["rescored"] == {} and again["still_outdated"] == 0

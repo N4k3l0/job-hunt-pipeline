@@ -116,9 +116,12 @@ async def test_queue_ratings_and_results(client):
     assert results["rated"] == 2 and results["good"] == 1
     from app.services.scoring.scorer import PROPOSED_SCORE_VERSION, SCORE_VERSION
     assert results["current"]["version"] == SCORE_VERSION
-    assert results["proposed"]["version"] == PROPOSED_SCORE_VERSION
     assert results["current"]["ranking_accuracy"] is not None
-    assert results["proposed"]["inbox"]["size"] >= 0
+    # A proposed version only shows when it differs from the live one.
+    if PROPOSED_SCORE_VERSION == SCORE_VERSION:
+        assert results["proposed"] is None
+    else:
+        assert results["proposed"]["version"] == PROPOSED_SCORE_VERSION
 
     # Other users' ratings are separate.
     other = (await client.get("/api/v1/ratings/results", headers={"x-test-user": str(OTHER_USER)})).json()
@@ -132,9 +135,9 @@ async def test_queue_ratings_and_results(client):
 async def test_results_can_compare_other_versions(client):
     """Before choosing the next scoring, the page can measure several
     versions on the user's ratings at once. Unknown versions are ignored."""
-    r = await client.get("/api/v1/ratings/results", params={"compare": "3,4,99"})
+    r = await client.get("/api/v1/ratings/results", params={"compare": "2,3,4,99"})
     assert r.status_code == 200, r.text
     compared = r.json().get("compared") or {}
-    assert set(compared) >= {"2", "3", "4", "5"} and "99" not in compared
+    assert set(compared) == {"2", "3", "4", "5"}
     for metrics in compared.values():
         assert "ranking_accuracy" in metrics

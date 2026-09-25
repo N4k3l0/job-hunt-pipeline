@@ -38,13 +38,20 @@ def _score(job, version, profile=PROFILE):
     return compute_job_score(*job, profile, version=version)
 
 
-def test_the_live_version_is_unchanged():
-    assert SCORE_VERSION == 2 and PROPOSED_SCORE_VERSION == 5
+def test_version_5_is_live():
+    assert SCORE_VERSION == 5 and PROPOSED_SCORE_VERSION == 5
     assert set(KNOWN_VERSIONS) == {2, 3, 4, 5}
     job = _job("Senior AI Engineer", ["Python", "RAG"], seniority="senior")
-    assert compute_job_score(*job, PROFILE) == _score(job, 2)
+    assert compute_job_score(*job, PROFILE) == _score(job, 5)
     # Version 2 titles still give half marks for sharing the role noun.
     assert title_match("FPGA Engineer", ["AI Engineer"])[0] == 0.5
+
+
+def test_a_company_name_in_the_title_is_not_the_job():
+    """Seen in the ratings: "Head of Operations @ Koast.ai" scored 84 for an
+    AI engineer because "ai" from the company name matched."""
+    assert title_match("Head of Operations @ Koast.ai", ["AI Engineer"], weighted=True)[0] == 0.0
+    assert title_match("AI Engineer @ Acme", ["AI Engineer"], weighted=True)[0] == 1.0
 
 
 def test_one_shared_skill_tag_no_longer_counts():
