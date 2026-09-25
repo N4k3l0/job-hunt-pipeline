@@ -215,7 +215,7 @@ export default function JobsInboxPage() {
   // viewParams is spread AFTER the defaults so an active chip overrides
   // them (e.g. "Top matches" pushes minScore from 50 to 80). Page resets
   // to 1 on chip change via the activeView effect below.
-  const { data, isLoading } = useJobs({
+  const { data, isLoading, isError, refetch } = useJobs({
     page,
     pageSize: 25,
     remoteOnly: false,
@@ -352,7 +352,7 @@ export default function JobsInboxPage() {
               Inbox
               {" "}
               <span className="ds-mono ds-faint" style={{ fontSize: 18, fontWeight: 500, letterSpacing: "-0.02em" }}>
-                · {total}
+                {data ? ` · ${total.toLocaleString("en-US")}` : null}
                 {/* Only surface the "matching" suffix when a client-side
                     chip or search query has actually trimmed the visible
                     list. Pagination alone doesn't count — page-size
@@ -477,6 +477,20 @@ export default function JobsInboxPage() {
         {isLoading ? (
           <div className="ds-card" style={{ padding: 60, textAlign: "center", marginTop: 16 }}>
             <Loader2 className="h-6 w-6 animate-spin mx-auto ds-dim" />
+          </div>
+        ) : isError && !data ? (
+          // A failed request is not an empty inbox: say so, and offer a retry.
+          <div className="ds-card" style={{ padding: 60, textAlign: "center", marginTop: 16, color: "var(--ds-fg-muted)" }}>
+            <InboxIcon className="h-7 w-7 mx-auto mb-3 ds-dim" />
+            <p style={{ fontSize: 15, color: "var(--ds-fg)", marginBottom: 4 }}>
+              Couldn&apos;t load your jobs
+            </p>
+            <p style={{ fontSize: 13, marginBottom: 14 }}>
+              Your jobs are still there. This is a problem loading them, not an empty inbox.
+            </p>
+            <button type="button" className="ds-btn" onClick={() => refetch()}>
+              Try again
+            </button>
           </div>
         ) : filtered.length === 0 ? (
           <div className="ds-card" style={{ padding: 60, textAlign: "center", marginTop: 16, color: "var(--ds-fg-muted)" }}>

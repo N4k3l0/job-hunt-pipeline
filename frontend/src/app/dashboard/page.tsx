@@ -28,8 +28,14 @@ import { ScoreRing } from "@/components/ds/score";
    ============================================================ */
 
 export default function DashboardOverview() {
-  const { data: analytics } = useAnalytics();
-  const { data: jobsData } = useJobs({ pageSize: 10, sortBy: "best" });
+  // Loading and failure are shown as such. Falling back to 0 made a slow
+  // load look like an empty account ("0 discovered, no scored jobs yet").
+  const analyticsQuery = useAnalytics();
+  const jobsQuery = useJobs({ pageSize: 10, sortBy: "best" });
+  const analytics = analyticsQuery.data;
+  const jobsData = jobsQuery.data;
+  const statsLoading = analyticsQuery.isPending;
+  const statsFailed = analyticsQuery.isError && !analytics;
   const { data: reviewQueue } = useReviewQueue();
   const { data: reminders } = useReminders();
   const { data: currentUser } = useCurrentUser();
@@ -88,6 +94,7 @@ export default function DashboardOverview() {
         tone: "info" as const,
       };
     }
+    if (!analytics) return null;
     return {
       text: `Inbox is calm · last sweep ${formatSweepTime(analytics?.last_discovery_at)}`,
       href: "/dashboard/jobs",
@@ -139,15 +146,17 @@ export default function DashboardOverview() {
           {firstName ? <>,{" "}<span>{firstName}.</span></> : "."}
         </h1>
 
-        <Link href={hint.href} className={`dash-hint dash-hint-${hint.tone}`}>
-          <span className="dash-hint-dot" />
-          {hint.text}
-          <ChevronRight size={14} style={{ opacity: 0.6 }} />
-        </Link>
+        {hint && (
+          <Link href={hint.href} className={`dash-hint dash-hint-${hint.tone}`}>
+            <span className="dash-hint-dot" />
+            {hint.text}
+            <ChevronRight size={14} style={{ opacity: 0.6 }} />
+          </Link>
+        )}
       </header>
 
       {/* Stat cards */}
-      <StatCards stats={stats} />
+      <StatCards stats={stats} loading={statsLoading} failed={statsFailed} onRetry={() => analyticsQuery.refetch()} />
 
       {/* Two-column body */}
       <div className="dash-grid">
@@ -155,8 +164,11 @@ export default function DashboardOverview() {
         <div className="dash-left">
           <RadarSection
             radar={radar}
-            totalScored={analytics?.jobs_discovered ?? 0}
+            totalScored={analytics?.jobs_discovered ?? null}
             lastSweep={analytics?.last_discovery_at}
+            loading={jobsQuery.isPending}
+            failed={jobsQuery.isError && !jobsData}
+            onRetry={() => jobsQuery.refetch()}
           />
         </div>
 
@@ -178,17 +190,44 @@ export default function DashboardOverview() {
 
 type StatCardData = { label: string; value: string; sub: string };
 
-function StatCards({ stats }: { stats: StatCardData[] }) {
+function StatCards({
+  stats,
+  loading,
+  failed,
+  onRetry,
+}: {
+  stats: StatCardData[];
+  loading: boolean;
+  failed: boolean;
+  onRetry: () => void;
+}) {
   return (
-    <div className="dash-stats">
-      {stats.map((s) => (
-        <div key={s.label} className="dash-stat">
-          <div className="ds-mono dash-stat-label">{s.label}</div>
-          <div className="ds-mono dash-stat-value">{s.value}</div>
-          <div className="dash-stat-sub">{s.sub}</div>
-        </div>
-      ))}
-    </div>
+    <>
+      <div className="dash-stats" aria-busy={loading}>
+        {stats.map((s) => (
+          <div key={s.label} className="dash-stat">
+            <div className="ds-mono dash-stat-label">{s.label}</div>
+            {loading ? (
+              <>
+                <div className="dash-skeleton dash-skeleton-value" />
+                <div className="dash-skeleton dash-skeleton-sub" />
+              </>
+            ) : (
+              <>
+                <div className="ds-mono dash-stat-value">{failed ? "—" : s.value}</div>
+                <div className="dash-stat-sub">{failed ? "Not loaded" : s.sub}</div>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+      {failed && (
+        <p className="dash-load-error">
+          Couldn&apos;t load your numbers.{" "}
+          <button type="button" onClick={onRetry}>Try again</button>
+        </p>
+      )}
+    </>
   );
 }
 
@@ -196,10 +235,16 @@ function RadarSection({
   radar,
   totalScored,
   lastSweep,
+  loading,
+  failed,
+  onRetry,
 }: {
   radar: Array<{ id: string; company: string; title: string; location: string; salary: string | null; time: string; score: number | null }>;
-  totalScored: number;
+  totalScored: number | null;
   lastSweep: string | null | undefined;
+  loading: boolean;
+  failed: boolean;
+  onRetry: () => void;
 }) {
   return (
     <section>
@@ -216,13 +261,29 @@ function RadarSection({
       <div className="dash-card dash-radar-card">
         <div className="dash-radar-head">
           <span className="ds-mono dash-radar-count">
-            {radar.length} OF {totalScored} · BEST MATCHES, NEWEST FIRST
+            {loading || totalScored == null ? "BEST MATCHES, NEWEST FIRST" : `${radar.length} OF ${totalScored} · BEST MATCHES, NEWEST FIRST`}
           </span>
           <span className="ds-mono dash-radar-sweep">
             SWEPT {formatSweepTime(lastSweep)}
           </span>
         </div>
-        {radar.length === 0 && (
+        {loading &&
+          Array.from({ length: 5 }, (_, i) => (
+            <div key={i} className="dash-radar-skeleton">
+              <div className="dash-skeleton dash-skeleton-ring" />
+              <div style={{ flex: 1 }}>
+                <div className="dash-skeleton dash-skeleton-title" />
+                <div className="dash-skeleton dash-skeleton-meta" />
+              </div>
+            </div>
+          ))}
+        {failed && (
+          <div className="dash-radar-empty ds-faint">
+            Couldn&apos;t load your matches.{" "}
+            <button type="button" className="dash-inline-btn" onClick={onRetry}>Try again</button>
+          </div>
+        )}
+        {!loading && !failed && radar.length === 0 && (
           <div className="dash-radar-empty ds-faint">
             No scored jobs yet. The next sweep will fill this in.
           </div>
@@ -357,8 +418,8 @@ function formatSweepTime(iso: string | null | undefined): string {
 }
 
 function formatNumber(n: number | null | undefined): string {
-  if (n == null) return "0";
-  return String(n);
+  if (n == null) return "—";
+  return n.toLocaleString("en-US");
 }
 
 function formatFirstName(name: string | null | undefined): string {
@@ -544,6 +605,19 @@ function DashStyle() {
         letter-spacing: 0.1em;
       }
       .dash-radar-empty { padding: 26px 16px; font-size: 13px; }
+
+      /* Loading placeholders: the shape of what's coming, never a false 0. */
+      .dash-skeleton { border-radius: 6px; background: var(--ds-bg-elev-2); animation: dash-pulse 1.4s ease-in-out infinite; }
+      .dash-skeleton-value { height: 28px; width: 64px; margin: 10px 0 8px; }
+      .dash-skeleton-sub { height: 12px; width: 96px; }
+      .dash-radar-skeleton { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-top: 1px solid var(--ds-line); }
+      .dash-skeleton-ring { height: 36px; width: 36px; border-radius: 999px; flex: 0 0 36px; }
+      .dash-skeleton-title { height: 14px; width: 60%; margin-bottom: 8px; }
+      .dash-skeleton-meta { height: 11px; width: 35%; }
+      @keyframes dash-pulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+      @media (prefers-reduced-motion: reduce) { .dash-skeleton { animation: none; } }
+      .dash-load-error { margin: -10px 0 22px; font-size: 13px; color: var(--ds-fg-muted, inherit); }
+      .dash-load-error button, .dash-inline-btn { color: var(--ds-accent); text-decoration: underline; background: none; border: 0; padding: 0; cursor: pointer; font: inherit; }
 
       .dash-radar-row {
         display: grid;
