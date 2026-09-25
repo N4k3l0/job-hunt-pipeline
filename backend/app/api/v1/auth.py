@@ -328,6 +328,14 @@ async def admin_stale_jobs_cleanup(
     return {"expired": result.rowcount, "days": days}
 
 
+@router.get("/admin/ai-status")
+async def admin_ai_status(admin: AdminUser):
+    """Whether AI calls are paused because the Anthropic credits ran out."""
+    from app.llm.client import CREDITS_MESSAGE, credits_paused
+    paused = credits_paused()
+    return {"paused": paused, "message": CREDITS_MESSAGE if paused else None}
+
+
 @router.get("/admin/debug/source-health")
 async def admin_source_health(admin: AdminUser):
     """Ping every external job source and report whether it's actually

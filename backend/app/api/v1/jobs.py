@@ -1279,7 +1279,7 @@ async def tailor_bullets(
     metrics, same scope.
     """
     from app.models.candidate import CandidateProfile, CandidateBullet
-    from app.llm.client import llm_client
+    from app.llm.client import LLMCreditsExhausted, llm_client
     from app.services.tailoring.tailor_service import (
         _load_samples_by_kind, _style_examples_block,
     )
@@ -1368,6 +1368,8 @@ async def tailor_bullets(
             tools=[_TAILOR_BULLETS_TOOL],
             max_tokens=4096,
         )
+    except LLMCreditsExhausted:
+        raise
     except Exception as e:  # noqa: BLE001
         logger.exception("Bullet tailoring failed for job %s", job_id)
         raise HTTPException(status_code=502, detail=f"Bullet tailoring failed: {type(e).__name__}: {e}")

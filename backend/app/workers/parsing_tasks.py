@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 
 from app.core.database import create_worker_session
+from app.llm.client import LLMCreditsExhausted
 from app.models.candidate import Resume, CandidateProfile, CandidateWorkHistory, CandidateSkill, CandidateEducation, CandidateBullet
 from app.services.parsing.resume_parser import parse_resume_content, build_bullets_from_parsed
 from app.services.parsing.job_parser import parse_job_text
@@ -176,7 +177,7 @@ async def _parse_job_from_url_async(url: str):
         parsed = await parse_job_text(page_content)
     except Exception as e:  # noqa: BLE001
         msg = str(e).lower()
-        if any(token in msg for token in (
+        if isinstance(e, LLMCreditsExhausted) or any(token in msg for token in (
             "credit balance is too low",
             "credit_balance",
             "insufficient_quota",

@@ -21,7 +21,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import defer, selectinload
 
 from app.core.database import create_worker_session
-from app.llm.client import llm_client
+from app.llm.client import LLMCreditsExhausted, credits_paused, llm_client
 from app.llm.prompts.enrich_job import RECORD_TOOL, SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
 from app.models.job import Job, JobEntity
 from app.models.scoring import JobScore
@@ -56,6 +56,8 @@ class EnrichmentResult:
     failed: int = 0
     job_ids: list[UUID] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    # The Anthropic credits ran out. Unread jobs stay unread for next time.
+    paused: bool = False
 
 
 def clean_description(raw: str | None) -> str:
@@ -203,6 +205,9 @@ async def enrich_pending_jobs(
     time budget is spent."""
     started = time.monotonic()
     result = EnrichmentResult()
+    if credits_paused():
+        result.paused = True
+        return result
     cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
     # Looked up per job through ix_job_scores_job_fit; aggregating every
     # score first took ~3s on the production database.
@@ -260,6 +265,9 @@ async def enrich_pending_jobs(
         for (job, entity), outcome in zip(to_extract, outcomes):
             if outcome is None:
                 continue
+            if isinstance(outcome, LLMCreditsExhausted):
+                result.paused = True  # not the job's fault; read it once credits are back
+                continue
             if isinstance(outcome, Exception) or "text" in outcome:
                 result.failed += 1
                 message = f"{type(outcome).__name__}: {outcome}" if isinstance(outcome, Exception) else "no tool call"
@@ -277,8 +285,8 @@ async def enrich_pending_jobs(
         await db.commit()
 
     logger.info(
-        "Enrichment: selected=%d enriched=%d short=%d failed=%d in %.1fs",
-        result.selected, result.enriched, result.skipped_short, result.failed,
+        "Enrichment: selected=%d enriched=%d short=%d failed=%d paused=%s in %.1fs",
+        result.selected, result.enriched, result.skipped_short, result.failed, result.paused,
         time.monotonic() - started,
     )
     return result

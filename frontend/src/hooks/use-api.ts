@@ -881,6 +881,15 @@ export interface InviteRequestRow {
 }
 
 /** Admin: people who asked for an invite on the homepage. */
+/** Whether AI is paused because the Anthropic credits ran out. */
+export function useAiStatus() {
+  return useQuery({
+    queryKey: ["admin", "ai-status"],
+    queryFn: () => api.get<{ paused: boolean; message: string | null }>("/api/v1/auth/admin/ai-status"),
+    staleTime: 60 * 1000,
+  });
+}
+
 export function useInviteRequests() {
   return useQuery({
     queryKey: ["admin", "invite-requests"],
