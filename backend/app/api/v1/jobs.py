@@ -16,6 +16,7 @@ from app.models.candidate import CandidateProfile
 from app.models.tracking import ApplicationTracking
 from app.models.auto_apply import AutoApplication
 from app.models.job_alert import JobAlertHit
+from app.services.auto_apply.apply_links import find_apply_url, has_apply_redirect
 from app.services.auto_apply.ats import detect_ats
 from app.services.discovery.ats_resolver import find_direct_apply, is_ats_url, _is_aggregator
 from app.services.jobs_filter import country_filter_codes, job_group_key
@@ -506,6 +507,18 @@ async def get_job(job_id: UUID, user_id: CurrentUserId, db: DbSession):
     job = result.scalar_one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    # The first time a job board listing is opened, find the company's own
+    # form behind its Apply button, so Apply for me shows when it can fill
+    # it in. One small request; the scheduler does this ahead of time too.
+    if job.apply_url is None and has_apply_redirect(job.job_url):
+        import asyncio
+        import httpx
+        try:
+            job.apply_url = await asyncio.wait_for(find_apply_url(job.job_url), timeout=5.0) or job.job_url
+            await db.commit()
+        except (httpx.HTTPError, asyncio.TimeoutError) as e:
+            logger.warning("Couldn't follow the apply link for job %s: %s", job_id, e)
 
     # Get user's score for this job
     score_result = await db.execute(
@@ -1008,6 +1021,19 @@ async def resolve_apply_url(job_id: UUID, user_id: CurrentUserId, db: DbSession)
         raise HTTPException(status_code=404, detail="Job not found")
 
     source = job.apply_url or job.job_url
+
+    # A job board's own Apply redirect names the real form for free, so
+    # it comes before the slug guessing and web search below.
+    if has_apply_redirect(source):
+        import httpx
+        try:
+            direct = await find_apply_url(source)
+        except httpx.HTTPError:
+            direct = None
+        if direct:
+            job.apply_url = direct
+            await db.commit()
+            return {"url": direct, "is_direct_ats": detect_ats(direct) is not None or is_ats_url(direct)}
 
     # Hard cap on the whole resolver cascade so a hung Firecrawl / Claude
     # web_search call can't burn past Vercel's 60s function ceiling.

@@ -17,7 +17,8 @@ from app.models.candidate import CandidateProfile, Resume
 from app.models.job import Job
 from app.models.user import User
 from app.services.auto_apply import answers as rules
-from app.services.auto_apply.ats import detect_ats, resolve_greenhouse_board
+from app.services.auto_apply.apply_links import find_apply_url, has_apply_redirect
+from app.services.auto_apply.ats import detect_ats, hiring_system_name, resolve_greenhouse_board
 from app.services.auto_apply.drafting import draft_answers
 from app.services.auto_apply.forms import FormUnavailable, fetch_form, http_client
 from app.services.scoring.matching import candidate_years
@@ -193,12 +194,24 @@ async def prepare_application(
     owns_client = client is None
     client = client or http_client()
     try:
+        board_page = job.apply_url or job.job_url
+        if target is None and has_apply_redirect(board_page):
+            try:
+                job.apply_url = await find_apply_url(board_page, client) or board_page
+            except httpx.HTTPError as e:
+                logger.warning("Couldn't follow the apply link for job %s: %s", job.id, e)
+            target = detect_ats(job.apply_url)
         if target is not None and target.board is None:
             board = await resolve_greenhouse_board(client, job.company, target.job_id)
             target = type(target)(target.ats, board, target.job_id, target.eu) if board else None
         if target is None:
             application.status = "unsupported"
-            application.error = "This job's application form isn't on Greenhouse, Lever or Ashby, so it can't be filled in automatically yet."
+            system = hiring_system_name(job.apply_url) or hiring_system_name(job.job_url)
+            application.error = (
+                f"This job's application form is on {system}, which the app can't fill in yet."
+                if system else
+                "This job's application form isn't on Greenhouse, Lever or Ashby, so it can't be filled in automatically yet."
+            )
             await db.commit()
             return application
 

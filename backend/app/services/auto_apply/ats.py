@@ -88,6 +88,37 @@ def detect_ats(url: str | None) -> AtsTarget | None:
     return None
 
 
+_OTHER_SYSTEMS = (
+    ("myworkdayjobs.com", "Workday"),
+    ("myworkdaysite.com", "Workday"),
+    ("join.com", "Join"),
+    ("personio.de", "Personio"),
+    ("personio.com", "Personio"),
+    ("recruitee.com", "Recruitee"),
+    ("smartrecruiters.com", "SmartRecruiters"),
+    ("workable.com", "Workable"),
+    ("teamtailor.com", "Teamtailor"),
+    ("bamboohr.com", "BambooHR"),
+    ("icims.com", "iCIMS"),
+    ("successfactors.com", "SuccessFactors"),
+    ("successfactors.eu", "SuccessFactors"),
+    ("taleo.net", "Taleo"),
+)
+
+
+def hiring_system_name(url: str | None) -> str | None:
+    """The name of a hiring system Apply for me can't fill in yet, for
+    telling the user where the form is. None when it isn't one of these."""
+    try:
+        host = (urlparse((url or "").strip()).hostname or "").lower()
+    except ValueError:
+        return None
+    for domain, name in _OTHER_SYSTEMS:
+        if host == domain or host.endswith("." + domain):
+            return name
+    return None
+
+
 @lru_cache(maxsize=1)
 def _curated_greenhouse_boards() -> dict[str, str]:
     path = Path(__file__).parents[1] / "discovery" / "curated_companies.json"

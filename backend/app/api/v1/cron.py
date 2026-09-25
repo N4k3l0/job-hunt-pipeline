@@ -354,6 +354,29 @@ async def cron_job_alert_details(
     }
 
 
+@router.get("/resolve-apply-links")
+async def cron_resolve_apply_links(
+    authorization: str | None = Header(None),
+    limit: int = Query(100, ge=1, le=300),
+):
+    """Find the company's own application form behind job board listings'
+    Apply buttons, best matches first, so Apply for me can fill them in.
+    Free: one small request per job, no AI."""
+    _verify_cron(authorization)
+
+    from app.services.auto_apply.apply_links import pending_apply_links, resolve_pending_apply_links
+
+    result = await resolve_pending_apply_links(limit=limit)
+    return {
+        "checked": result.checked,
+        "found": result.found,
+        "fillable": result.fillable,
+        "gone": result.gone,
+        "errors": result.errors,
+        "pending": await pending_apply_links(),
+    }
+
+
 @router.get("/send-digests")
 async def cron_send_digests(authorization: str | None = Header(None)):
     """Send the daily email to everyone who wants it and hasn't had today's.
