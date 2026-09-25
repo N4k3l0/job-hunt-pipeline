@@ -1,14 +1,75 @@
 "use client";
 
 import Link from "next/link";
-import { Bell, Briefcase, ChevronDown, Loader2, Send } from "lucide-react";
+import { Bell, Briefcase, ChevronDown, ChevronRight, FileText, Loader2, Send } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useApplicationPipeline, useUpdateStatus, useReminders } from "@/hooks/use-api";
+import {
+  useApplicationPipeline, useAutoApplications, useReminders, useReviewQueue, useUpdateStatus,
+} from "@/hooks/use-api";
+import { AutoApplyStatusPill } from "@/components/auto-apply-status";
 import { useToast } from "@/components/ui/toast";
 import { EmptyState } from "@/components/ui/empty-state";
-import type { ApplicationTracking } from "@/lib/types";
+import type { ApplicationTracking, AutoApplication, TailoredApplication } from "@/lib/types";
+
+// A tailored resume nobody opened in a month is history, not a to-do.
+const STALE_DAYS = 30;
+
+function daysSince(iso: string | null | undefined) {
+  return iso ? (Date.now() - new Date(iso).getTime()) / 86_400_000 : 0;
+}
+
+function timeAgo(iso: string | null | undefined) {
+  if (!iso) return "";
+  const minutes = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (minutes < 60) return minutes < 1 ? "just now" : `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  return days < 14 ? `${days}d ago` : `${Math.round(days / 7)}w ago`;
+}
+
+/** One row for something still on its way out: an application being
+ *  prepared, or a resume written for a job. */
+function ToDoRow({ href, company, title, detail, right }: {
+  href: string; company?: string; title?: string; detail: string; right: React.ReactNode;
+}) {
+  return (
+    <Link href={href} className="ds-row" style={{ gridTemplateColumns: "minmax(0, 1fr) auto auto", alignItems: "center" }}>
+      <div className="min-w-0">
+        <div className="ds-muted truncate" style={{ fontSize: 13 }}>{company}</div>
+        <div className="truncate" style={{ fontSize: 15, fontWeight: 500 }}>{title || "Unknown role"}</div>
+        <div className="ds-dim truncate" style={{ fontSize: 12, marginTop: 2 }}>{detail}</div>
+      </div>
+      <div className="flex items-center" style={{ gap: 10 }}>{right}</div>
+      <ChevronRight className="h-4 w-4 ds-dim" />
+    </Link>
+  );
+}
+
+function Section({ title, hint, count, children }: {
+  title: string; hint?: string; count: number; children: React.ReactNode;
+}) {
+  return (
+    <section className="space-y-2">
+      <div className="flex items-baseline justify-between" style={{ gap: 12 }}>
+        <h2 className="ds-h3">
+          {title} <span className="ds-mono ds-dim" style={{ fontSize: 13 }}>{count}</span>
+        </h2>
+        {hint && <span className="ds-dim" style={{ fontSize: 12 }}>{hint}</span>}
+      </div>
+      <div className="ds-card" style={{ overflow: "hidden" }}>{children}</div>
+    </section>
+  );
+}
+
+function autoDetail(a: AutoApplication) {
+  if (a.status === "needs_you") return `${a.open_count} ${a.open_count === 1 ? "question needs" : "questions need"} you`;
+  if (a.status === "preparing") return "Reading the form and filling in your answers";
+  if (a.status === "queued") return "Answers approved. Fill in the form and send it.";
+  return a.error ?? "";
+}
 
 /** Format a date string ("YYYY-MM-DD") relative to today: "Today",
  *  "Tomorrow", "in 3 days", "3 days ago". Empty input returns null.
@@ -78,14 +139,36 @@ function Dot({ status }: { status: string }) {
   );
 }
 
+/** Everything about applying, in one place: what still needs you, what's
+ *  ready to send, and what's been sent. It used to be three pages (Review
+ *  Queue, Apply for me, Applications) holding parts of the same thing. */
 export default function ApplicationsPage() {
   const { data: tracking, isLoading } = useApplicationPipeline();
+  const { data: autoApplications, isLoading: autoLoading } = useAutoApplications();
+  const { data: tailored } = useReviewQueue();
   const { data: reminders } = useReminders();
   const updateStatus = useUpdateStatus();
   const toast = useToast();
 
   const items = tracking ?? [];
   const reminderCount = reminders?.length ?? 0;
+
+  const autos = autoApplications ?? [];
+  // A sent application is tracked below with everything else that's sent.
+  const needsYou = autos.filter((a) => a.status === "needs_you" || a.status === "preparing");
+  const readyToSend = autos.filter((a) => a.status === "queued" || a.status === "submitting");
+  const stopped = autos.filter((a) => ["failed", "unsupported", "cancelled"].includes(a.status));
+  // Resumes written for a job with an application are shown on that
+  // application, so only the others are listed on their own.
+  const jobsWithApplication = new Set(autos.map((a) => a.job_id));
+  const resumes = (tailored ?? []).filter((t: TailoredApplication) => !jobsWithApplication.has(t.job_id));
+  const resumesToCheck = resumes.filter(
+    (t) => ["ready", "generating", "pending"].includes(t.approval_status) && daysSince(t.updated_at) <= STALE_DAYS,
+  );
+  const olderResumes = resumes.filter(
+    (t) => ["ready", "generating", "pending"].includes(t.approval_status) && daysSince(t.updated_at) > STALE_DAYS,
+  );
+  const inProgress = needsYou.length + resumesToCheck.length;
 
   const changeStatus = (item: ApplicationTracking, status: string) => {
     updateStatus.mutate(
@@ -104,7 +187,7 @@ export default function ApplicationsPage() {
     .map((status) => ({ status, items: items.filter((t) => t.status === status) }))
     .filter((group) => group.items.length > 0);
 
-  if (isLoading) {
+  if (isLoading || autoLoading) {
     return (
       <div className="flex items-center justify-center py-16">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -118,8 +201,9 @@ export default function ApplicationsPage() {
         <div className="flex flex-wrap items-end justify-between" style={{ gap: 12 }}>
           <div>
             <h1 className="ds-h1">Applications</h1>
-            <p className="ds-muted" style={{ marginTop: 6 }}>
-              <span className="ds-mono">{items.length}</span> tracked
+            <p className="ds-muted" style={{ marginTop: 6, maxWidth: 620 }}>
+              Everything you&apos;re applying to: what still needs you, what&apos;s ready to send, and what
+              you&apos;ve sent.
             </p>
           </div>
           {reminderCount > 0 && (
@@ -129,6 +213,54 @@ export default function ApplicationsPage() {
             </span>
           )}
         </div>
+
+        {inProgress > 0 && (
+          <Section title="Needs you" hint="Answer the questions or check the resume" count={inProgress}>
+            {needsYou.map((a) => (
+              <ToDoRow
+                key={a.id}
+                href={`/dashboard/auto-apply/${a.id}`}
+                company={a.job?.company}
+                title={a.job?.title}
+                detail={autoDetail(a)}
+                right={<AutoApplyStatusPill status={a.status} />}
+              />
+            ))}
+            {resumesToCheck.map((t) => (
+              <ToDoRow
+                key={t.id}
+                href="/dashboard/review"
+                company={t.job?.company}
+                title={t.job?.title}
+                detail={t.approval_status === "ready" ? "Resume and cover letter ready to check" : "Writing your resume"}
+                right={<span className="ds-mono ds-dim hidden sm:inline" style={{ fontSize: 12 }}>
+                  <FileText className="inline h-3.5 w-3.5" style={{ verticalAlign: -2 }} /> {timeAgo(t.updated_at)}
+                </span>}
+              />
+            ))}
+          </Section>
+        )}
+
+        {readyToSend.length > 0 && (
+          <Section title="Ready to send" hint="Every answer is approved" count={readyToSend.length}>
+            {readyToSend.map((a) => (
+              <ToDoRow
+                key={a.id}
+                href={`/dashboard/auto-apply/${a.id}`}
+                company={a.job?.company}
+                title={a.job?.title}
+                detail={autoDetail(a)}
+                right={<AutoApplyStatusPill status={a.status} />}
+              />
+            ))}
+          </Section>
+        )}
+
+        {(inProgress > 0 || readyToSend.length > 0) && items.length > 0 && (
+          <h2 className="ds-overline ds-mono ds-dim" style={{ fontSize: 12, letterSpacing: "0.08em", paddingTop: 8 }}>
+            SENT
+          </h2>
+        )}
 
         {grouped.length > 1 && (
           <div className="flex flex-wrap" style={{ gap: 8 }}>
@@ -142,16 +274,16 @@ export default function ApplicationsPage() {
           </div>
         )}
 
-        {items.length === 0 ? (
+        {items.length === 0 && inProgress === 0 && readyToSend.length === 0 ? (
           <div className="ds-card">
             <EmptyState
               icon={Briefcase}
-              title="No applications tracked yet"
-              description="Jobs you mark as applied, from the Review Queue or a job's page, show up here grouped by status."
-              action={{ label: "Open Review Queue", href: "/dashboard/review" }}
+              title="Nothing here yet"
+              description="Open a job in your inbox and press Apply for me, or mark a job as applied. It shows up here until you hear back."
+              action={{ label: "Go to inbox", href: "/dashboard/jobs" }}
             />
           </div>
-        ) : (
+        ) : items.length === 0 ? null : (
           grouped.map(({ status, items: statusItems }) => (
             <section key={status} className="space-y-2">
               <div className="flex items-center" style={{ gap: 8 }}>
@@ -224,6 +356,36 @@ export default function ApplicationsPage() {
               </div>
             </section>
           ))
+        )}
+
+        {(stopped.length > 0 || olderResumes.length > 0) && (
+          <details className="space-y-2">
+            <summary className="ds-dim" style={{ fontSize: 13, cursor: "pointer" }}>
+              Stopped, couldn&apos;t apply, and older resumes ({stopped.length + olderResumes.length})
+            </summary>
+            <div className="ds-card" style={{ overflow: "hidden", marginTop: 8 }}>
+              {stopped.map((a) => (
+                <ToDoRow
+                  key={a.id}
+                  href={`/dashboard/auto-apply/${a.id}`}
+                  company={a.job?.company}
+                  title={a.job?.title}
+                  detail={autoDetail(a)}
+                  right={<AutoApplyStatusPill status={a.status} />}
+                />
+              ))}
+              {olderResumes.map((t) => (
+                <ToDoRow
+                  key={t.id}
+                  href="/dashboard/review"
+                  company={t.job?.company}
+                  title={t.job?.title}
+                  detail="Resume written, never sent"
+                  right={<span className="ds-mono ds-dim" style={{ fontSize: 12 }}>{timeAgo(t.updated_at)}</span>}
+                />
+              ))}
+            </div>
+          </details>
         )}
       </div>
     </div>

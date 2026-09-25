@@ -133,6 +133,11 @@ Every job flows: Raw → Normalized → Deduplicated → Enriched → Scored →
 - Alert emails have no description. `/cron/job-alert-details` (every scheduler run) looks each new job up once on the company's own job board (`ats_resolver.resolve_ats_url`, then the Greenhouse/Lever/Ashby posting APIs). Free: no LinkedIn pages, Firecrawl or Claude
 - Rate matches samples up to 10 alert jobs whatever their score and reports how often the user rates them good. "LinkedIn sent it" doesn't change scores until ratings show it should
 
+### Applications page (`/dashboard/applications`)
+- The one place for applying, and the only sidebar entry for it: **Needs you** (applications with questions open, plus resumes written for jobs without an application, from the last 30 days), **Ready to send** (approved), then everything **Sent** (`application_tracking`, grouped by status), and a folded list of stopped applications and older resumes. The sidebar and dashboard count the same things
+- `/dashboard/auto-apply` redirects here. `/dashboard/review` still exists for changing a tailored resume's wording, reached from an application; it's no longer in the sidebar
+- A job page has one main action: **Apply for me** when the form is on Greenhouse, Lever or Ashby (or **Continue your application**), otherwise **Apply on their site** with a line saying why, plus **Write a resume for this job**. Tailoring isn't a separate button when Apply for me is available, because Apply for me tailors
+
 ### Apply for me (`services/auto_apply/`, `/api/v1/auto-apply`)
 - Supported: jobs whose `apply_url`/`job_url` is on Greenhouse, Lever or Ashby (`ats.py`). Greenhouse and Ashby publish each job's form as JSON; Lever's is read from its apply page (`forms.py`). All three forms carry invisible bot checks (reCAPTCHA / hCaptcha): never build anything that gets around them
 - `prepare_application` reads the form, fills answers from the profile with rules (`answers.py`), then drafts the remaining required questions in one Claude call (`drafting.py`). Every answer records its `source` and whether it's `confirmed`

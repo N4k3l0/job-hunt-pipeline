@@ -193,7 +193,7 @@ function ProductStill() {
             <div className="hp-mini-section-label">PIPELINE</div>
             <div className="hp-mini-nav-list">
               <div className="hp-mini-nav hp-active"><span>Inbox</span><span className="hp-mono hp-dim-num">287</span></div>
-              <div className="hp-mini-nav"><span>Review Queue</span><span className="hp-mono hp-dim-num">5</span></div>
+              <div className="hp-mini-nav"><span>Applications</span><span className="hp-mono hp-dim-num">5</span></div>
               <div className="hp-mini-nav"><span>Applications</span><span className="hp-mono hp-dim-num">12</span></div>
               <div className="hp-mini-nav"><span>Analytics</span></div>
             </div>

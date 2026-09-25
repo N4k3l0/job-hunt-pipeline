@@ -522,8 +522,8 @@ export default function AutoApplicationPage({ params }: { params: Promise<{ id: 
   if (error || !application) {
     return (
       <div className="ds-root space-y-4">
-        <Link href="/dashboard/auto-apply" className="ds-btn ghost" style={{ paddingLeft: 0 }}>
-          <ArrowLeft className="h-3.5 w-3.5" /> Apply for me
+        <Link href="/dashboard/applications" className="ds-btn ghost" style={{ paddingLeft: 0 }}>
+          <ArrowLeft className="h-3.5 w-3.5" /> Applications
         </Link>
         <p className="ds-muted">Application not found.</p>
       </div>
@@ -612,8 +612,8 @@ export default function AutoApplicationPage({ params }: { params: Promise<{ id: 
   return (
     <div className="ds-root ds-page-fade" style={{ background: "var(--ds-bg)" }}>
       <div className="space-y-6" style={{ maxWidth: 820, margin: "0 auto", paddingBottom: 96 }}>
-        <Link href="/dashboard/auto-apply" className="ds-btn ghost" style={{ paddingLeft: 0, width: "fit-content" }}>
-          <ArrowLeft className="h-3.5 w-3.5" /> Apply for me
+        <Link href="/dashboard/applications" className="ds-btn ghost" style={{ paddingLeft: 0, width: "fit-content" }}>
+          <ArrowLeft className="h-3.5 w-3.5" /> Applications
         </Link>
 
         <div className="space-y-3">
