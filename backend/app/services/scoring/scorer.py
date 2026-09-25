@@ -6,6 +6,7 @@ from app.services.scoring.matching import (
     LEVEL_GAP_SCORES,
     domain_match,
     expand_skills,
+    normalize_skill,
     seniority_match,
     skill_match,
     title_match,
@@ -18,7 +19,10 @@ logger = logging.getLogger(__name__)
 # a change is measured against the user's own ratings before it replaces
 # the stored scores.
 SCORE_VERSION = 2
-PROPOSED_SCORE_VERSION = 3
+PROPOSED_SCORE_VERSION = 5
+# Every version the scorer can compute. The Rate matches comparison can
+# score a user's ratings with any of them (?compare=3,4).
+KNOWN_VERSIONS = (2, 3, 4, 5)
 
 # Weights of the rule-based components; they sum to 1.
 WEIGHTS = {"title": 0.30, "skills": 0.35, "seniority": 0.20, "domain": 0.05, "remote": 0.10}
@@ -32,6 +36,21 @@ STRICT_LEVEL_GAP_SCORES = (1.0, 0.7, 0.2, 0.0)
 # (default minimum 50). Otherwise its score stops here.
 RELEVANCE_MIN = 0.5
 IRRELEVANT_MAX_SCORE = 45.0
+
+# Version 4 counts a part only when both sides know something about it,
+# and never guesses the rest. Version 2 gave a middle score to what wasn't
+# known and version 3 gave it zero; both put noise into the ranking.
+# - Skills count when the job lists at least SKILLS_MIN_LISTED of them.
+#   With one or two tags, a single shared tag scored ~85% (an FPGA job
+#   scored in the 60s for an AI engineer).
+# - The level counts when both the job's and the candidate's are known.
+# - Remote counts when the user has a preference and the job states its
+#   policy; industry when the profile has industries; titles when it has
+#   roles. Otherwise there's nothing to compare, so no points either way.
+# What's left out shares its weight among the rest. No relevance cap.
+# Version 5 is version 4 with titles compared by their specific words: two
+# titles sharing only "Engineer" no longer get half the title points.
+SKILLS_MIN_LISTED = 3
 
 # Axis maxima the dashboard displays each component against.
 AXIS_MAX = {"title": 20, "skills": 25, "seniority": 15, "domain": 10}
@@ -52,13 +71,16 @@ def compute_job_score(
             visa_notes, sponsorship_available
         profile: target_roles, preferred_countries, visa_statuses, remote_preference,
             salary_min, salary_max, skills, work_history
-        version: 2 gives unknown components a middle score; 3 gives them nothing.
+        version: 2 gives unknown components a middle score; 3 gives them
+            nothing; 4 counts only what both sides know; 5 is 4 with
+            titles compared by their specific words.
 
     Returns:
         Dict with the JobScore columns: per-axis scores, overall_fit (0-100),
         priority, role_path and reasoning.
     """
-    strict = version >= 3
+    strict = version == 3
+    known_only = version >= 4
     title = job_data.get("title") or ""
     description = job_data.get("raw_description") or ""
     work_history = profile.get("work_history") or []
@@ -84,6 +106,7 @@ def compute_job_score(
         profile.get("target_roles"),
         [w.get("title") for w in work_history if w.get("title")],
         interests=profile.get("search_keywords"),
+        weighted=version >= 5,
     )
 
     candidate_skills = [s.get("skill_name", "") for s in profile.get("skills") or []]
@@ -145,6 +168,26 @@ def compute_job_score(
         }
         if has_roles or has_skills:
             relevant = (components["title"] or 0) >= RELEVANCE_MIN or (components["skills"] or 0) >= RELEVANCE_MIN
+    elif known_only:
+        has_roles = bool(
+            profile.get("target_roles") or profile.get("search_keywords")
+            or any(w.get("title") for w in work_history)
+        )
+        listed = {normalize_skill(s) for s in job_entities.get("skills") or [] if s and normalize_skill(s)}
+        remote_preference = profile.get("remote_preference") or "any"
+        components = {
+            "title": title_value if has_roles else None,
+            "skills": (
+                skills_value if len(listed) >= SKILLS_MIN_LISTED and expand_skills(candidate_skills) else None
+            ),
+            "seniority": (
+                seniority_value
+                if seniority_detail["job_level"] is not None and seniority_detail["candidate_level"] is not None
+                else None
+            ),
+            "domain": domain_value if any(t and len(t.strip()) >= 3 for t in domain_tags) else None,
+            "remote": remote_value if remote_preference != "any" and job_data.get("remote_type") else None,
+        }
 
     counted = {name: value for name, value in components.items() if value is not None}
     counted_weight = sum(WEIGHTS[name] for name in counted)
@@ -186,6 +229,7 @@ def compute_job_score(
             # Version 3: the components the score is made of, and whether the
             # job matched the candidate's roles or skills.
             **({"counted": sorted(counted), "role_or_skill_match": relevant} if strict else {}),
+            **({"counted": sorted(counted)} if known_only else {}),
             "matched_role": matched_role,
             "skills_matched": skills_matched,
             "skills_missing": skills_missing,

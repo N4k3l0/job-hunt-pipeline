@@ -108,5 +108,11 @@ async def unrate_job(job_id: UUID, user_id: CurrentUserId, db: DbSession):
 
 
 @router.get("/results")
-async def get_results(user_id: CurrentUserId, db: DbSession):
-    return await evaluate(db, user_id)
+async def get_results(
+    user_id: CurrentUserId,
+    db: DbSession,
+    compare: str | None = Query(None, description="Other scoring versions to measure too, e.g. 3,4"),
+):
+    """How well each scoring version ranks the user's own rated jobs."""
+    versions = [int(v) for v in (compare or "").split(",") if v.strip().isdigit()]
+    return await evaluate(db, user_id, compare=versions)

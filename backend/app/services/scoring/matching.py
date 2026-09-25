@@ -32,6 +32,16 @@ _STOP_WORDS = {
 # Leadership words are interchangeable enough that a "Marketing Lead"
 # search should still surface "Marketing Manager".
 _LEADERSHIP = {"manager", "lead", "head", "director", "owner", "supervisor", "chief"}
+# The noun that names the kind of job. Two titles that share only this word
+# ("FPGA Engineer" and "AI Engineer") are different jobs, so with weighted
+# matching it counts for far less than the words that say what the job is.
+_GENERIC_ROLE_WORDS = {
+    "engineer", "developer", "manager", "specialist", "analyst", "consultant",
+    "officer", "coordinator", "administrator", "representative", "assistant",
+    "professional", "expert", "technician", "operator", "executive",
+    "architect", "scientist", "designer", "lead", "head", "director",
+}
+GENERIC_WORD_WEIGHT = 0.3
 _ABBREVIATIONS = {
     "mgr": "manager", "eng": "engineer", "engr": "engineer", "dev": "developer",
     "admin": "administrator", "exec": "executive", "rep": "representative",
@@ -73,26 +83,30 @@ def title_tokens(title: str | None) -> frozenset[str]:
     )
 
 
-def _token_overlap(wanted: frozenset[str], have: frozenset[str]) -> float:
+def _word_weight(token: str, weighted: bool) -> float:
+    return GENERIC_WORD_WEIGHT if weighted and token in _GENERIC_ROLE_WORDS else 1.0
+
+
+def _token_overlap(wanted: frozenset[str], have: frozenset[str], weighted: bool = False) -> float:
     """Weighted count of `wanted` tokens found in `have`; leadership words
     match each other at 0.8."""
     score = 0.0
     have_leadership = bool(have & _LEADERSHIP)
     for token in wanted:
         if token in have:
-            score += 1.0
+            score += _word_weight(token, weighted)
         elif have_leadership and token in _LEADERSHIP:
-            score += 0.8
+            score += 0.8 * _word_weight(token, weighted)
     return score
 
 
-def title_similarity(role: str, job_title: str) -> float:
+def title_similarity(role: str, job_title: str, weighted: bool = False) -> float:
     wanted = title_tokens(role)
     have = title_tokens(job_title)
     if not wanted or not have:
         return 0.0
-    coverage = _token_overlap(wanted, have) / len(wanted)
-    precision = _token_overlap(have, wanted) / len(have)
+    coverage = _token_overlap(wanted, have, weighted) / sum(_word_weight(t, weighted) for t in wanted)
+    precision = _token_overlap(have, wanted, weighted) / sum(_word_weight(t, weighted) for t in have)
     return min(1.0, 0.75 * coverage + 0.25 * precision)
 
 
@@ -101,6 +115,7 @@ def title_match(
     target_roles: list[str] | None,
     recent_titles: list[str] | None = None,
     interests: list[str] | None = None,
+    weighted: bool = False,
 ) -> tuple[float, str | None]:
     """Best similarity between the job title and the roles the candidate
     wants. Their search keywords (interests) and recent job titles count
@@ -115,7 +130,7 @@ def title_match(
         return 0.5, None
     best, best_role = 0.0, None
     for phrase, weight in candidates:
-        s = weight * title_similarity(phrase, job_title)
+        s = weight * title_similarity(phrase, job_title, weighted)
         if s > best:
             best, best_role = s, phrase
     return round(best, 3), best_role
