@@ -79,6 +79,10 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
   // Popup-blocker note: window.open must happen synchronously inside the
   // click handler, before any await — otherwise browsers silently swallow
   // the new tab.
+  // Scores from version 4 on list the parts they count. A part left out
+  // shows the reason instead of a number that played no part.
+  const counted = (score?.reasoning as { counted?: string[] } | null | undefined)?.counted;
+  const leftOut = (part: string, reason: string) => (counted && !counted.includes(part) ? reason : undefined);
   const hasUrl = !!(job.apply_url || job.job_url);
   const isAlreadyApplied = job.status === "applied";
   const existingApplication = job.auto_apply?.application_id ?? null;
@@ -896,22 +900,27 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
             <div className="flex flex-col" style={{ gap: 12, marginTop: 14 }}>
               <ScoreAxis label="Overall fit" value={overallFit} />
               {score?.title_score !== undefined && score?.title_score !== null && (
-                <ScoreAxis label="Title match" value={pct(score.title_score, 20)} />
+                <ScoreAxis label="Title match" value={pct(score.title_score, 20)}
+                  notCounted={leftOut("title", "No target roles on your profile")} />
               )}
               {score?.skill_score !== undefined && score?.skill_score !== null && (
-                <ScoreAxis label="Skills overlap" value={pct(score.skill_score, 25)} />
+                <ScoreAxis label="Skills overlap" value={pct(score.skill_score, 25)}
+                  notCounted={leftOut("skills", "The job lists too few skills to judge")} />
               )}
               {score?.seniority_score !== undefined && score?.seniority_score !== null && (
-                <ScoreAxis label="Seniority" value={pct(score.seniority_score, 15)} />
+                <ScoreAxis label="Seniority" value={pct(score.seniority_score, 15)}
+                  notCounted={leftOut("seniority", "The job doesn't state its level")} />
               )}
               {score?.geo_score !== undefined && score?.geo_score !== null && (
                 <ScoreAxis label="Geo fit" value={pct(score.geo_score, 15)} />
               )}
               {score?.remote_score !== undefined && score?.remote_score !== null && (
-                <ScoreAxis label="Remote policy" value={pct(score.remote_score, 5)} />
+                <ScoreAxis label="Remote policy" value={pct(score.remote_score, 5)}
+                  notCounted={leftOut("remote", "No remote preference, or the job doesn't say")} />
               )}
               {score?.industry_score !== undefined && score?.industry_score !== null && (
-                <ScoreAxis label="Industry" value={pct(score.industry_score, 10)} />
+                <ScoreAxis label="Industry" value={pct(score.industry_score, 10)}
+                  notCounted={leftOut("domain", "No industries on your profile")} />
               )}
               {/* Salary band + Visa / sponsorship were intentionally removed
                   from the visible breakdown — both axes default to a neutral

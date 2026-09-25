@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 # next to it on the Rate matches page (services/scoring/evaluation.py), so
 # a change is measured against the user's own ratings before it replaces
 # the stored scores.
-SCORE_VERSION = 2
+SCORE_VERSION = 5
 PROPOSED_SCORE_VERSION = 5
 # Every version the scorer can compute. The Rate matches comparison can
 # score a user's ratings with any of them (?compare=3,4).

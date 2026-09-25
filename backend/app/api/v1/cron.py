@@ -15,7 +15,7 @@ import logging
 import os
 import time
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Query
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -153,6 +153,53 @@ async def cron_discover_remote(authorization: str | None = Header(None)):
     ])
     scoring = await quick_score_all_users(per_user_timeout=10)
     return {"status": "complete", "results": results, "scoring": scoring}
+
+
+@router.get("/rescore-outdated")
+async def cron_rescore_outdated(
+    authorization: str | None = Header(None),
+    max_users: int = Query(2, ge=1, le=10),
+):
+    """Rescore users whose scores come from an older scoring version.
+
+    After SCORE_VERSION changes, every user needs a full rescore before the
+    inbox reflects it. The scheduler calls this every run, a couple of users
+    at a time, so a version switch finishes on its own within a few runs.
+    """
+    _verify_cron(authorization)
+
+    import asyncio
+    import time
+
+    from sqlalchemy import select
+
+    from app.models.scoring import JobScore
+    from app.services.scoring.scorer import SCORE_VERSION
+    from app.workers.discovery_tasks import create_worker_session
+    from app.workers.scoring_tasks import _batch_score_async
+
+    async with create_worker_session()() as db:
+        outdated = [
+            str(row[0]) for row in (await db.execute(
+                select(JobScore.user_id).where(JobScore.score_version != SCORE_VERSION).distinct()
+            )).all()
+        ]
+
+    results: dict[str, str] = {}
+    for uid in outdated[:max_users]:
+        started = time.monotonic()
+        try:
+            await asyncio.wait_for(_batch_score_async(uid, rescore_all=True), timeout=75)
+            results[uid] = f"ok ({time.monotonic() - started:.1f}s)"
+        except asyncio.TimeoutError:
+            results[uid] = f"timeout after {time.monotonic() - started:.0f}s"
+        except Exception as e:  # noqa: BLE001 — one user's failure shouldn't stop the others
+            results[uid] = f"error: {type(e).__name__}: {e}"
+    return {
+        "version": SCORE_VERSION,
+        "rescored": results,
+        "still_outdated": max(0, len(outdated) - len(results)),
+    }
 
 
 @router.get("/score-backlog")

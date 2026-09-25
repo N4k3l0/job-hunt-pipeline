@@ -127,7 +127,18 @@ export function ScoreAxis({
   label,
   value,
   max = 100,
-}: { label: string; value: number; max?: number }) {
+  notCounted,
+}: { label: string; value: number; max?: number; notCounted?: string }) {
+  // A part the score leaves out (the job doesn't say, or the profile has no
+  // preference) shows why instead of a number that didn't count.
+  if (notCounted) {
+    return (
+      <div className="flex items-baseline justify-between" style={{ gap: 8 }}>
+        <span style={{ fontSize: 12, color: "var(--ds-fg-muted)", fontWeight: 500 }}>{label}</span>
+        <span style={{ fontSize: 12, color: "var(--ds-fg-faint)", textAlign: "right" }}>{notCounted}</span>
+      </div>
+    );
+  }
   const clamped = Math.max(0, Math.min(max, value));
   const pct = (clamped / max) * 100;
   const top = clamped >= 80;

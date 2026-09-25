@@ -34,10 +34,9 @@ def _score(job, profile=PROFILE, version=3):
     return compute_job_score(*job, profile, version=version)
 
 
-def test_version_2_is_unchanged_by_default():
+def test_version_2_can_still_be_computed():
     job = _job("Senior AI Engineer", ["Python", "RAG"], seniority="senior")
-    assert compute_job_score(*job, PROFILE)["score_version"] == 2
-    assert compute_job_score(*job, PROFILE) == _score(job, version=2)
+    assert _score(job, version=2)["score_version"] == 2
 
 
 def test_a_full_match_still_scores_top():

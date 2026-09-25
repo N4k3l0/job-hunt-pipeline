@@ -128,6 +128,10 @@ def title_match(
     )
     if not candidates:
         return 0.5, None
+    if weighted:
+        # "Head of Operations @ Koast.ai": the words after "@" name the
+        # company, not the job ("ai" here isn't an AI job).
+        job_title = job_title.split(" @ ")[0]
     best, best_role = 0.0, None
     for phrase, weight in candidates:
         s = weight * title_similarity(phrase, job_title, weighted)
