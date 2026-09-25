@@ -91,9 +91,10 @@ function Hero() {
       </h1>
 
       <p className="hp-hero-lede">
-        A private inbox for people serious about their next role. Every posting gets a number,{" "}
-        <span className="hp-mono hp-accent-text">0 – 100</span>, across eight axes that tell you{" "}
-        <em>why</em> it matched — not just that it did. Swept each morning. Tailored with one click.
+        A private inbox for people serious about their next role. Every posting gets a number from{" "}
+        <span className="hp-mono hp-accent-text">0 to 100</span>, with a breakdown that tells you{" "}
+        <em>why</em> it matched, not just that it did. New jobs every morning. For many of them, the app
+        fills in the application form for you.
       </p>
 
       <InviteForm placeholder="you@work.com" formKey="hero" />
@@ -150,16 +151,14 @@ function InviteForm({ placeholder, formKey }: { placeholder: string; formKey: "h
       </div>
       {formKey === "hero" && !success && (
         <div className="hp-email-meta hp-mono">
-          <span>Reply turnaround</span>
+          <span>We read every request</span>
           <span className="hp-faint">·</span>
-          <span className="hp-accent-text">~36 hours</span>
-          <span className="hp-faint">·</span>
-          <span>No marketing. Ever.</span>
+          <span>No marketing, ever</span>
         </div>
       )}
       <div className={`hp-email-success hp-mono${success ? " hp-on" : ""}`}>
         <Check size={14} strokeWidth={2.2} />
-        Got it. We&apos;ll reply by hand within 36 hours.
+        Got it. We&apos;ll reply by hand.
       </div>
     </form>
   );
@@ -259,7 +258,7 @@ function MiniEditorial() {
           <div className="hp-mini-company">Linear</div>
           <div className="hp-mini-title">Senior Product Designer, Issue Tracking</div>
           <p className="hp-mini-summary">
-            Linear is hiring a senior designer to own the issue tracking surfaces — the core of
+            Linear is hiring a senior designer to own the issue tracking surfaces, the core of
             the product. You&apos;ll partner with two PMs and four engineers on the surfaces where
             users spend 80% of their day.
           </p>
@@ -305,11 +304,11 @@ function MiniEditorial() {
 
 function MiniList() {
   const rows = [
-    { score: 92, title: "Founding Designer", meta: "Replicate · Remote, US/EU · $170k – $230k · 38m ago" },
-    { score: 89, title: "Staff Product Designer, Observability", meta: "Vercel · Remote · $190k – $245k · 1h ago" },
-    { score: 87, title: "Senior Product Designer, Billing UX", meta: "Stripe · Remote, US/CA/UK · $185k – $240k · 2h ago" },
-    { score: 76, title: "Product Designer, Insights", meta: "Sentry · Remote · $150k – $190k · 10h ago" },
-    { score: 71, title: "Senior Product Designer", meta: "Coda · Remote, US · $165k – $205k · 21h ago" },
+    { score: 92, title: "Founding Designer", meta: "Replicate · Remote, US/EU · $170k-$230k · 38m ago" },
+    { score: 89, title: "Staff Product Designer, Observability", meta: "Vercel · Remote · $190k-$245k · 1h ago" },
+    { score: 87, title: "Senior Product Designer, Billing UX", meta: "Stripe · Remote, US/CA/UK · $185k-$240k · 2h ago" },
+    { score: 76, title: "Product Designer, Insights", meta: "Sentry · Remote · $150k-$190k · 10h ago" },
+    { score: 71, title: "Senior Product Designer", meta: "Coda · Remote, US · $165k-$205k · 21h ago" },
   ];
   return (
     <>
@@ -342,9 +341,9 @@ function HowItWorks() {
       title: "Upload your resume. Set what you want.",
       body: (
         <>
-          We parse the resume once and pull out bullets, skills, seniority signal, salary history,
-          and a voice profile. You confirm a few preferences — target titles, where you can work, remote
-          posture, salary floor. About a hundred and forty seconds.
+          We read your resume once and pull out your roles, skills and level. Then you confirm a few
+          things: the titles you want, where you can work, remote or office, and your salary floor. It
+          takes a few minutes.
         </>
       ),
     },
@@ -353,20 +352,21 @@ function HowItWorks() {
       title: "The matcher sweeps every morning.",
       body: (
         <>
-          Around six UTC, we crawl the surfaces that actually matter — direct careers pages, a handful of
-          curated boards, your saved sources — score every posting against your profile, and write them to
-          your inbox. The top match leads. Everything else falls in score order.
+          Around six in the morning UTC, we check company careers pages and a set of job boards, score
+          every new posting against your profile, and put them in your inbox. The best match comes first.
+          The rest follow in score order.
         </>
       ),
     },
     {
       num: "03",
-      title: "Tailor and apply, in one click.",
+      title: "Apply without the busywork.",
       body: (
         <>
-          When you open a job worth chasing, hit <em>tailor</em>. We generate a tuned summary, a reordered
-          set of bullets, a cover letter in your voice, and an outreach DM. You review them in a queue,
-          approve or regenerate, and send. The whole loop fits in a coffee.
+          When a job is worth it, press <em>Apply for me</em>. The app writes a resume for that job, reads
+          the company&apos;s application form, answers what your profile already answers, and leaves the
+          rest to you. You check everything before it goes. After you apply, it can find the hiring manager
+          and draft a short note.
         </>
       ),
     },
@@ -380,7 +380,7 @@ function HowItWorks() {
       <h2 className="hp-section-title">Three steps to your first scored inbox.</h2>
       <p className="hp-section-lede">
         The product is a loop. The first half is the matcher; the second half is what you do with what it finds.
-        Most users finish the setup in under three minutes and see scored matches the next morning.
+        Setup takes a few minutes, and your first scored matches show up straight away.
       </p>
       <ol className="hp-steps">
         {steps.map((s) => (
@@ -397,17 +397,17 @@ function HowItWorks() {
   );
 }
 
-/* ---------- Scoring (8 axes) ---------- */
+/* ---------- Scoring (the six parts of a score) ---------- */
 function Scoring() {
+  // What the scorer actually weighs (services/scoring/scorer.py). Salary and
+  // sponsorship are filters, not parts of the score: see the note below.
   const axes = [
-    { n: "01", title: "Title match", body: "How closely the role's title maps to the ones you're hunting. Catches re-named seniorities and parallel ladders." },
-    { n: "02", title: "Skills overlap", body: "The technical and craft skills from your resume against the ones the posting calls for, weighted by recency." },
-    { n: "03", title: "Seniority", body: "Your years and scope against the band the posting is hiring into. Penalises over- and under-shoots equally." },
-    { n: "04", title: "Geo fit", body: "Where the role can legally hire from, against where you can legally work or relocate to." },
-    { n: "05", title: "Remote policy", body: "Fully remote, hybrid, onsite. We never surface a hybrid role to a remote-only candidate." },
-    { n: "06", title: "Salary band", body: "USD-normalised. A floor signal, not a ceiling — roles below your minimum are docked, not zeroed." },
-    { n: "07", title: "Industry", body: "The space the company plays in, weighed against the industries on your resume and the ones you've flagged." },
-    { n: "08", title: "Visa / sponsorship", body: "Whether the company has historically sponsored, and which countries. Quietly the highest-leverage axis for many of you." },
+    { n: "01", title: "Title match", body: "How closely the job title matches the roles you want, including ones named differently at different companies." },
+    { n: "02", title: "Skills overlap", body: "The skills on your resume against the ones the posting asks for." },
+    { n: "03", title: "Seniority", body: "Your level against the level the posting is hiring for." },
+    { n: "04", title: "Geo fit", body: "Where the job can hire from, against where you live and where you can work." },
+    { n: "05", title: "Remote policy", body: "Remote, hybrid or in an office, against what you want." },
+    { n: "06", title: "Industry", body: "The field the company works in, against the fields on your resume." },
   ];
   return (
     <section id="scoring" className="hp-scoring">
@@ -415,20 +415,25 @@ function Scoring() {
         <div className="hp-scoring-intro">
           <div className="hp-section-eyebrow hp-mono">
             <span className="hp-dot" />
-            <span>THE MATCHER · 8 AXES</span>
+            <span>THE MATCHER · 6 AXES</span>
           </div>
           <h2 className="hp-section-title">
             Other tools say <span className="hp-strike">good fit / not&nbsp;a&nbsp;fit</span>.<br />
             We say <em>why</em>.
           </h2>
           <p className="hp-section-lede">
-            Every posting in your inbox carries a number out of a hundred and a structured breakdown
-            across eight axes. The number is the headline. The axes tell you what&apos;s actually driving it —
-            where the role over-indexes, where it falls short, what&apos;s worth a conversation anyway.
+            Every posting in your inbox carries a number out of a hundred and a breakdown across six axes.
+            The number is the headline. The axes tell you what&apos;s driving it: where the job fits, where it
+            falls short, and what&apos;s worth a conversation anyway.
           </p>
           <p className="hp-section-lede hp-faint">
-            Scores are deterministic. Re-run the matcher on the same posting and the same profile, you&apos;ll
-            get the same number. We log the weight changes so you can see when the matcher learns.
+            Salary and visa sponsorship aren&apos;t scored. They&apos;re filters: when a posting pays below your
+            floor, or won&apos;t sponsor a visa you need, it never reaches your inbox.
+          </p>
+          <p className="hp-section-lede hp-faint">
+            Scores follow fixed rules, so the same posting and the same profile always get the same number. You
+            can rate jobs good or bad without seeing their scores, and we check the matcher against your ratings
+            before we change it.
           </p>
         </div>
         <ul className="hp-axes">
@@ -456,8 +461,8 @@ function FounderNote() {
         <p>
           I built this because I was the user. I&apos;d spent six weeks on LinkedIn, Indeed, and three
           aggregators trying to find roles that fit, and what I kept noticing was that <em>nothing
-          was scoring anything</em>. The signal was there — every posting carried enough structure to
-          score against my resume — and no product was doing the work.
+          was scoring anything</em>. The signal was there. Every posting carried enough structure to
+          score against my resume, and no product was doing the work.
         </p>
         <p>
           So I built a private matcher for myself, started forwarding the inbox to friends, and the
@@ -480,13 +485,13 @@ function FounderNote() {
 /* ---------- Invite card ---------- */
 function Invite() {
   const stats: Array<{ n: string; l: string; accent?: boolean }> = [
-    { n: "~36h", l: "REPLY TIME", accent: true },
+    { n: "Free", l: "DURING BETA", accent: true },
     { n: "13", l: "JOB SOURCES" },
-    { n: "8", l: "SCORING AXES" },
+    { n: "6", l: "SCORING AXES" },
     { n: "06:00", l: "DAILY SWEEP · UTC" },
   ];
   return (
-    <section className="hp-invite">
+    <section id="invite" className="hp-invite">
       <div className="hp-invite-card">
         <div className="hp-invite-status">
           <span className="hp-dot hp-pulse" />
@@ -527,12 +532,10 @@ function Footer() {
           <p className="hp-footer-line">Invite-only. Made by Olalekan Oderinlo in Lagos.</p>
         </div>
         <div className="hp-footer-links">
-          <a href="mailto:invite@jobhuntpipeline.app" className="hp-footer-link">
+          <a href="#invite" className="hp-footer-link">
             <span className="hp-mono hp-mono-accent">→</span>
-            invite@jobhuntpipeline.app
+            Request an invite
           </a>
-          <a href="#" className="hp-footer-link hp-dim">Privacy</a>
-          <a href="#" className="hp-footer-link hp-dim">Terms</a>
         </div>
       </div>
       <div className="hp-footer-meta hp-mono">
