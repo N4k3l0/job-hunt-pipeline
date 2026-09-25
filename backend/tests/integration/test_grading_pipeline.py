@@ -247,6 +247,31 @@ async def _extracted():
     return {"required_skills": ["SQL"], "nice_to_have_skills": [], "requirements": [], "keywords": []}
 
 
+async def test_old_jobs_you_worked_on_say_they_may_have_closed(client):
+    from app.core.database import engine
+
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "UPDATE jobs SET discovered_at = now() - interval '60 days', last_seen_at = NULL WHERE id = :id"
+        ), {"id": SHORT})
+    r = await client.post(f"/api/v1/jobs/{SHORT}/shortlist", headers={"x-test-user": str(US_USER)})
+    assert r.status_code == 200, r.text
+
+    async def inbox_job(user):
+        r = await client.get("/api/v1/jobs", params={"min_score": 0}, headers={"x-test-user": str(user)})
+        assert r.status_code == 200, r.text
+        return next(j for j in r.json()["jobs"] if j["id"] == str(SHORT))
+
+    saved = await inbox_job(US_USER)
+    assert saved["closed_note"].startswith("This job may have closed. The app last saw it listed on ")
+    assert "posted_at" in saved
+    # Someone who hasn't worked on it gets no note: it will close on its own.
+    assert (await inbox_job(NIGERIA_USER))["closed_note"] is None
+
+    detail = (await client.get(f"/api/v1/jobs/{SHORT}", headers={"x-test-user": str(US_USER)})).json()
+    assert detail["closed_note"] == saved["closed_note"]
+
+
 async def test_hard_filters_are_per_user(client):
     await client.get("/api/v1/cron/enrich", params={"limit": 10})
 

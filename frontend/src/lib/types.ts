@@ -21,9 +21,14 @@ export interface Job {
   application_type: string | null;
   source_name: string | null;
   status: string;
+  /** When the company posted the job, when the source says. */
+  posted_at?: string | null;
   discovered_at: string;
   /** Last time a job board listed this job (it was still open then). */
   last_seen_at?: string | null;
+  /** On a job the user has worked on that no job site has listed for a
+   *  while: "This job may have closed. ..." */
+  closed_note?: string | null;
   /** Last time the job's link was checked. */
   last_checked_at?: string | null;
   expires_at: string | null;

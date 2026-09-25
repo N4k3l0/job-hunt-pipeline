@@ -36,6 +36,8 @@ import { OperationProgress } from "@/components/operation-progress";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 import { Score, ScoreAxis } from "@/components/ds/score";
+import { ClosedNote } from "@/components/closed-note";
+import { jobFreshness } from "@/lib/freshness";
 
 // Two-letter ISO codes for the "Europe" saved view. Kept inline so the
 // chip works without an extra API trip. Add codes as the matcher expands.
@@ -44,18 +46,6 @@ const EUROPE_CODES = new Set([
   "HR","HU","IE","IS","IT","LI","LT","LU","LV","MT","NL","NO","PL","PT",
   "RO","SE","SI","SK","UK",
 ]);
-
-function timeAgo(dateStr: string | null | undefined): string {
-  if (!dateStr) return "";
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 60) return `${mins}m`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d`;
-  return `${Math.floor(days / 7)}w`;
-}
 
 /** Normalize an axis sub-score (raw 0..max) to a 0–100 percentage so
  *  it can be rendered consistently against the overall_fit scale. */
@@ -706,8 +696,9 @@ function TopMatchCard({
             {job.linkedin_alert && (
               <span className="ds-dim" title="One of your LinkedIn job alerts sent you this job">LinkedIn alert</span>
             )}
-            <span className="ds-mono ds-dim">{timeAgo(job.discovered_at)} ago</span>
+            <span className="ds-dim">{jobFreshness(job).long}</span>
           </div>
+          {job.closed_note && <ClosedNote note={job.closed_note} />}
         </div>
 
         {/* Hero score — mono number, NO ring, slightly bigger than row scores. */}
@@ -883,9 +874,13 @@ function NextUpPanel({ jobs }: { jobs: any[] }) {
                 )}
               </div>
             </div>
-            <span className="ds-mono ds-dim" style={{ fontSize: 11 }}>
-              {timeAgo(job.discovered_at)}
-            </span>
+            {job.closed_note ? (
+              <ClosedNote note={job.closed_note} compact />
+            ) : (
+              <span className="ds-mono ds-dim" style={{ fontSize: 11 }}>
+                {jobFreshness(job).short}
+              </span>
+            )}
           </Link>
         ))}
       </div>
@@ -951,10 +946,11 @@ function DenseRow({
           {job.linkedin_alert && (
             <span className="ds-dim" title="One of your LinkedIn job alerts sent you this job">LinkedIn alert</span>
           )}
-          <span className="ds-mono ds-dim" style={{ marginLeft: "auto" }}>
-            {timeAgo(job.discovered_at)}
+          <span className="ds-dim" style={{ marginLeft: "auto" }}>
+            {jobFreshness(job).long}
           </span>
         </div>
+        {job.closed_note && <ClosedNote note={job.closed_note} />}
       </div>
 
       <div className="flex items-center" onClick={(e) => e.preventDefault()}>

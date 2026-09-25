@@ -19,6 +19,7 @@ from app.models.job_alert import JobAlertHit
 from app.services.auto_apply.apply_links import find_apply_url, has_apply_redirect
 from app.services.auto_apply.ats import detect_ats
 from app.services.discovery.ats_resolver import find_direct_apply, is_ats_url, _is_aggregator
+from app.services.job_freshness import closed_notes
 from app.services.jobs_filter import country_filter_codes, job_group_key
 from app.services.parsing.html_text import safe_description_html, strip_html
 from app.services.tracking.applied import record_applied
@@ -406,6 +407,7 @@ async def list_jobs(
         rows = [by_id[job_id] for job_id in page_ids if job_id in by_id]
 
     # Serialize with score and source included
+    notes = await closed_notes(db, user_id, [row[0] for row in rows])
     jobs_out = []
     for row in rows:
         job = row[0]  # Job
@@ -440,10 +442,14 @@ async def list_jobs(
                 user_state,
                 "applied" if job.id in applied_id_set else None,
             ),
+            "posted_at": job.posted_at.isoformat() if job.posted_at else None,
             "discovered_at": job.discovered_at.isoformat() if job.discovered_at else None,
             "last_seen_at": job.last_seen_at.isoformat() if job.last_seen_at else None,
             "last_checked_at": job.last_checked_at.isoformat() if job.last_checked_at else None,
             "expires_at": job.expires_at.isoformat() if job.expires_at else None,
+            # Set on jobs this user has worked on that no job site has
+            # listed for a while (services/job_freshness.py).
+            "closed_note": notes.get(job.id),
             # First ~240 chars of the JD, HTML-stripped + word-boundary
             # trimmed. Prefer the English translation when the source was
             # non-English so the inbox card body stays readable; falls
@@ -589,6 +595,8 @@ async def get_job(job_id: UUID, user_id: CurrentUserId, db: DbSession):
         # one, sanitized. The raw fields come from job boards and must never
         # be rendered as HTML.
         "description_html": safe_description_html(job.raw_description_en or job.raw_description),
+        "posted_at": job.posted_at.isoformat() if job.posted_at else None,
+        "closed_note": (await closed_notes(db, user_id, [job])).get(job.id),
         "discovered_at": job.discovered_at.isoformat() if job.discovered_at else None,
         "last_seen_at": job.last_seen_at.isoformat() if job.last_seen_at else None,
         "last_checked_at": job.last_checked_at.isoformat() if job.last_checked_at else None,
