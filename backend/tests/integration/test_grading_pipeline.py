@@ -196,6 +196,53 @@ async def test_enrich_pauses_when_credits_run_out(client, monkeypatch):
     assert body["pending"] == 0
 
 
+async def test_enrich_skips_jobs_no_one_scores_well(client, monkeypatch):
+    from app.core.config import get_settings
+    from app.core.database import engine
+
+    monkeypatch.setattr(get_settings(), "enrich_min_score", 40)
+    async with engine.begin() as conn:
+        await conn.execute(text("UPDATE job_scores SET overall_fit = 20"))
+
+    body = (await client.get("/api/v1/cron/enrich", params={"limit": 10})).json()
+    assert body["selected"] == 0
+    assert body["pending"] == 0  # nothing worth reading, so nothing waiting
+    assert client.extracted_calls == []
+
+    # A profile change that lifts a job's score makes it worth reading.
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "UPDATE job_scores SET overall_fit = 45 WHERE job_id = :id AND user_id = :user"
+        ), {"id": US_ONLY, "user": US_USER})
+    body = (await client.get("/api/v1/cron/enrich", params={"limit": 10})).json()
+    assert body["enriched"] == 1
+    assert client.extracted_calls == [US_ONLY]
+
+
+async def test_enrich_stops_at_the_daily_limit(client, monkeypatch):
+    from app.core.config import get_settings
+    from app.core.database import engine
+
+    monkeypatch.setattr(get_settings(), "enrich_min_score", None)
+    # The seed already read two jobs today, so this leaves room for one more.
+    monkeypatch.setattr(get_settings(), "enrich_daily_limit", 3)
+    async with engine.begin() as conn:
+        await conn.execute(text("UPDATE job_scores SET overall_fit = 50"))
+        await conn.execute(text("UPDATE job_scores SET overall_fit = 90 WHERE job_id = :id"), {"id": US_ONLY})
+
+    body = (await client.get("/api/v1/cron/enrich", params={"limit": 10})).json()
+    assert body["selected"] == 1
+    assert body["enriched"] == 1
+    assert body["read_today"] == 3
+    assert body["daily_limit_reached"] is False
+
+    body = (await client.get("/api/v1/cron/enrich", params={"limit": 10})).json()
+    assert body["selected"] == 0
+    assert body["daily_limit_reached"] is True
+    assert body["pending"] == 1  # the short job waits for tomorrow
+    assert client.extracted_calls == [US_ONLY]
+
+
 async def _extracted():
     return {"required_skills": ["SQL"], "nice_to_have_skills": [], "requirements": [], "keywords": []}
 

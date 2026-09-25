@@ -58,6 +58,8 @@ class EnrichmentResult:
     errors: list[str] = field(default_factory=list)
     # The Anthropic credits ran out. Unread jobs stay unread for next time.
     paused: bool = False
+    read_today: int = 0
+    daily_limit_reached: bool = False
 
 
 def clean_description(raw: str | None) -> str:
@@ -189,10 +191,36 @@ async def extract_job_details(job: Job) -> dict:
     )
 
 
+def _best_score():
+    # Looked up per job through ix_job_scores_job_fit; aggregating every
+    # score first took ~3s on the production database.
+    return (
+        select(func.max(JobScore.overall_fit))
+        .where(JobScore.job_id == Job.id)
+        .correlate(Job)
+        .scalar_subquery()
+    )
+
+
+def unread_jobs_filter(max_age_days: int, min_best_score: float | None):
+    """Recent visible jobs not read yet that score at least
+    `min_best_score` for some user (None: any score)."""
+    conditions = [
+        Job.status.notin_(["duplicate", "raw", "expired", "dismissed"]),
+        Job.discovered_at >= datetime.now(timezone.utc) - timedelta(days=max_age_days),
+        or_(JobEntity.id.is_(None), JobEntity.enriched_at.is_(None)),
+    ]
+    if min_best_score is not None:
+        conditions.append(_best_score() >= min_best_score)
+    return conditions
+
+
 async def enrich_pending_jobs(
     *,
     limit: int = 25,
     max_age_days: int = 30,
+    min_best_score: float | None = None,
+    daily_limit: int | None = None,
     concurrency: int = 8,
     time_budget_seconds: float = 40.0,
     per_call_timeout_seconds: float = 30.0,
@@ -201,33 +229,31 @@ async def enrich_pending_jobs(
     the best match for any user first, then newest first. Reading tells
     the scorer a job's level and skills, and an unread job's score stays low
     while they're unknown, so the most promising jobs go first rather than
-    only those already in an inbox. Stops starting new model calls once the
-    time budget is spent."""
+    only those already in an inbox. Jobs no one scores `min_best_score` for
+    are left unread, and no more than `daily_limit` jobs are read per UTC
+    day. Stops starting new model calls once the time budget is spent."""
     started = time.monotonic()
     result = EnrichmentResult()
     if credits_paused():
         result.paused = True
         return result
-    cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
-    # Looked up per job through ix_job_scores_job_fit; aggregating every
-    # score first took ~3s on the production database.
-    best_score = (
-        select(func.max(JobScore.overall_fit))
-        .where(JobScore.job_id == Job.id)
-        .correlate(Job)
-        .scalar_subquery()
-    )
 
     async with create_worker_session()() as db:
+        if daily_limit is not None:
+            today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            result.read_today = (await db.execute(
+                select(func.count(JobEntity.id)).where(JobEntity.enriched_at >= today)
+            )).scalar() or 0
+            limit = min(limit, daily_limit - result.read_today)
+            if limit <= 0:
+                result.daily_limit_reached = True
+                return result
+
         rows = (await db.execute(
             select(Job)
             .outerjoin(JobEntity, JobEntity.job_id == Job.id)
-            .where(
-                Job.status.notin_(["duplicate", "raw", "expired", "dismissed"]),
-                Job.discovered_at >= cutoff,
-                or_(JobEntity.id.is_(None), JobEntity.enriched_at.is_(None)),
-            )
-            .order_by(best_score.desc().nulls_last(), Job.discovered_at.desc())
+            .where(*unread_jobs_filter(max_age_days, min_best_score))
+            .order_by(_best_score().desc().nulls_last(), Job.discovered_at.desc())
             .limit(limit)
             .options(defer(Job.raw_content), selectinload(Job.entities))
         )).scalars().all()
@@ -285,8 +311,8 @@ async def enrich_pending_jobs(
         await db.commit()
 
     logger.info(
-        "Enrichment: selected=%d enriched=%d short=%d failed=%d paused=%s in %.1fs",
-        result.selected, result.enriched, result.skipped_short, result.failed, result.paused,
+        "Enrichment: selected=%d enriched=%d short=%d failed=%d paused=%s read_earlier_today=%d in %.1fs",
+        result.selected, result.enriched, result.skipped_short, result.failed, result.paused, result.read_today,
         time.monotonic() - started,
     )
     return result

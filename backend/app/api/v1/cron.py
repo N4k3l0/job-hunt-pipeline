@@ -257,32 +257,33 @@ async def cron_enrich(
     """Read up to `limit` recent jobs with the extraction model, then
     rescore them for every user. Meant to be called on a schedule until
     `pending` reaches 0; each call stays inside the 60s function limit.
+    Only jobs scoring ENRICH_MIN_SCORE for someone are read, at most
+    ENRICH_DAILY_LIMIT a day.
 
-    Cost: roughly $0.004 per job read (Claude Haiku 4.5)."""
+    Cost: roughly $0.0045 per job read (Claude Haiku 4.5)."""
     _verify_cron(authorization)
 
-    from datetime import datetime, timedelta, timezone
-    from sqlalchemy import func, or_, select
+    from sqlalchemy import func, select
+    from app.core.config import get_settings
     from app.core.database import create_worker_session
     from app.models.job import Job, JobEntity
     from app.llm.client import CREDITS_MESSAGE
-    from app.services.enrichment.job_enricher import enrich_pending_jobs
+    from app.services.enrichment.job_enricher import enrich_pending_jobs, unread_jobs_filter
     from app.workers.scoring_tasks import rescore_jobs_for_all_users
 
+    cfg = get_settings()
     limit = max(1, min(limit, 60))
-    result = await enrich_pending_jobs(limit=limit, max_age_days=max_age_days, time_budget_seconds=35)
+    result = await enrich_pending_jobs(
+        limit=limit, max_age_days=max_age_days, time_budget_seconds=35,
+        min_best_score=cfg.enrich_min_score, daily_limit=cfg.enrich_daily_limit,
+    )
     rescored = await rescore_jobs_for_all_users(result.job_ids)
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
     async with create_worker_session()() as db:
         pending = (await db.execute(
             select(func.count(Job.id))
             .outerjoin(JobEntity, JobEntity.job_id == Job.id)
-            .where(
-                Job.status.notin_(["duplicate", "raw", "expired", "dismissed"]),
-                Job.discovered_at >= cutoff,
-                or_(JobEntity.id.is_(None), JobEntity.enriched_at.is_(None)),
-            )
+            .where(*unread_jobs_filter(max_age_days, cfg.enrich_min_score))
         )).scalar() or 0
 
     return {
@@ -295,6 +296,9 @@ async def cron_enrich(
         "pending": pending,
         "paused": result.paused,
         "message": CREDITS_MESSAGE if result.paused else None,
+        "read_today": result.read_today + result.enriched + result.skipped_short,
+        "daily_limit": cfg.enrich_daily_limit,
+        "daily_limit_reached": result.daily_limit_reached,
     }
 
 

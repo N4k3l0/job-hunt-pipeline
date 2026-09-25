@@ -48,6 +48,14 @@ class Settings(BaseSettings):
     # The daily email goes out on the first scheduler run at or after this hour (UTC).
     digest_hour_utc: int = 7
 
+    # The job reader (/cron/enrich) costs about half a cent a job. It reads
+    # only jobs that score at least ENRICH_MIN_SCORE for some user: the inbox
+    # starts at 50, and reading can move a score, so there's room below that.
+    # A job under it is read later if a profile change lifts its score.
+    enrich_min_score: float = 40
+    # At most this many jobs read per day (UTC). 200 is about $0.90.
+    enrich_daily_limit: int = 200
+
     @property
     def async_database_url(self) -> str:
         """Convert standard postgresql:// URL to asyncpg format."""
