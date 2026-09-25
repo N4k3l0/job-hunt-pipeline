@@ -17,7 +17,7 @@ A private, invite-only, multi-user web application that discovers job postings f
 - **Storage:** Supabase Storage (resumes, private bucket with signed links)
 - **Scheduled work:** a Railway cron service calls the backend's `/api/v1/cron/*` endpoints (see "Scheduler on Railway"). There is no queue or worker process; `app/workers/` holds plain async functions the endpoints call
 - **Job Discovery:** company job boards (Greenhouse, Lever, Ashby), JSearch, Arbeitnow, RemoteOK, Himalayas, Remotive, We Work Remotely, DailyRemote, Undutchables, Working Nomads, Wellfound, Jobberman, MyJobMag, and users' LinkedIn job alert emails
-- **Page Parsing:** Firecrawl API
+- **Page Parsing:** job board pages are fetched directly with an honest user agent (`services/discovery/firecrawl_service.py`); Firecrawl is only the fallback for a page that doesn't come back, and is left alone for an hour after it answers 429. A site that blocks direct requests or shows a human check is never worked around
 - **AI/LLM:** Claude API (see "LLM Usage")
 - **Tailored resume PDFs:** drawn by the backend with fpdf2 (`services/auto_apply/resume_pdf.py`) so applications can attach them; `/dashboard/review/[id]/print` stays for saving one by hand
 - **Hosting:** frontend on Vercel; backend and scheduler on Railway; Supabase for database, auth and storage. The backend's Vercel project stays deployed as a rollback target

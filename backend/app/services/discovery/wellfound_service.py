@@ -20,7 +20,8 @@ from __future__ import annotations
 import logging
 import re
 
-from app.services.discovery.firecrawl_service import scrape_url
+from app.services.discovery.firecrawl_service import html_to_markdown, scrape_html, scrape_url
+from app.services.discovery.jobposting import job_posting
 
 logger = logging.getLogger(__name__)
 
@@ -149,14 +150,20 @@ async def fetch_jobs(
 
     jobs: list[dict] = []
     for title, url in candidates:
-        try:
-            detail_md = await scrape_url(url)
-        except Exception as e:
-            logger.warning("Wellfound detail scrape failed for %s: %s", url, e)
+        html = await scrape_html(url)
+        if not html:
+            logger.warning("Wellfound detail page didn't load: %s", url)
             continue
-        normalized = _parse_detail(title=title, url=url, markdown=detail_md)
-        if normalized:
-            jobs.append(normalized)
+        normalized = _parse_detail(title=title, url=url, markdown=html_to_markdown(html, url))
+        if not normalized:
+            continue
+        # The page's JobPosting names the company and place as the employer
+        # entered them; the page text often doesn't label them at all.
+        posting = job_posting(html)
+        if posting:
+            normalized["company"] = posting["company"] or normalized["company"]
+            normalized["location"] = posting["location"] or normalized["location"]
+        jobs.append(normalized)
 
     logger.info("Wellfound: %d jobs ingested", len(jobs))
     return jobs

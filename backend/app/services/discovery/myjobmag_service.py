@@ -43,6 +43,7 @@ JOB_LINK_RE = re.compile(
 )
 
 TITLE_HEADING_RE = re.compile(r"^#\s+(.+)$", re.M)
+TITLE_AT_COMPANY_RE = re.compile(r"^(.+?)\s+at\s+(.+)$")
 COMPANY_LABEL_RE = re.compile(
     r"(?:^|\n)\s*(?:Company|Employer|Recruiter)\s*[:\-]\s*([^\n]+)",
     re.I,
@@ -109,6 +110,13 @@ def _parse_detail(*, title: str, url: str, markdown: str) -> dict | None:
 
     company_m = COMPANY_LABEL_RE.search(markdown)
     company = company_m.group(1).strip(" *_•")[:80] if company_m else "Unknown"
+    # MyJobMag titles its pages "<role> at <company>" and rarely labels
+    # the company anywhere else.
+    at_company = TITLE_AT_COMPANY_RE.match(page_title)
+    if at_company:
+        page_title = at_company.group(1).strip()
+        if company == "Unknown":
+            company = at_company.group(2).strip(" .")[:80]
 
     location_m = LOCATION_LABEL_RE.search(markdown)
     location = location_m.group(1).strip(" *_•")[:120] if location_m else "Nigeria"
