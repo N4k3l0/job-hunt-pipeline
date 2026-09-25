@@ -93,6 +93,7 @@ def main() -> int:
     for kind in discovery:
         results.append(call(base_url, secret, f"/api/v1/cron/discover-{kind}", DISCOVERY_TIMEOUT))
     results.append(call(base_url, secret, f"/api/v1/cron/enrich?limit={jobs_per_run}", TASK_TIMEOUT))
+    results.append(call(base_url, secret, "/api/v1/cron/resolve-apply-links?limit=100", TASK_TIMEOUT))
     results.append(call(base_url, secret, "/api/v1/cron/job-alert-details?limit=10", TASK_TIMEOUT))
     results.append(call(base_url, secret, "/api/v1/cron/expire-stale?verify_limit=40", TASK_TIMEOUT))
     results.append(call(base_url, secret, "/api/v1/cron/send-digests", TASK_TIMEOUT))

@@ -191,7 +191,8 @@ async def extract_job_details(job: Job) -> dict:
     )
 
 
-def _best_score():
+def best_score():
+    """A job's best score for any user, for ordering jobs by promise."""
     # Looked up per job through ix_job_scores_job_fit; aggregating every
     # score first took ~3s on the production database.
     return (
@@ -211,7 +212,7 @@ def unread_jobs_filter(max_age_days: int, min_best_score: float | None):
         or_(JobEntity.id.is_(None), JobEntity.enriched_at.is_(None)),
     ]
     if min_best_score is not None:
-        conditions.append(_best_score() >= min_best_score)
+        conditions.append(best_score() >= min_best_score)
     return conditions
 
 
@@ -253,7 +254,7 @@ async def enrich_pending_jobs(
             select(Job)
             .outerjoin(JobEntity, JobEntity.job_id == Job.id)
             .where(*unread_jobs_filter(max_age_days, min_best_score))
-            .order_by(_best_score().desc().nulls_last(), Job.discovered_at.desc())
+            .order_by(best_score().desc().nulls_last(), Job.discovered_at.desc())
             .limit(limit)
             .options(defer(Job.raw_content), selectinload(Job.entities))
         )).scalars().all()

@@ -24,6 +24,15 @@ JOB_B = uuid.UUID("00000000-0000-0000-0000-0000000a0002")
 JOB_UNSUPPORTED = uuid.UUID("00000000-0000-0000-0000-0000000a0003")
 JOB_CLOSED = uuid.UUID("00000000-0000-0000-0000-0000000a0004")
 JOB_BASICS = uuid.UUID("00000000-0000-0000-0000-0000000a0005")
+# Job board listings whose Apply button redirects to the company's form.
+JOB_BOARD = uuid.UUID("00000000-0000-0000-0000-0000000a0006")
+JOB_BOARD_JOIN = uuid.UUID("00000000-0000-0000-0000-0000000a0007")
+JOB_BOARD_GONE = uuid.UUID("00000000-0000-0000-0000-0000000a0008")
+BOARD = "https://www.arbeitnow.co.uk/jobs/companies/acme"
+BOARD_REDIRECTS = {
+    "product-manager-london-1": "https://job-boards.greenhouse.io/acme/jobs/111?utm_source=arbeitnow.co.uk",
+    "product-manager-berlin-2": "https://join.com/companies/acme/123-product-manager",
+}
 
 HEAR = {"required": True, "label": "How did you hear about this job?", "fields": [
     {"name": "question_hear", "type": "multi_value_single_select",
@@ -65,6 +74,11 @@ FORMS = {
 
 
 def ats_handler(request: httpx.Request) -> httpx.Response:
+    if request.url.host == "www.arbeitnow.co.uk":
+        slug = request.url.path.removesuffix("/apply").rsplit("/", 1)[-1]
+        if request.url.path.endswith("/apply") and slug in BOARD_REDIRECTS:
+            return httpx.Response(302, headers={"location": BOARD_REDIRECTS[slug]})
+        return httpx.Response(404)
     job_id = request.url.path.rstrip("/").split("/")[-1]
     if request.url.host == "boards-api.greenhouse.io" and job_id in FORMS:
         return httpx.Response(200, json=FORMS[job_id])
@@ -76,7 +90,7 @@ async def client(monkeypatch):
     from app.main import app
     from app.api.deps import get_current_user_id
     from app.core.database import engine
-    from app.services.auto_apply import prepare
+    from app.services.auto_apply import apply_links, prepare
     from app.services.tailoring import tailor_service
 
     async with engine.begin() as conn:
@@ -107,6 +121,9 @@ async def client(monkeypatch):
             (JOB_UNSUPPORTED, "https://www.linkedin.com/jobs/view/1"),
             (JOB_CLOSED, "https://job-boards.greenhouse.io/acme/jobs/404"),
             (JOB_BASICS, "https://job-boards.greenhouse.io/acme/jobs/333"),
+            (JOB_BOARD, f"{BOARD}/product-manager-london-1"),
+            (JOB_BOARD_JOIN, f"{BOARD}/product-manager-berlin-2"),
+            (JOB_BOARD_GONE, f"{BOARD}/product-manager-paris-3"),
         ):
             await conn.execute(text(
                 "INSERT INTO jobs (id, company, title, status, job_url, country) "
@@ -124,6 +141,7 @@ async def client(monkeypatch):
         return None
 
     monkeypatch.setattr(prepare, "http_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(ats_handler)))
+    monkeypatch.setattr(apply_links, "http_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(ats_handler)))
     monkeypatch.setattr(prepare, "draft_answers", fake_drafter)
     # Never the real model in tests (conftest sets a fake API key).
     monkeypatch.setattr(tailor_service, "generate_tailored_application", no_tailoring)
@@ -272,6 +290,54 @@ async def test_prepare_still_works_when_tailoring_fails(client, monkeypatch):
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "needs_you"
     assert await _tailored_count(JOB_A) == 0
+
+
+async def _apply_url(job_id) -> str | None:
+    from app.core.database import engine
+    async with engine.connect() as conn:
+        return (await conn.execute(text("SELECT apply_url FROM jobs WHERE id = :j"), {"j": job_id})).scalar()
+
+
+async def test_job_board_listing_is_prepared_from_the_company_form(client):
+    r = await client.post(f"/api/v1/auto-apply/jobs/{JOB_BOARD}")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ats"] == "greenhouse"
+    assert body["form_url"] == "https://job-boards.greenhouse.io/acme/jobs/111"
+    assert by_key(body)["first_name"]["answer"]["value"] == "Ada"
+    assert await _apply_url(JOB_BOARD) == BOARD_REDIRECTS["product-manager-london-1"]
+
+
+async def test_job_board_listing_on_another_system_says_which(client):
+    r = await client.post(f"/api/v1/auto-apply/jobs/{JOB_BOARD_JOIN}")
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "unsupported"
+    assert r.json()["error"] == "This job's application form is on Join, which the app can't fill in yet."
+    assert await _apply_url(JOB_BOARD_JOIN) == BOARD_REDIRECTS["product-manager-berlin-2"]
+
+
+async def test_job_page_offers_apply_for_me_for_job_board_listings(client):
+    r = await client.get(f"/api/v1/jobs/{JOB_BOARD}")
+    assert r.status_code == 200, r.text
+    assert r.json()["auto_apply"]["supported"] is True
+    assert r.json()["apply_url"] == BOARD_REDIRECTS["product-manager-london-1"]
+
+    r = await client.get(f"/api/v1/jobs/{JOB_BOARD_GONE}")
+    assert r.json()["auto_apply"]["supported"] is False
+    assert await _apply_url(JOB_BOARD_GONE) == f"{BOARD}/product-manager-paris-3"  # checked, not asked again
+
+
+async def test_scheduler_finds_the_forms_behind_job_board_listings(client, monkeypatch):
+    monkeypatch.setenv("CRON_SECRET", "test-cron-secret")
+    auth = {"Authorization": "Bearer test-cron-secret"}
+
+    r = await client.get("/api/v1/cron/resolve-apply-links", headers=auth)
+    assert r.status_code == 200, r.text
+    assert r.json() == {"checked": 3, "found": 2, "fillable": 1, "gone": 1, "errors": 0, "pending": 0}
+    assert await _apply_url(JOB_BOARD) == BOARD_REDIRECTS["product-manager-london-1"]
+
+    r = await client.get("/api/v1/cron/resolve-apply-links", headers=auth)
+    assert r.json()["checked"] == 0
 
 
 async def test_unsupported_closed_and_private(client):
