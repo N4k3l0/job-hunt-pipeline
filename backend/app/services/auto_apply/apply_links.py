@@ -88,12 +88,15 @@ async def resolve_pending_apply_links(
     *,
     limit: int = 100,
     max_age_days: int = 30,
-    concurrency: int = 5,
+    concurrency: int = 2,
+    pause_seconds: float = 0.3,
     time_budget_seconds: float = 30.0,
 ) -> ApplyLinkResult:
     """Follow the Apply link of up to `limit` job board listings that
     haven't been checked, best match for any user first. Free: one small
-    request each, no AI."""
+    request each, no AI. Two at a time with a pause after each, about six
+    a second: the first run asked 100 in 2.5s and the board turned some
+    away."""
     started = time.monotonic()
     result = ApplyLinkResult()
     async with create_worker_session()() as db:
@@ -115,6 +118,8 @@ async def resolve_pending_apply_links(
                         return await find_apply_url(job.job_url, client) or job.job_url
                     except httpx.HTTPError:
                         return False
+                    finally:
+                        await asyncio.sleep(pause_seconds)
 
             outcomes = await asyncio.gather(*(check(job) for job in jobs))
 

@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.core.config import get_settings
+from app.core.logging import setup_logging
 from app.llm.client import LLMCreditsExhausted
 from app.api.v1 import (
     auth, candidates, jobs, tailoring, tracking, analytics, cron, feedback,
@@ -13,6 +14,7 @@ settings = get_settings()
 
 
 def create_app() -> FastAPI:
+    setup_logging()
     app = FastAPI(
         title="Job Hunt Pipeline",
         description="Automated job discovery, scoring, and application tailoring",
