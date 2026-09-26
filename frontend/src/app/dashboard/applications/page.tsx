@@ -9,12 +9,16 @@ import {
   useApplicationPipeline, useAutoApplications, useReminders, useReviewQueue, useUpdateStatus,
 } from "@/hooks/use-api";
 import { AutoApplyStatusPill } from "@/components/auto-apply-status";
+import { ClosedNote } from "@/components/closed-note";
 import { useToast } from "@/components/ui/toast";
 import { EmptyState } from "@/components/ui/empty-state";
 import type { ApplicationTracking, AutoApplication, TailoredApplication } from "@/lib/types";
 
 // A tailored resume nobody opened in a month is history, not a to-do.
 const STALE_DAYS = 30;
+// Sent applications still waiting to hear back. A job taken down once the
+// company is interviewing you is normal, so later stages get no note.
+const WAITING_STATUSES = ["approved", "applied", "follow_up_due"];
 
 function daysSince(iso: string | null | undefined) {
   return iso ? (Date.now() - new Date(iso).getTime()) / 86_400_000 : 0;
@@ -32,8 +36,9 @@ function timeAgo(iso: string | null | undefined) {
 
 /** One row for something still on its way out: an application being
  *  prepared, or a resume written for a job. */
-function ToDoRow({ href, company, title, detail, right }: {
+function ToDoRow({ href, company, title, detail, right, note }: {
   href: string; company?: string; title?: string; detail: string; right: React.ReactNode;
+  note?: string | null;
 }) {
   return (
     <Link href={href} className="ds-row" style={{ gridTemplateColumns: "minmax(0, 1fr) auto auto", alignItems: "center" }}>
@@ -41,6 +46,7 @@ function ToDoRow({ href, company, title, detail, right }: {
         <div className="ds-muted truncate" style={{ fontSize: 13 }}>{company}</div>
         <div className="truncate" style={{ fontSize: 15, fontWeight: 500 }}>{title || "Unknown role"}</div>
         <div className="ds-dim truncate" style={{ fontSize: 12, marginTop: 2 }}>{detail}</div>
+        {note && <ClosedNote note={note} />}
       </div>
       <div className="flex items-center" style={{ gap: 10 }}>{right}</div>
       <ChevronRight className="h-4 w-4 ds-dim" />
@@ -224,6 +230,7 @@ export default function ApplicationsPage() {
                 title={a.job?.title}
                 detail={autoDetail(a)}
                 right={<AutoApplyStatusPill status={a.status} />}
+                note={a.job?.closed_note}
               />
             ))}
             {resumesToCheck.map((t) => (
@@ -233,6 +240,7 @@ export default function ApplicationsPage() {
                 company={t.job?.company}
                 title={t.job?.title}
                 detail={t.approval_status === "ready" ? "Resume and cover letter ready to check" : "Writing your resume"}
+                note={t.job?.closed_note}
                 right={<span className="ds-mono ds-dim hidden sm:inline" style={{ fontSize: 12 }}>
                   <FileText className="inline h-3.5 w-3.5" style={{ verticalAlign: -2 }} /> {timeAgo(t.updated_at)}
                 </span>}
@@ -251,6 +259,7 @@ export default function ApplicationsPage() {
                 title={a.job?.title}
                 detail={autoDetail(a)}
                 right={<AutoApplyStatusPill status={a.status} />}
+                note={a.job?.closed_note}
               />
             ))}
           </Section>
@@ -308,6 +317,9 @@ export default function ApplicationsPage() {
                         <div className="ds-muted truncate" style={{ fontSize: 13, marginTop: 2 }}>
                           {item.job?.company || ""}
                         </div>
+                        {item.job?.closed_note && WAITING_STATUSES.includes(status) && (
+                          <ClosedNote note={item.job.closed_note} />
+                        )}
                       </Link>
                       <div className="flex items-center" style={{ gap: 8 }}>
                         {due && (

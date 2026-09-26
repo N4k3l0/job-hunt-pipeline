@@ -272,6 +272,23 @@ async def test_old_jobs_you_worked_on_say_they_may_have_closed(client):
     assert detail["closed_note"] == saved["closed_note"]
 
 
+async def test_applications_you_are_waiting_on_say_they_may_have_closed(client):
+    from app.core.database import engine
+
+    r = await client.post(f"/api/v1/jobs/{US_ONLY}/mark-applied", headers={"x-test-user": str(US_USER)})
+    assert r.status_code == 200, r.text
+    tracked = (await client.get("/api/v1/tracking", headers={"x-test-user": str(US_USER)})).json()
+    assert tracked[0]["job"]["closed_note"] is None  # listed today
+
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "UPDATE jobs SET discovered_at = now() - interval '60 days', last_seen_at = now() - interval '25 days' "
+            "WHERE id = :id"
+        ), {"id": US_ONLY})
+    tracked = (await client.get("/api/v1/tracking", headers={"x-test-user": str(US_USER)})).json()
+    assert tracked[0]["job"]["closed_note"].startswith("This job may have closed. The app last saw it listed on ")
+
+
 async def test_hard_filters_are_per_user(client):
     await client.get("/api/v1/cron/enrich", params={"limit": 10})
 

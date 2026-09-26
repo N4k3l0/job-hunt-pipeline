@@ -7,6 +7,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUserId, DbSession
 from app.llm.client import LLMCreditsExhausted
+from app.services.job_freshness import closed_note
 from app.models.tailoring import TailoredApplication
 from app.models.job import Job
 from app.schemas.job import TailoredApplicationResponse, TailoredApplicationUpdate
@@ -134,6 +135,7 @@ async def get_review_queue(user_id: CurrentUserId, db: DbSession):
                 "title": a.job.title,
                 "company": a.job.company,
                 "location": a.job.location,
+                "closed_note": closed_note(a.job),
                 "country": a.job.country,
                 "remote_type": a.job.remote_type,
                 "job_url": a.job.job_url,

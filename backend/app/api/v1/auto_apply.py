@@ -29,6 +29,7 @@ from app.services.auto_apply.prepare import (
     prepare_application,
     update_answers,
 )
+from app.services.job_freshness import closed_note
 from app.services.outreach.follow_up import NotSentYet, draft_follow_up
 
 router = APIRouter()
@@ -54,6 +55,7 @@ def serialize(application: AutoApplication, *, detail: bool) -> dict:
             "title": job.title_en or job.title,
             "company": job.company,
             "location": job.location,
+            "closed_note": closed_note(job),
         } if job else None,
         "status": application.status,
         "ats": application.ats,

@@ -305,6 +305,7 @@ async def test_job_board_listing_is_prepared_from_the_company_form(client):
     assert body["ats"] == "greenhouse"
     assert body["form_url"] == "https://job-boards.greenhouse.io/acme/jobs/111"
     assert by_key(body)["first_name"]["answer"]["value"] == "Ada"
+    assert body["job"]["closed_note"] is None  # found today
     assert await _apply_url(JOB_BOARD) == BOARD_REDIRECTS["product-manager-london-1"]
 
 

@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUserId, DbSession
 from app.models.tracking import ApplicationTracking, PipelineEvent
+from app.services.job_freshness import closed_note
 
 router = APIRouter()
 
@@ -54,6 +55,7 @@ async def get_pipeline(user_id: CurrentUserId, db: DbSession):
                 "title": t.job.title,
                 "company": t.job.company,
                 "location": t.job.location,
+                "closed_note": closed_note(t.job),
             } if t.job else None,
         }
         for t in trackings
