@@ -104,7 +104,7 @@ export interface AutoApplyField {
 export interface AutoApplication {
   id: string;
   job_id: string;
-  job: { id: string; title: string; company: string; location: string | null } | null;
+  job: { id: string; title: string; company: string; location: string | null; closed_note?: string | null } | null;
   status: AutoApplicationStatus;
   ats: "greenhouse" | "lever" | "ashby" | null;
   form_url: string | null;
