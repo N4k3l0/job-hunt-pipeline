@@ -193,3 +193,42 @@ async def test_link_checker_works_through_catalog(monkeypatch):
     assert statuses["Job 1"] == "expired"
     assert statuses["Tracked"] == "scored"
     assert unchecked == 0
+
+
+async def test_company_boards_keep_every_listed_job_open():
+    from app.core.database import engine
+    from app.services.maintenance.board_listings import refresh_from_boards
+    from app.services.parsing.normalizer import normalize_url
+
+    board = "https://job-boards.greenhouse.io/anthropic/jobs/"
+    async with engine.begin() as conn:
+        await _reset(conn)
+        curated = await _source(conn, "curated")
+        renamed = await _job(conn, source_id=curated, discovered=days_ago(30), last_seen=None,
+                             title="AI Engineer, GTM Claudification", url=board + "1")
+        closed = await _job(conn, source_id=curated, discovered=days_ago(60), last_seen=days_ago(20),
+                            title="Data Engineer", url=board + "2", status="expired")
+        gone = await _job(conn, source_id=curated, discovered=days_ago(60), last_seen=days_ago(20),
+                          title="Recruiter", url=board + "3")
+
+    outcome = await refresh_from_boards({
+        normalize_url(board + "1"): "Staff Software Engineer, GTM AI Engineering ",
+        normalize_url(board + "2"): "Data Engineer",
+        normalize_url(board + "99"): "A job we don't have yet",
+    }, now=NOW)
+    assert outcome == {"listed": 3, "still_listed": 2, "renamed": 1, "reopened": 1, "scores_updated": 0}
+
+    async with engine.connect() as conn:
+        rows = {
+            row[0]: row[1:]
+            for row in (await conn.execute(text("SELECT id, title, status, last_seen_at FROM jobs"))).all()
+        }
+    # Renamed on its board: new title, and still open.
+    assert rows[renamed][:2] == ("Staff Software Engineer, GTM AI Engineering", "scored")
+    assert abs((rows[renamed][2] - NOW).total_seconds()) < 1
+    # Closed by mistake: its company still lists it, so it's open again.
+    assert rows[closed][:2] == ("Data Engineer", "scored")
+    assert abs((rows[closed][2] - NOW).total_seconds()) < 1
+    # Not on the board: left alone.
+    assert rows[gone][:2] == ("Recruiter", "scored")
+    assert rows[gone][2] < NOW - timedelta(days=19)

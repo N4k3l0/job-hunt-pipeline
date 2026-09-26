@@ -20,12 +20,14 @@ import asyncio
 import json
 import logging
 import re
+from dataclasses import dataclass, field
 from html import unescape
 from pathlib import Path
 
 import httpx
 
 from app.services.discovery.eligibility import matches_keywords
+from app.services.parsing.normalizer import normalize_url
 
 logger = logging.getLogger(__name__)
 
@@ -230,20 +232,40 @@ _FETCHERS = {
 PER_COMPANY_CAP = 30  # cap most-recent jobs per company to bound dedup cost
 
 
+@dataclass
+class BoardListings:
+    # Up to PER_COMPANY_CAP per company, for adding new jobs.
+    jobs: list[dict] = field(default_factory=list)
+    # Every open job on each board that answered, cap or not: normalized
+    # URL -> title. What says a job we already have is still open.
+    listed: dict[str, str] = field(default_factory=dict)
+
+
 async def fetch_jobs(
     keywords: set[str] | None = None,
     limit: int = 500,
 ) -> list[dict]:
     """Pull active postings from every curated company, filter by user
-    keywords, return normalized for `_ingest_raw_jobs`.
+    keywords, return normalized for `_ingest_raw_jobs`."""
+    return (await fetch_board_listings(keywords=keywords, limit=limit)).jobs
+
+
+async def fetch_board_listings(
+    keywords: set[str] | None = None,
+    limit: int = 500,
+) -> BoardListings:
+    """Every curated company's board: new jobs to add, capped, plus every
+    listing on the boards that answered.
 
     Per-company cap (PER_COMPANY_CAP) keeps the candidate pool bounded so
     the downstream dedup-per-job DB queries don't blow the cron budget.
-    Most ATSes return jobs newest-first so we lose tail roles only.
+    `listed` isn't capped: a big company (Anthropic lists 600+) would
+    otherwise look like it had taken down everything past its first 30,
+    and those jobs were closed as gone from the board.
     """
     companies = _load_companies()
     if not companies:
-        return []
+        return BoardListings()
 
     sem = asyncio.Semaphore(CONCURRENCY)
 
@@ -258,15 +280,20 @@ async def fetch_jobs(
             except Exception as e:  # noqa: BLE001
                 logger.warning("Curated: %s (%s) failed: %s", c.get("name"), c.get("ats"), e)
                 return []
-            # Cap per-company AFTER fetch so we always take the most recent
-            # ones the ATS returned.
-            return jobs[:PER_COMPANY_CAP]
+            return jobs
 
     headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
     async with httpx.AsyncClient(timeout=TIMEOUT, headers=headers) as client:
         batches = await asyncio.gather(*(fetch_company(client, c) for c in companies))
 
-    all_jobs: list[dict] = [j for batch in batches for j in batch]
+    listed = {
+        key: j.get("title") or ""
+        for batch in batches for j in batch
+        if (key := normalize_url(j.get("job_url")))
+    }
+    # Cap per company after fetching, so the cap takes the ones the ATS
+    # returned first.
+    all_jobs: list[dict] = [j for batch in batches for j in batch[:PER_COMPANY_CAP]]
 
     # Apply keyword filter against title + description. Skill-aware scoring
     # later will sort the survivors by fit.
@@ -281,7 +308,7 @@ async def fetch_jobs(
     if limit and len(all_jobs) > limit:
         all_jobs = all_jobs[:limit]
 
-    logger.info("Curated: %d companies → %d jobs after keyword filter",
-                len(companies), len(all_jobs))
-    return all_jobs
+    logger.info("Curated: %d companies → %d jobs after keyword filter, %d listed in all",
+                len(companies), len(all_jobs), len(listed))
+    return BoardListings(jobs=all_jobs, listed=listed)
 
