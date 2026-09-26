@@ -545,12 +545,16 @@ async def _run_curated_async():
     per-user inbox filter (apply_user_filters) is the right place to
     decide what each user sees; ingest should keep the catalog wide.
     """
-    from app.services.discovery.curated_service import fetch_jobs
+    from app.services.discovery.curated_service import fetch_board_listings
+    from app.services.maintenance.board_listings import refresh_from_boards
 
     try:
-        jobs = await fetch_jobs(keywords=None)
-        if jobs:
-            await _ingest_raw_jobs(jobs)
+        boards = await fetch_board_listings(keywords=None)
+        # First, so jobs past each board's first 30 count as still open,
+        # and renamed ones take their new title before new jobs are added.
+        logger.info("Curated boards: %s", await refresh_from_boards(boards.listed))
+        if boards.jobs:
+            await _ingest_raw_jobs(boards.jobs)
     except Exception as e:
         logger.error("Curated discovery failed: %s", e)
 
