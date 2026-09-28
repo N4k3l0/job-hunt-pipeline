@@ -389,6 +389,46 @@ async def _collect_user_roles(limit: int = 8) -> list[str]:
     return top
 
 
+def _one_role_per_user(role_lists: list[list[str]], limit: int, start: int = 0) -> list[str]:
+    """Up to `limit` search terms taking users in turn: everyone's first
+    role, then everyone's second, and so on, starting from user `start`.
+    A role two users share is searched once. Each user's roles are in their
+    own order, so the first is the one they care most about."""
+    lists = [[r.strip().lower() for r in roles if r and len(r.strip()) >= 2] for roles in role_lists]
+    lists = [roles for roles in lists if roles]
+    if not lists:
+        return []
+    start %= len(lists)
+    lists = lists[start:] + lists[:start]
+    picked: list[str] = []
+    for depth in range(max(len(roles) for roles in lists)):
+        for roles in lists:
+            if len(picked) >= limit:
+                return picked
+            if depth < len(roles) and roles[depth] not in picked:
+                picked.append(roles[depth])
+    return picked
+
+
+async def _collect_roles_one_per_user(limit: int) -> list[str]:
+    """Search terms for a source with only a few searches a day: one role
+    per user in turn (see _one_role_per_user), not the roles most users
+    share, which left users with rarer roles out entirely. When there are
+    more users than searches, the starting user moves on each day."""
+    from app.models.candidate import CandidateProfile
+
+    async with create_worker_session()() as db:
+        rows = (await db.execute(
+            select(CandidateProfile.target_roles, CandidateProfile.search_keywords)
+            .order_by(CandidateProfile.created_at)
+        )).all()
+    role_lists = [list(target_roles or []) + list(search_keywords or []) for target_roles, search_keywords in rows]
+    start = datetime.now(timezone.utc).timetuple().tm_yday
+    picked = _one_role_per_user(role_lists, limit, start)
+    logger.info("One role per user, %d searches: %s", limit, picked or "(no users have roles set)")
+    return picked
+
+
 # ── RemoteOK ─────────────────────────────────────────────────────────────────
 
 
@@ -427,12 +467,13 @@ async def _run_arbeitnow_async():
 
 async def _run_jsearch_async():
     """JSearch is RapidAPI-rate-limited (free tier ~150 req/month).
-    Use top 5 user roles only, one page each, so the daily run stays inside
-    budget (5 queries × 30 days = 150/month, at the wire). Skip if no users
-    have roles set."""
+    Five searches a day, one page each, stays inside it (5 × 30 = 150/month,
+    at the wire). With that few, each user gets one of their roles searched
+    rather than the five roles most users share. Skip if no users have
+    roles set."""
     from app.services.discovery.jsearch_service import fetch_jobs
 
-    queries = await _collect_user_roles(limit=5)
+    queries = await _collect_roles_one_per_user(limit=5)
     if not queries:
         logger.info(
             "JSearch: skipping — no users have target_roles set yet"
