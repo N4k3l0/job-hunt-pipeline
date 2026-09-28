@@ -39,9 +39,16 @@ function isEmpty(value: AutoApplyValue | undefined) {
   return value === null || value === undefined || value === "" || (Array.isArray(value) && value.length === 0);
 }
 
-function displayValue(field: AutoApplyField, value: AutoApplyValue | undefined): string {
+/** Which resume goes with the application, for the resume question. */
+type AttachedResume = { tailored: boolean; url: string | null };
+
+function displayValue(field: AutoApplyField, value: AutoApplyValue | undefined, resume?: AttachedResume): string {
   if (isEmpty(value)) return "";
-  if (field.type === "file") return field.kind === "resume" ? "Your latest resume" : "File";
+  if (field.type === "file") {
+    if (field.kind !== "resume") return "File";
+    if (!resume) return "Your resume";
+    return resume.tailored ? "Your resume written for this job" : "The resume on your profile";
+  }
   if (field.type === "boolean") return value ? "Yes" : "No";
   if (field.options) {
     const values = Array.isArray(value) ? value : [String(value)];
@@ -175,8 +182,22 @@ function FieldInput({
   );
 }
 
-function AnswerMeta({ field }: { field: AutoApplyField }) {
+function AnswerMeta({ field, resume }: { field: AutoApplyField; resume?: AttachedResume }) {
   const answer = field.answer;
+  // The resume question's answer is "the resume": say which one is attached.
+  if (field.type === "file" && field.kind === "resume" && resume) {
+    return (
+      <div className="ds-dim" style={{ fontSize: 12, marginTop: 6 }}>
+        <span className="ds-accent-fg">{resume.tailored ? "Tailored for this job" : "From your profile"}</span>
+        {resume.url && (
+          <>
+            {" · "}
+            <a href={resume.url} target="_blank" rel="noopener noreferrer" className="ds-accent-fg">Open it</a>
+          </>
+        )}
+      </div>
+    );
+  }
   if (!answer?.note && !answer?.source) return null;
   return (
     <div className="ds-dim" style={{ fontSize: 12, marginTop: 6 }}>
@@ -324,6 +345,7 @@ function Question({
   editable,
   highlighted,
   applicationId,
+  resume,
 }: {
   field: AutoApplyField;
   value: AutoApplyValue | undefined;
@@ -333,10 +355,11 @@ function Question({
   editable: boolean;
   highlighted: boolean;
   applicationId: string;
+  resume?: AttachedResume;
 }) {
   const [editing, setEditing] = useState(false);
   const showInput = editable && (field.needs_attention || editing);
-  const text = displayValue(field, value);
+  const text = displayValue(field, value, resume);
   return (
     <div
       style={{
@@ -378,7 +401,7 @@ function Question({
           </div>
         )}
       </div>
-      <AnswerMeta field={field} />
+      <AnswerMeta field={field} resume={resume} />
       {editable && <WritingCheck field={field} value={value} applicationId={applicationId} onUse={onUsePlainer} saving={saving} />}
     </div>
   );
@@ -620,6 +643,7 @@ export default function AutoApplicationPage({ params }: { params: Promise<{ id: 
   const watching = watchingSince !== null && Date.now() - watchingSince < WATCH_MS;
   const { data: application, isLoading, error } = useAutoApplication(id, { watch: watching });
   const save = useSaveAutoApplyAnswers(id);
+  const { data: documents } = useApplicationDocuments(id);
   const cancel = useCancelAutoApplication(id);
   const prepare = usePrepareAutoApplication();
   const markSent = useMarkAutoApplicationSent(id);
@@ -775,6 +799,7 @@ export default function AutoApplicationPage({ params }: { params: Promise<{ id: 
       onChange={(v) => setValue(field.key, v)}
       onUsePlainer={(text) => savePlainer(field.key, text)}
       saving={save.isPending}
+      resume={documents ? { tailored: documents.tailored, url: documents.resume?.url ?? null } : undefined}
       editable={editable}
       highlighted={problemKeys.includes(field.key)}
       applicationId={id}
