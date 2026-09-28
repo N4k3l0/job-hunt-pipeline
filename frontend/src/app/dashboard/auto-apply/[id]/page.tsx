@@ -11,7 +11,7 @@ import {
 import {
   useApplicationDocuments, useAutoApplication, useCancelAutoApplication, useDraftFollowUp,
   useFindJobContact, useJobContact, useKeepDocumentWording, useKeepWording, useMarkAutoApplicationSent,
-  usePrepareAutoApplication,
+  useFirstGo, usePrepareAutoApplication,
   useRewriteAnswer, useSaveAutoApplyAnswers,
 } from "@/hooks/use-api";
 import { useExtensionInstalled } from "@/hooks/use-extension";
@@ -343,6 +343,8 @@ function Question({
   value,
   onChange,
   onUsePlainer,
+  onFirstGo,
+  writing,
   saving,
   editable,
   highlighted,
@@ -353,6 +355,8 @@ function Question({
   value: AutoApplyValue | undefined;
   onChange: (value: AutoApplyValue) => void;
   onUsePlainer: (text: string) => void;
+  onFirstGo: () => void;
+  writing: boolean;
   saving: boolean;
   editable: boolean;
   highlighted: boolean;
@@ -396,7 +400,21 @@ function Question({
       )}
       <div style={{ marginTop: 8 }}>
         {showInput ? (
-          <FieldInput field={field} value={value} onChange={onChange} />
+          <>
+            <FieldInput field={field} value={value} onChange={onChange} />
+            {/* A question the app left empty: it can write a start to change. */}
+            {(field.type === "textarea" || field.type === "text") && field.kind === "question" && isEmpty(value) && (
+              <div className="flex flex-wrap items-center" style={{ gap: 8, marginTop: 8 }}>
+                <button type="button" className="ds-btn sm" onClick={onFirstGo} disabled={writing || saving}>
+                  {writing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                  {writing ? "Writing" : "Write a first go"}
+                </button>
+                <span className="ds-dim" style={{ fontSize: 12 }}>
+                  From your profile and the job. You change it to sound like you.
+                </span>
+              </div>
+            )}
+          </>
         ) : (
           <div className={text ? "" : "ds-dim"} style={{ fontSize: 13, whiteSpace: "pre-line" }}>
             {text || "Left blank"}
@@ -659,6 +677,7 @@ export default function AutoApplicationPage({ params }: { params: Promise<{ id: 
   const [problemKeys, setProblemKeys] = useState<string[]>([]);
   const [filling, setFilling] = useState(false);
   const [showDone, setShowDone] = useState(false);
+  const firstGo = useFirstGo(id);
   const asList = useMemo(() => (application ? [application] : undefined), [application]);
   useSendFinished(asList);
 
@@ -804,6 +823,21 @@ export default function AutoApplicationPage({ params }: { params: Promise<{ id: 
     );
   }
 
+  // Anything typed elsewhere is saved first: the page reloads its answers
+  // from the server once the first go is written.
+  async function writeFirstGo(key: string) {
+    try {
+      const typed = [...edited].filter((k) => k !== key && application!.fields.some((f) => f.key === k && f.type !== "file"));
+      if (typed.length) {
+        await save.mutateAsync({ answers: Object.fromEntries(typed.map((k) => [k, values[k] ?? null])), approve: false });
+      }
+      await firstGo.mutateAsync(key);
+      toast.success("Wrote a first go", { description: "Change it so it sounds like you, then approve." });
+    } catch (e) {
+      toast.error("Couldn't write it", { description: e instanceof Error ? e.message : undefined });
+    }
+  }
+
   const renderQuestion = (field: AutoApplyField) => (
     <Question
       key={field.key}
@@ -811,6 +845,8 @@ export default function AutoApplicationPage({ params }: { params: Promise<{ id: 
       value={values[field.key]}
       onChange={(v) => setValue(field.key, v)}
       onUsePlainer={(text) => savePlainer(field.key, text)}
+      onFirstGo={() => writeFirstGo(field.key)}
+      writing={firstGo.isPending && firstGo.variables === field.key}
       saving={save.isPending}
       resume={documents ? { tailored: documents.tailored, url: documents.resume?.url ?? null } : undefined}
       editable={editable}

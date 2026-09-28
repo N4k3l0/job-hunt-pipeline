@@ -191,6 +191,40 @@ async def read_answers_through(application: AutoApplication, reader=None, revise
     return await read_answers_through(application, reader=reader, revise=False)
 
 
+FIRST_GO_TYPES = {"text", "textarea"}
+
+
+async def write_first_go(db: AsyncSession, application: AutoApplication, key: str, drafter=None) -> AutoApplication:
+    """A first go at one written question the app left empty, drafted from
+    the user's profile and the job for them to change. Like every draft,
+    it's read through and fixed, and it needs the user before sending."""
+    if application.status not in ("needs_you", "queued"):
+        raise AnswerError("This application can't be changed now.")
+    item = next((f for f in application.form or [] if f["key"] == key), None)
+    if item is None or item["type"] not in FIRST_GO_TYPES:
+        raise AnswerError("The app can only write a first go at a question you answer in words.", [key])
+    entry = (application.answers or {}).get(key) or {}
+    if entry.get("source") == "user" and not rules.is_empty(entry.get("value")):
+        raise AnswerError("That question already has your answer.", [key])
+
+    job = (await db.execute(select(Job).where(Job.id == application.job_id))).scalar_one()
+    _, facts_for_drafting, _, _ = await load_applicant(db, application.user_id)
+    drafted = await (drafter or draft_answers)([item], facts_for_drafting, {
+        "title": job.title, "company": job.company, "location": job.location,
+        "description": job.raw_description_en or job.raw_description,
+    }, first_go=True)
+    if key not in drafted:
+        raise AnswerError(
+            "The app couldn't write a first go from your profile and the job. A line or two of your own is enough.",
+            [key],
+        )
+    application.answers = {**(application.answers or {}), key: drafted[key]}
+    await read_answers_through(application)
+    application.status = _status_for(application.form, application.answers)
+    await db.commit()
+    return application
+
+
 def _status_for(form: list[dict], answers: dict) -> str:
     return "needs_you" if any(rules.needs_attention(f, answers.get(f["key"])) for f in form) else "queued"
 

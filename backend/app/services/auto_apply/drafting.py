@@ -10,6 +10,7 @@ import json
 import logging
 
 from app.llm.prompts.draft_application_answers import (
+    FIRST_GO,
     RECORD_TOOL,
     SYSTEM_PROMPT,
     USER_PROMPT_TEMPLATE,
@@ -65,9 +66,10 @@ def to_field_value(item: dict, raw):
     return text
 
 
-async def draft_answers(items: list[dict], facts_text: str, job: dict, llm=None) -> dict[str, dict]:
+async def draft_answers(items: list[dict], facts_text: str, job: dict, llm=None, *, first_go: bool = False) -> dict[str, dict]:
     """Drafted answers for `items`, keyed by field key. Questions the model
-    can't answer from the facts are left out."""
+    can't answer from the facts are left out. `first_go` is the user asking
+    for a start on a question the app left empty."""
     items = [i for i in items if i["type"] in DRAFTABLE_TYPES][:MAX_QUESTIONS]
     if not items:
         return {}
@@ -81,6 +83,7 @@ async def draft_answers(items: list[dict], facts_text: str, job: dict, llm=None)
         location=job.get("location") or "",
         description=(job.get("description") or "")[:DESCRIPTION_CHARS],
         questions="\n".join(_question_line(i) for i in items),
+        first_go=FIRST_GO if first_go else "",
     )
     result = await llm.generate_structured("applying", SYSTEM_PROMPT, prompt, tools=[RECORD_TOOL], max_tokens=3000)
     by_key = {i["key"]: i for i in items}

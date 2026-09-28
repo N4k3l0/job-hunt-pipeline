@@ -654,3 +654,49 @@ async def test_answers_every_form_asks_for_are_kept_on_the_profile(client):
     assert profile.visa_statuses == {"US": "need_sponsorship"}
     assert profile.earliest_start == "1 month"
     assert profile.open_to_relocation is True
+
+
+async def test_write_a_first_go_at_a_question_left_empty(client, monkeypatch):
+    from app.services.auto_apply import answers as rules
+    from app.services.auto_apply import prepare
+
+    asked = []
+
+    async def nothing(items, facts_text, job, llm=None, first_go=False):
+        return {}
+
+    async def drafter(items, facts_text, job, llm=None, first_go=False):
+        asked.append(([i["key"] for i in items], first_go, job["company"]))
+        return {"question_why": rules.answer("Your card issuing team does what I did at Acme.", "drafted",
+                                             "Drafted from your profile. Check it before sending.")}
+
+    monkeypatch.setattr(prepare, "draft_answers", nothing)
+    body = (await client.post(f"/api/v1/auto-apply/jobs/{JOB_A}")).json()
+    app_id = body["id"]
+    assert by_key(body)["question_why"]["answer"] is None
+
+    # The app can't write one: it says so, and nothing changes.
+    r = await client.post(f"/api/v1/auto-apply/{app_id}/first-go", json={"key": "question_why"})
+    assert r.status_code == 422 and "A line or two of your own" in r.json()["detail"]["message"]
+
+    monkeypatch.setattr(prepare, "draft_answers", drafter)
+    r = await client.post(f"/api/v1/auto-apply/{app_id}/first-go", json={"key": "question_why"})
+    assert r.status_code == 200, r.text
+    why = by_key(r.json())["question_why"]
+    assert why["answer"]["value"] == "Your card issuing team does what I did at Acme."
+    assert why["answer"]["source"] == "drafted" and why["needs_attention"]  # still theirs to check
+    assert asked == [(["question_why"], True, "Stripe")]
+    assert r.json()["status"] == "needs_you"
+
+    # Only questions answered in words, and never over the user's own answer.
+    r = await client.post(f"/api/v1/auto-apply/{app_id}/first-go", json={"key": "question_hear"})
+    assert r.status_code == 422
+    await client.put(f"/api/v1/auto-apply/{app_id}/answers", json={"answers": {"question_why": "My own words about Stripe."}})
+    r = await client.post(f"/api/v1/auto-apply/{app_id}/first-go", json={"key": "question_why"})
+    assert r.status_code == 422 and "already has your answer" in r.json()["detail"]["message"]
+    assert len(asked) == 1
+
+    # Someone else's application isn't theirs to change.
+    r = await client.post(f"/api/v1/auto-apply/{app_id}/first-go", json={"key": "question_why"},
+                          headers={"x-test-user": str(OTHER_USER)})
+    assert r.status_code == 404

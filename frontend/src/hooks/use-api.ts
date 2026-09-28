@@ -687,6 +687,19 @@ export function useSaveAutoApplyAnswers(id: string) {
   });
 }
 
+/** The app writes a first go at a question it left empty, saved as a draft
+ *  for the user to change. */
+export function useFirstGo(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (key: string) => api.post<AutoApplicationDetail>(`/api/v1/auto-apply/${id}/first-go`, { key }),
+    onSuccess: (data) => {
+      qc.setQueryData(["auto-apply", id], data);
+      qc.invalidateQueries({ queryKey: ["auto-apply"], exact: true });
+    },
+  });
+}
+
 /** A plainer version of one answer. Nothing is saved until the user uses it. */
 export function useRewriteAnswer(id: string) {
   return useMutation({

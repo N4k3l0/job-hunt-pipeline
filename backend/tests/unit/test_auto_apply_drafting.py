@@ -67,3 +67,12 @@ async def test_nothing_to_draft_makes_no_call():
     llm = FakeLLM({"answers": []})
     assert await draft_answers([field("cv", "file")], "Name: Ada", {}, llm=llm) == {}
     assert llm.calls == []
+
+
+async def test_a_first_go_asks_for_an_answer_rather_than_none():
+    llm = FakeLLM({"answers": [{"key": "why", "answer": "I build agents for a living.", "basis": "Crimetube"}]})
+    job = {"title": "AI Engineer", "company": "Palantir", "description": "Build."}
+    await draft_answers([field("why", "textarea")], "Name: Ada", job, llm=llm)
+    await draft_answers([field("why", "textarea")], "Name: Ada", job, llm=llm, first_go=True)
+    assert "asked for a first go" not in llm.calls[0][1]
+    assert "asked for a first go" in llm.calls[1][1]
