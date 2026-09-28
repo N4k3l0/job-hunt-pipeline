@@ -596,6 +596,8 @@ export function useAutoApplications() {
     queryKey: ["auto-apply"],
     queryFn: () => api.get<AutoApplication[]>("/api/v1/auto-apply"),
     staleTime: 30 * 1000,
+    // While the app is sending one, check back until it's done.
+    refetchInterval: (query) => (query.state.data?.some((a) => a.sending?.waiting) ? 15_000 : false),
   });
 }
 
@@ -605,7 +607,20 @@ export function useAutoApplication(id: string, { watch = false }: { watch?: bool
     queryKey: ["auto-apply", id],
     queryFn: () => api.get<AutoApplicationDetail>(`/api/v1/auto-apply/${id}`),
     enabled: !!id,
-    refetchInterval: watch ? 5000 : false,
+    refetchInterval: (query) => (watch ? 5000 : query.state.data?.sending?.waiting ? 15_000 : false),
+  });
+}
+
+/** Ask the app's own browser to send the application, or with `practice`
+ *  to fill the form in without sending. It goes within about five minutes. */
+export function useSendForMe(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (practice: boolean) => api.post<AutoApplicationDetail>(`/api/v1/auto-apply/${id}/send`, { practice }),
+    onSuccess: (data) => {
+      qc.setQueryData(["auto-apply", id], data);
+      qc.invalidateQueries({ queryKey: ["auto-apply"], exact: true });
+    },
   });
 }
 

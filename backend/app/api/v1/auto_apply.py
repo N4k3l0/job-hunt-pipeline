@@ -6,6 +6,7 @@ are approved, the browser extension fills in the company's form in the
 user's own browser, and the user presses Submit there.
 """
 
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query
@@ -35,7 +36,7 @@ from app.llm.style import has_dashes, read_through, saved_read, writing_problems
 from app.services.auto_apply.drafting import rewrite_plainly
 from app.services.auto_apply.resume_pdf import tailored_for_job
 from app.services.auto_apply.writing import (
-    accept_document_wording, application_document_problems, wants_cover_letter,
+    accept_document_wording, application_document_problems, first_document_problem, wants_cover_letter,
 )
 
 router = APIRouter()
@@ -72,6 +73,7 @@ def serialize(application: AutoApplication, *, detail: bool) -> dict:
         "created_at": application.created_at.isoformat() if application.created_at else None,
         "updated_at": application.updated_at.isoformat() if application.updated_at else None,
     }
+    body["sending"] = sending_state(application)
     if detail:
         answers = application.answers or {}
         kinds = rules.kinds(application.form or [], rules.JobFacts(company=(job.company if job else "") or ""))
@@ -231,6 +233,74 @@ async def keep_document_wording(application_id: UUID, body: DocumentName, user_i
     files = await application_files(db, application)
     files["writing_problems"] = await application_document_problems(db, application)
     return files
+
+
+class SendRequest(BaseModel):
+    practice: bool = False
+
+
+def _outcome_view(outcome: dict | None) -> dict | None:
+    if not outcome:
+        return None
+    return {
+        "status": outcome.get("status"),
+        "message": outcome.get("message"),
+        "filled": outcome.get("filled"),
+        "not_filled": [item.get("label") for item in outcome.get("not_filled") or []],
+        "at": outcome.get("at"),
+        "has_screenshot": bool(outcome.get("screenshot")),
+    }
+
+
+def sending_state(application: AutoApplication) -> dict:
+    """Where "Send it for me" stands: waiting, running, and the last
+    practice run and real send."""
+    result = application.result or {}
+    waiting = result.get("request") or result.get("running")
+    return {
+        "waiting": {"practice": bool(waiting.get("practice")), "since": waiting.get("at"),
+                    "running": "running" in result} if waiting else None,
+        "practice": _outcome_view(result.get("practice")),
+        "send": _outcome_view(result.get("send")),
+    }
+
+
+@router.post("/{application_id}/send")
+async def send_for_me(application_id: UUID, body: SendRequest, user_id: CurrentUserId, db: DbSession):
+    """Ask the app's own browser to fill in the company's form and send it
+    (or, with `practice`, fill it in without sending). The sender picks it
+    up within about five minutes."""
+    application = await _load(db, user_id, application_id)
+    if application.status == "submitted":
+        raise HTTPException(status_code=409, detail="This application has already been sent.")
+    if application.status != "queued":
+        raise HTTPException(status_code=409, detail="Approve the answers first.")
+    result = application.result or {}
+    if "request" in result or "running" in result:
+        raise HTTPException(status_code=409, detail="It's already waiting to go.")
+    # Everything it sends has to read plainly, now as when it was approved.
+    answers = application.answers or {}
+    flagged = [f["label"] for f in application.form or [] if rules.needs_attention(f, answers.get(f["key"]))]
+    if flagged:
+        raise HTTPException(status_code=409, detail=f"“{flagged[0]}” needs you before it can be sent.")
+    document = first_document_problem(await application_document_problems(db, application, read=False))
+    if document:
+        raise HTTPException(status_code=409, detail=document)
+    application.result = {**result, "request": {"practice": body.practice, "at": datetime.now(timezone.utc).isoformat()}}
+    application.error = None
+    await db.commit()
+    return serialize(await _load(db, user_id, application_id), detail=True)
+
+
+@router.get("/{application_id}/send-screenshot")
+async def send_screenshot(application_id: UUID, user_id: CurrentUserId, db: DbSession, what: str = "practice"):
+    """A short-lived link to the picture of the form as the app left it."""
+    application = await _load(db, user_id, application_id)
+    path = ((application.result or {}).get(what) or {}).get("screenshot")
+    if what not in ("practice", "send") or not path:
+        raise HTTPException(status_code=404, detail="There's no picture of that run.")
+    from app.services.storage import signed_url
+    return {"url": await signed_url("resumes", path)}
 
 
 @router.get("/{application_id}/fill")

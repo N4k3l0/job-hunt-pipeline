@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft, Check, CheckCircle2, Copy, ExternalLink, FileText, Loader2, Pencil, Puzzle, RefreshCw, Search,
+  ArrowLeft, Check, CheckCircle2, Copy, ExternalLink, FileText, Loader2, Pencil, RefreshCw, Search,
   Sparkles, UserSearch, Wand2,
 } from "lucide-react";
 import {
@@ -15,6 +15,7 @@ import {
   useRewriteAnswer, useSaveAutoApplyAnswers,
 } from "@/hooks/use-api";
 import { useExtensionInstalled } from "@/hooks/use-extension";
+import { SendForMe, SendOutcome } from "@/components/send-for-me";
 import { useToast } from "@/components/ui/toast";
 import { api } from "@/lib/api-client";
 import { askExtension } from "@/lib/extension";
@@ -733,7 +734,7 @@ export default function AutoApplicationPage({ params }: { params: Promise<{ id: 
           setProblemKeys([]);
           if (approve) {
             toast.success("Answers approved", {
-              description: "It's under Ready to send. Press Fill in the form there when you're ready.",
+              description: "It's under Ready to send. Press Send it for me there when you're ready.",
             });
             router.push("/dashboard/applications");
           } else {
@@ -852,32 +853,35 @@ export default function AutoApplicationPage({ params }: { params: Promise<{ id: 
               form for you.
             </p>
           )}
-          {application.status === "queued" && (
+          {(application.status === "queued" || application.status === "submitting") && (
             <div className="space-y-3">
               <p>
                 <CheckCircle2 className="inline h-4 w-4 ds-accent-fg" style={{ marginRight: 6, verticalAlign: -3 }} />
-                {extensionInstalled === false
-                  ? "Answers approved. Add the Job Hunt extension to Chrome and it fills in the company's form for you. You look it over and press Submit."
-                  : "Answers approved. Fill in the form opens the company's form in a new tab with your answers filled in. Look it over, then press Submit there."}
+                Everything&apos;s approved. <strong>Send it for me</strong> has the app fill in {job?.company ?? "the company"}&apos;s
+                form, attach your resume and send it, with nothing to install or paste. A practice run fills it in
+                without sending, so you can see exactly what would go.
               </p>
-              <div className="flex flex-wrap" style={{ gap: 8 }}>
-                {extensionInstalled === false ? (
-                  <Link href="/dashboard/extension" className="ds-btn primary">
-                    <Puzzle className="h-4 w-4" /> Add the extension
-                  </Link>
-                ) : (
+              {application.error && <p className="text-amber-500" style={{ fontSize: 13 }}>{application.error}</p>}
+              <SendForMe application={application} />
+              <SendOutcome applicationId={application.id} what="practice" outcome={application.sending?.practice} />
+              {application.sending?.send && application.sending.send.status !== "submitted" && (
+                <SendOutcome applicationId={application.id} what="send" outcome={application.sending.send} />
+              )}
+              <div className="flex flex-wrap items-center" style={{ gap: 8, paddingTop: 4 }}>
+                <span className="ds-dim" style={{ fontSize: 12 }}>Or send it yourself:</span>
+                {extensionInstalled === true && (
                   <button
                     type="button"
-                    className="ds-btn primary"
+                    className="ds-btn ghost sm"
                     onClick={fillInForm}
-                    disabled={filling || extensionInstalled === null}
+                    disabled={filling}
                   >
-                    {filling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
-                    Fill in the form
+                    {filling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
+                    Fill in with the extension
                   </button>
                 )}
-                <button type="button" className="ds-btn" onClick={markApplied} disabled={markSent.isPending}>
-                  {markSent.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                <button type="button" className="ds-btn ghost sm" onClick={markApplied} disabled={markSent.isPending}>
+                  {markSent.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
                   I sent it myself
                 </button>
               </div>
