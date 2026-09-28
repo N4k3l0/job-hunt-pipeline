@@ -20,7 +20,7 @@ import hashlib
 import re
 from dataclasses import dataclass, field
 
-from app.llm.style import has_dashes, writing_problems
+from app.llm.style import NOT_READ_YET, fingerprint, has_dashes, writing_problems
 from app.services.jobs_filter import work_eligible_countries
 
 COUNTRY_NAMES = {
@@ -495,14 +495,33 @@ MIN_WRITTEN_WORDS = 8
 
 
 def _fingerprint(text: str) -> str:
-    return hashlib.sha256(text.encode()).hexdigest()[:16]
+    return fingerprint(text)
+
+
+def is_written(item: dict, entry: dict | None) -> bool:
+    value = (entry or {}).get("value")
+    return item["type"] in WRITTEN_TYPES and isinstance(value, str) and len(value.split()) >= MIN_WRITTEN_WORDS
+
+
+def needs_read_through(item: dict, entry: dict | None) -> bool:
+    """A written answer the model hasn't read in its current words."""
+    if not is_written(item, entry):
+        return False
+    return (entry.get("read_through") or {}).get("fp") != fingerprint(entry["value"])
+
+
+def with_read_through(entry: dict, problems: list[str]) -> dict:
+    return {**entry, "read_through": {"fp": fingerprint(entry["value"]), "problems": problems}}
 
 
 def answer_writing_problems(item: dict, entry: dict | None) -> list[str]:
-    value = (entry or {}).get("value")
-    if item["type"] not in WRITTEN_TYPES or not isinstance(value, str) or len(value.split()) < MIN_WRITTEN_WORDS:
+    """What the writing check and the read-through found in this answer."""
+    if not is_written(item, entry):
         return []
-    return writing_problems(value)
+    found = writing_problems(entry["value"])
+    if needs_read_through(item, entry):
+        return found + [NOT_READ_YET]
+    return found + [p for p in entry["read_through"]["problems"] if p not in found]
 
 
 def wording_accepted(entry: dict | None) -> bool:

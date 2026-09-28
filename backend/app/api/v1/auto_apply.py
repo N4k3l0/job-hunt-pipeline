@@ -31,7 +31,7 @@ from app.services.auto_apply.prepare import (
 )
 from app.services.job_freshness import closed_note
 from app.services.outreach.follow_up import NotSentYet, draft_follow_up
-from app.llm.style import has_dashes, writing_problems
+from app.llm.style import has_dashes, read_through, writing_problems
 from app.services.auto_apply.drafting import rewrite_plainly
 from app.services.auto_apply.writing import application_document_problems
 
@@ -178,7 +178,12 @@ async def rewrite_answer(application_id: UUID, body: AnswerKey, user_id: Current
     application = await _load(db, user_id, application_id)
     item, entry = _written_answer(application, body.key)
     suggestion = await rewrite_plainly(item["label"], entry["value"])
-    return {"suggestion": suggestion, "writing_problems": writing_problems(suggestion)}
+    problems = writing_problems(suggestion)
+    try:
+        problems += await read_through(suggestion, what=f"an answer to the question \"{item['label']}\"")
+    except Exception:  # noqa: BLE001 — it's read again when the user saves it
+        pass
+    return {"suggestion": suggestion, "writing_problems": problems}
 
 
 @router.post("/{application_id}/keep-wording")

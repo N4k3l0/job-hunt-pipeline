@@ -7,6 +7,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUserId, DbSession
 from app.llm.client import LLMCreditsExhausted
+from app.llm.style import without_dashes
 from app.services.job_freshness import closed_note
 from app.models.tailoring import TailoredApplication
 from app.models.job import Job
@@ -382,6 +383,7 @@ async def regenerate_section(
             user_prompt=prompt,
             max_tokens=400,
         )).strip()
+        new_content = await without_dashes(new_content)
         app.tailored_summary = new_content
     elif body.section == "cover_letter":
         # Authoritative name from the User row — never let the model
@@ -406,6 +408,7 @@ async def regenerate_section(
             user_prompt=prompt,
             max_tokens=1200,
         ))
+        new_content = await without_dashes(new_content)
         app.cover_letter = new_content
     else:  # recruiter_message
         # OUTREACH_PROMPT now requires candidate_name + candidate_summary +
@@ -437,6 +440,7 @@ async def regenerate_section(
             user_prompt=prompt,
             max_tokens=500,
         ))
+        new_content = await without_dashes(new_content)
         app.recruiter_message = new_content
 
     await db.commit()

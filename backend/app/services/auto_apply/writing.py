@@ -12,13 +12,68 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.llm.style import writing_problems
+import asyncio
+import logging
+
+from app.llm.style import NOT_READ_YET, fingerprint, read_through, writing_problems
 from app.models.auto_apply import AutoApplication
 from app.models.tailoring import TailoredApplication
 from app.services.auto_apply import answers as rules
 from app.services.auto_apply.resume_pdf import tailored_for_job
 
+logger = logging.getLogger(__name__)
+
 DOCUMENT_NAMES = {"resume": "Your resume", "cover_letter": "Your cover letter"}
+DOCUMENT_WHAT = {
+    "resume": "the summary and bullet points of a resume written for this job",
+    "cover_letter": "a cover letter",
+}
+
+
+def _resume_parts(tailored: TailoredApplication) -> list[str]:
+    resume = tailored.tailored_resume_json or {}
+    return [resume.get("tailored_summary") or ""] + [
+        bullet for role in resume.get("selected_experience") or [] for bullet in role.get("bullets") or []
+    ]
+
+
+def _document_texts(tailored: TailoredApplication, with_cover_letter: bool) -> dict[str, str]:
+    texts = {"resume": "\n".join(p for p in _resume_parts(tailored) if p.strip())}
+    if with_cover_letter:
+        texts["cover_letter"] = tailored.cover_letter or ""
+    return {name: text for name, text in texts.items() if text.strip()}
+
+
+def _read(tailored: TailoredApplication) -> dict:
+    return dict((tailored.validation_notes or {}).get("read_through") or {})
+
+
+async def read_documents_through(tailored: TailoredApplication | None, *, with_cover_letter: bool, reader=None) -> int:
+    """Have the model read the documents it hasn't read in their current
+    words, and keep what it found with them. Returns how many couldn't be
+    read; those stay "not read yet". The caller commits."""
+    if tailored is None:
+        return 0
+    reader = reader or read_through
+    done = _read(tailored)
+    todo = {
+        name: text for name, text in _document_texts(tailored, with_cover_letter).items()
+        if (done.get(name) or {}).get("fp") != fingerprint(text)
+    }
+    if not todo:
+        return 0
+    results = await asyncio.gather(
+        *(reader(text, what=DOCUMENT_WHAT[name]) for name, text in todo.items()), return_exceptions=True,
+    )
+    failed = 0
+    for (name, text), found in zip(todo.items(), results):
+        if isinstance(found, Exception):
+            failed += 1
+            logger.warning("Couldn't read the %s through: %s", name, found)
+            continue
+        done[name] = {"fp": fingerprint(text), "problems": found}
+    tailored.validation_notes = {**(tailored.validation_notes or {}), "read_through": done}
+    return failed
 
 
 def _unique(problems) -> list[str]:
@@ -30,17 +85,21 @@ def document_problems(tailored: TailoredApplication | None, *, with_cover_letter
     if tailored is None:
         return {}
     out: dict[str, list[str]] = {}
-    resume = tailored.tailored_resume_json or {}
-    parts = [resume.get("tailored_summary") or ""] + [
-        bullet for role in resume.get("selected_experience") or [] for bullet in role.get("bullets") or []
-    ]
-    found = _unique(p for part in parts for p in writing_problems(part))
-    if found:
-        out["resume"] = found
-    if with_cover_letter:
-        found = writing_problems(tailored.cover_letter)
+    done = _read(tailored)
+    texts = _document_texts(tailored, with_cover_letter)
+    checked = {
+        "resume": _unique(p for part in _resume_parts(tailored) for p in writing_problems(part)),
+        "cover_letter": writing_problems(tailored.cover_letter) if with_cover_letter else [],
+    }
+    for name, found in checked.items():
+        if name in texts:
+            read = done.get(name) or {}
+            if read.get("fp") != fingerprint(texts[name]):
+                found = found + [NOT_READ_YET]
+            else:
+                found = _unique(found + read.get("problems", []))
         if found:
-            out["cover_letter"] = found
+            out[name] = found
     return out
 
 
@@ -49,9 +108,19 @@ def wants_cover_letter(application: AutoApplication) -> bool:
     return any(kind == "cover_letter" for kind in kinds.values())
 
 
-async def application_document_problems(db: AsyncSession, application: AutoApplication) -> dict[str, list[str]]:
+async def application_document_problems(
+    db: AsyncSession, application: AutoApplication, *, read: bool = True,
+) -> dict[str, list[str]]:
+    """Problems in the documents this application sends. With `read`, any
+    the model hasn't read in their current words are read first."""
     tailored = await tailored_for_job(db, application.user_id, application.job_id)
-    return document_problems(tailored, with_cover_letter=wants_cover_letter(application))
+    with_cover_letter = wants_cover_letter(application)
+    if read and tailored is not None:
+        before = dict(tailored.validation_notes or {})
+        await read_documents_through(tailored, with_cover_letter=with_cover_letter)
+        if tailored.validation_notes != before:
+            await db.commit()
+    return document_problems(tailored, with_cover_letter=with_cover_letter)
 
 
 def first_document_problem(problems: dict[str, list[str]]) -> str | None:

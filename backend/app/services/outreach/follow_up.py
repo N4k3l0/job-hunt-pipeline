@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.llm.prompts.tailor_resume import OUTREACH_PROMPT, SYSTEM_PROMPT
-from app.llm.style import plain_english
+from app.llm.style import without_dashes
 from app.models.auto_apply import AutoApplication
 from app.models.job import Job, JobContact
 from app.models.tailoring import TailoredApplication
@@ -67,7 +67,7 @@ async def draft_follow_up(db: AsyncSession, application: AutoApplication, llm=No
         prompt += "\nOpen with their first name."
 
     drafted = await llm.generate(task_type="tailoring", system_prompt=SYSTEM_PROMPT, user_prompt=prompt, max_tokens=500)
-    message = plain_english(drafted)
+    message = await without_dashes(drafted, llm)
     application.follow_up = {"message": message, "drafted_at": datetime.now(timezone.utc).isoformat()}
     await db.commit()
     logger.info("Drafted a follow-up for application %s", application.id)
