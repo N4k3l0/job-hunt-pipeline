@@ -14,7 +14,7 @@ from app.llm.prompts.tailor_resume import (
     TAILOR_RESUME_PROMPT,
     TAILOR_TOOL,
 )
-from app.llm.style import plain_english
+from app.llm.style import without_dashes
 from app.models.candidate import CandidateProfile, Resume, SampleApplication
 from app.models.job import Job
 from app.models.tailoring import TailoredApplication
@@ -80,12 +80,20 @@ _TRAILING_RE = re.compile(
 )
 
 
-def _written_plainly(resume: dict) -> dict:
+async def _written_plainly(resume: dict) -> dict:
     """The resume's own words, in plain English. Everything else in the
     tool result (keywords, matches) is left alone."""
-    resume["tailored_summary"] = plain_english(resume.get("tailored_summary"))
-    for role in resume.get("selected_experience") or []:
-        role["bullets"] = [plain_english(b) for b in role.get("bullets") or []]
+    import asyncio
+
+    roles = resume.get("selected_experience") or []
+    summary, *bullets = await asyncio.gather(
+        without_dashes(resume.get("tailored_summary")),
+        *(without_dashes(b) for role in roles for b in role.get("bullets") or []),
+    )
+    resume["tailored_summary"] = summary
+    for role in roles:
+        count = len(role.get("bullets") or [])
+        role["bullets"], bullets = bullets[:count], bullets[count:]
     return resume
 
 
@@ -237,7 +245,7 @@ async def generate_tailored_application(
         user_prompt=resume_prompt,
         tools=[TAILOR_TOOL],
     )
-    tailored_resume = _written_plainly(tailored_resume)
+    tailored_resume = await _written_plainly(tailored_resume)
 
     # ── Step 2: Generate cover letter ─────────────────────────────────────
     logger.info("Generating cover letter for job %s", job_id)
@@ -274,7 +282,7 @@ async def generate_tailored_application(
             )
         ),
     )
-    cover_letter = plain_english(_strip_llm_fluff(cover_letter_raw))
+    cover_letter = await without_dashes(_strip_llm_fluff(cover_letter_raw))
 
     # ── Step 3: Message to a hiring manager ───────────────────────────────
     # Only when asked for: it's written after an application is sent, from
@@ -304,7 +312,7 @@ async def generate_tailored_application(
             ),
             max_tokens=500,
         )
-        outreach = plain_english(_strip_llm_fluff(outreach_raw))
+        outreach = await without_dashes(_strip_llm_fluff(outreach_raw))
 
     # ── Step 4: Generate screening answers (if applicable) ────────────────
     short_answers = {}
@@ -328,7 +336,7 @@ async def generate_tailored_application(
             # Strip "Here's the answer:" / "Let me know if..." patterns —
             # screening answers go straight into the application form so
             # any preamble shows up verbatim to the recruiter.
-            short_answers[q] = plain_english(_strip_llm_fluff(answer))
+            short_answers[q] = await without_dashes(_strip_llm_fluff(answer))
 
     # ── Store results ─────────────────────────────────────────────────────
     keyword_matches = {
@@ -374,6 +382,15 @@ async def generate_tailored_application(
         )
         db.add(application)
     await db.flush()
+
+    # Read the documents through now, so the writing check has its answer
+    # ready when they're looked at or sent (services/auto_apply/writing.py).
+    from app.services.auto_apply.writing import read_documents_through
+    try:
+        await read_documents_through(application, with_cover_letter=True)
+        await db.flush()
+    except Exception as e:  # noqa: BLE001 — read again before anything is sent
+        logger.warning("Couldn't read the documents for job %s through: %s", job_id, e)
 
     logger.info(
         "Tailored application created for job %s (id=%s): %d matched keywords, %d gaps",

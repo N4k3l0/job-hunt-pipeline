@@ -428,6 +428,91 @@ async def test_rewrite_suggests_a_plainer_answer(client, monkeypatch):
     assert by_key(app)["question_why"]["answer"]["value"] == dashed
 
 
+async def test_the_read_through_decides_whether_an_answer_is_ready(client, monkeypatch):
+    from app.services.auto_apply import prepare
+
+    async def careful_reader(text, *, what, llm=None):
+        if "autonomous agent capability" in text:
+            return ['"autonomous agent capability": jargon. Say what it does.']
+        return []
+
+    monkeypatch.setattr(prepare, "read_through", careful_reader)
+    app_id = (await client.post(f"/api/v1/auto-apply/jobs/{JOB_A}")).json()["id"]
+    jargon = "I built an autonomous agent capability that finds hiring managers for my own job search."
+
+    r = await client.put(f"/api/v1/auto-apply/{app_id}/answers",
+                         json={"answers": {**APPROVE_REST, "question_why": jargon}, "approve": True})
+    assert r.status_code == 422
+    assert r.json()["detail"]["message"] == (
+        "\u201cWhy Stripe?\u201d needs plainer wording before it can be sent. "
+        '"autonomous agent capability": jargon. Say what it does.'
+    )
+
+    # Plain words pass.
+    plain = "I built a tool that finds hiring managers for my own job search, and I use it every day."
+    r = await client.put(f"/api/v1/auto-apply/{app_id}/answers",
+                         json={"answers": {**APPROVE_REST, "question_why": plain}, "approve": True})
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "queued"
+
+
+async def test_nothing_is_ready_when_the_answers_couldnt_be_read(client, monkeypatch):
+    from app.services.auto_apply import prepare
+    from app.llm.client import LLMCreditsExhausted
+
+    async def paused(text, *, what, llm=None):
+        raise LLMCreditsExhausted()
+
+    monkeypatch.setattr(prepare, "read_through", paused)
+    app_id = (await client.post(f"/api/v1/auto-apply/jobs/{JOB_A}")).json()["id"]
+    answer_text = "I built a tool that finds hiring managers for my own job search, and I use it every day."
+    r = await client.put(f"/api/v1/auto-apply/{app_id}/answers",
+                         json={"answers": {**APPROVE_REST, "question_why": answer_text}, "approve": True})
+    assert r.status_code == 422
+    assert r.json()["detail"]["message"].startswith("The app couldn't read your answers through just now")
+
+
+async def test_preparing_takes_up_a_renamed_posting_and_writes_the_resume_again(client, monkeypatch):
+    from app.core.config import get_settings
+    from app.models.tailoring import TailoredApplication
+    from app.services.tailoring import tailor_service
+
+    posting = {"title": "Staff Product Manager, Payments", "content": "&lt;p&gt;" + "Own the payments roadmap. " * 20 + "&lt;/p&gt;"}
+    monkeypatch.setitem(FORMS, "111", {**FORMS["111"], **posting})
+    tailored = []
+
+    async def fake_tailor(db, job_id, user_id, with_outreach=True):
+        tailored.append(job_id)
+        application = TailoredApplication(job_id=job_id, user_id=user_id, approval_status="ready",
+                                          tailored_resume_json={}, cover_letter="Hi,")
+        db.add(application)
+        await db.flush()
+        return application
+
+    monkeypatch.setattr(get_settings(), "anthropic_api_key", "test-key")
+    monkeypatch.setattr(tailor_service, "generate_tailored_application", fake_tailor)
+
+    r = await client.post(f"/api/v1/auto-apply/jobs/{JOB_A}")
+    assert r.status_code == 200, r.text
+    from app.core.database import engine
+    async with engine.connect() as conn:
+        title, description = (await conn.execute(
+            text("SELECT title, raw_description FROM jobs WHERE id = :j"), {"j": JOB_A}
+        )).one()
+    assert title == "Staff Product Manager, Payments"
+    assert description.startswith("<p>Own the payments roadmap.")
+    assert len(tailored) == 1
+
+    # The same posting again: nothing changed, the resume isn't written again.
+    await client.post(f"/api/v1/auto-apply/jobs/{JOB_A}")
+    assert len(tailored) == 1
+
+    # The company rewrites the posting: the resume is written for the new one.
+    monkeypatch.setitem(FORMS, "111", {**FORMS["111"], "content": "&lt;p&gt;" + "Run the card issuing team. " * 20})
+    await client.post(f"/api/v1/auto-apply/jobs/{JOB_A}")
+    assert len(tailored) == 2
+
+
 async def test_unsupported_closed_and_private(client):
     r = await client.post(f"/api/v1/auto-apply/jobs/{JOB_UNSUPPORTED}")
     assert r.json()["status"] == "unsupported" and "Greenhouse" in r.json()["error"]

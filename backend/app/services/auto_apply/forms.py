@@ -301,8 +301,10 @@ def parse_lever(page: str) -> list[dict]:
 # ─── Fetching ───────────────────────────────────────────────────────────────
 
 
-async def fetch_form(client: httpx.AsyncClient, target: AtsTarget) -> list[dict]:
-    """Read the target's application form. Raises FormUnavailable."""
+async def fetch_form(client: httpx.AsyncClient, target: AtsTarget, posting: dict | None = None) -> list[dict]:
+    """Read the target's application form. Raises FormUnavailable. When
+    the hiring system sends the posting with the form (Greenhouse does),
+    its current `title` and `content` (HTML) go into `posting`."""
     try:
         if target.ats == "greenhouse":
             host = "boards-api.eu.greenhouse.io" if target.eu else "boards-api.greenhouse.io"
@@ -312,7 +314,10 @@ async def fetch_form(client: httpx.AsyncClient, target: AtsTarget) -> list[dict]
             if r.status_code == 404:
                 raise FormUnavailable("This posting is no longer listed", closed=True)
             r.raise_for_status()
-            return parse_greenhouse(r.json())
+            data = r.json()
+            if posting is not None:
+                posting.update(title=data.get("title"), content=data.get("content"))
+            return parse_greenhouse(data)
 
         if target.ats == "ashby":
             r = await client.post(

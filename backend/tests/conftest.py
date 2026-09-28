@@ -29,3 +29,16 @@ def _ai_not_paused(monkeypatch, tmp_path):
 
     monkeypatch.setattr(llm_module, "PAUSE_FILE", tmp_path / "ai-paused-until")
     monkeypatch.setattr(llm_module, "_credits_paused_until", 0.0)
+
+
+@pytest.fixture(autouse=True)
+def _read_through_finds_nothing(monkeypatch):
+    """The writing read-through asks the model; tests never do. A test that
+    wants it to find something, or fail, patches these itself."""
+    from app.services.auto_apply import prepare, writing
+
+    async def reads_fine(text, *, what, llm=None):
+        return []
+
+    monkeypatch.setattr(prepare, "read_through", reads_fine)
+    monkeypatch.setattr(writing, "read_through", reads_fine)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from datetime import date, datetime, timedelta, timezone
@@ -21,6 +22,7 @@ from app.services.auto_apply.apply_links import find_apply_url, has_apply_redire
 from app.services.auto_apply.ats import detect_ats, hiring_system_name, resolve_greenhouse_board
 from app.services.auto_apply.drafting import draft_answers
 from app.services.auto_apply.forms import FormUnavailable, fetch_form, http_client
+from app.llm.style import read_through
 from app.services.auto_apply.writing import application_document_problems, first_document_problem
 from app.services.scoring.matching import candidate_years
 
@@ -139,11 +141,56 @@ def _job_country(job: Job) -> str | None:
     return eligible[0] if len(eligible) == 1 else None
 
 
+async def read_answers_through(application: AutoApplication, reader=None) -> int:
+    """Have the model read every written answer it hasn't read in its
+    current words, and keep what it found on the answer. Returns how many
+    couldn't be read (AI paused, say); those stay "not read yet"."""
+    reader = reader or read_through
+    form = application.form or []
+    answers = dict(application.answers or {})
+    todo = [f for f in form if rules.needs_read_through(f, answers.get(f["key"]))]
+    if not todo:
+        return 0
+    results = await asyncio.gather(
+        *(reader(answers[f["key"]]["value"], what=f"an answer to the question \"{f['label']}\"") for f in todo),
+        return_exceptions=True,
+    )
+    failed = 0
+    for item, found in zip(todo, results):
+        if isinstance(found, Exception):
+            failed += 1
+            logger.warning("Couldn't read the answer to %r through: %s", item["label"], found)
+            continue
+        answers[item["key"]] = rules.with_read_through(answers[item["key"]], found)
+    application.answers = answers
+    return failed
+
+
 def _status_for(form: list[dict], answers: dict) -> str:
     return "needs_you" if any(rules.needs_attention(f, answers.get(f["key"])) for f in form) else "queued"
 
 
-async def _tailor_for(db: AsyncSession, user_id: uuid.UUID, job_id: uuid.UUID) -> None:
+def _take_up_posting(job: Job, posting: dict) -> bool:
+    """Bring the job's title and description in line with the live posting.
+    True when either changed. The description is stored the way the
+    company-board source stores it, so an unchanged posting compares equal."""
+    from app.services.discovery.curated_service import _strip_html
+
+    changed = False
+    title = " ".join((posting.get("title") or "").split())
+    if title and title != " ".join((job.title or "").split()):
+        job.title, job.title_en = title, None
+        changed = True
+    description = _strip_html(posting.get("content") or "")
+    if len(description) >= 200 and description != (job.raw_description or ""):
+        job.raw_description, job.raw_description_en = description, None
+        if job.entities is not None:
+            job.entities.enriched_at = None  # the job reader reads it again
+        changed = True
+    return changed
+
+
+async def _tailor_for(db: AsyncSession, user_id: uuid.UUID, job_id: uuid.UUID, *, force: bool = False) -> None:
     """Write a resume for this job (and a cover letter) unless one is
     already waiting. Never blocks the application: if it fails, the
     profile's own resume is attached instead."""
@@ -153,7 +200,7 @@ async def _tailor_for(db: AsyncSession, user_id: uuid.UUID, job_id: uuid.UUID) -
 
     if not get_settings().anthropic_api_key:
         return
-    if await tailored_for_job(db, user_id, job_id) is not None:
+    if not force and await tailored_for_job(db, user_id, job_id) is not None:
         return
     try:
         await generate_tailored_application(db, str(job_id), str(user_id), with_outreach=False)
@@ -218,8 +265,9 @@ async def prepare_application(
 
         application.ats = target.ats
         application.form_url = target.form_url
+        posting: dict = {}
         try:
-            form = await fetch_form(client, target)
+            form = await fetch_form(client, target, posting)
         except FormUnavailable as e:
             application.status = "failed"
             application.error = "This posting has closed." if e.closed else f"Couldn't read the application form: {e}"
@@ -228,6 +276,10 @@ async def prepare_application(
     finally:
         if owns_client:
             await client.aclose()
+
+    # Companies rename and rewrite postings. Applying goes by the one that's
+    # live now, and a resume written for an older version is written again.
+    posting_changed = _take_up_posting(job, posting)
 
     facts, facts_for_drafting, resume, saved = await load_applicant(db, user_id)
     job_facts = rules.JobFacts(company=job.company or "", country=_job_country(job))
@@ -256,13 +308,18 @@ async def prepare_application(
 
     application.form = form
     application.answers = answers
+    await read_answers_through(application)
+    answers = application.answers
     application.resume_id = resume.id if resume else None
     application.error = None
     application.status = _status_for(form, answers)
     await db.commit()
 
+    if posting_changed:
+        from app.workers.scoring_tasks import rescore_jobs_for_all_users
+        await rescore_jobs_for_all_users([job_id])
     if tailor:
-        await _tailor_for(db, user_id, job_id)
+        await _tailor_for(db, user_id, job_id, force=posting_changed)
         await db.refresh(application)  # a failed tailoring rolls back, which expires it
     # Ready to send only when the documents read plainly too.
     if application.status == "queued" and await application_document_problems(db, application):
@@ -329,13 +386,23 @@ async def update_answers(
             continue
         previous = answers.get(key) or {}
         answers[key] = rules.answer(value, "user")
-        # Sending back an answer unchanged keeps "fine as it is".
-        if previous.get("value") == value and rules.wording_accepted(previous):
-            answers[key] = rules.accept_wording(answers[key])
+        # Sending back an answer unchanged keeps "fine as it is" and what
+        # the read-through found.
+        if previous.get("value") == value:
+            for kept in ("wording_ok", "read_through"):
+                if kept in previous:
+                    answers[key][kept] = previous[kept]
     application.answers = answers
+    unread = await read_answers_through(application)
+    answers = application.answers
 
     open_fields = [f for f in application.form if rules.needs_attention(f, answers.get(f["key"]))]
     if approve:
+        if unread:
+            raise AnswerError(
+                "The app couldn't read your answers through just now, so it can't check they read plainly. "
+                "Try again in a minute."
+            )
         wording = [f for f in open_fields if rules.writing_blocks(f, answers.get(f["key"]))]
         if wording:
             first = wording[0]

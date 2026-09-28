@@ -14,7 +14,7 @@ from app.llm.prompts.draft_application_answers import (
     SYSTEM_PROMPT,
     USER_PROMPT_TEMPLATE,
 )
-from app.llm.style import plain_english
+from app.llm.style import without_dashes
 from app.services.auto_apply.answers import answer, normalize_label
 
 logger = logging.getLogger(__name__)
@@ -91,7 +91,7 @@ async def draft_answers(items: list[dict], facts_text: str, job: dict, llm=None)
             continue
         value = to_field_value(item, entry.get("answer"))
         if isinstance(value, str):
-            value = plain_english(value)
+            value = await without_dashes(value, llm)
         if value is None:
             continue
         basis = (entry.get("basis") or "").strip()
@@ -115,4 +115,4 @@ async def rewrite_plainly(question: str, text: str, llm=None) -> str:
     rewritten = await llm.generate(
         "applying", system, f"Question: {question}\n\nTheir answer:\n{text}", max_tokens=1500,
     )
-    return plain_english(rewritten.strip().strip('"'))
+    return await without_dashes(rewritten.strip().strip('"'), llm)
