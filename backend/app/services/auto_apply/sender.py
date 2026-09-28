@@ -18,6 +18,7 @@ import base64
 import json
 import logging
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -35,7 +36,17 @@ FILLER_PATH = Path(os.environ.get("FORM_FILLER_PATH", Path(__file__).parents[4] 
 SENT_URLS = ("/thanks", "/confirmation")
 SUCCESS_TEXT = "thank you for applying|thanks for applying|application (has been |was )?(successfully )?(submitted|received)"
 FILL_TIMEOUT_MS = 120_000
+PRESS_TIMEOUT_MS = 15_000
 SUBMIT_WAIT_SECONDS = 90
+SUBMIT_LABEL = re.compile(r"submit|send application", re.IGNORECASE)
+# The filler shows the extension's panel ("Filled in 20 answers") in the
+# page's corner, above everything. Here nobody reads it, and it sat on top
+# of Greenhouse's Submit button, so the press never landed.
+HIDE_PANEL = """() => {
+    const style = document.createElement('style');
+    style.textContent = 'job-hunt-panel { display: none !important; }';
+    document.documentElement.appendChild(style);
+}"""
 
 
 class SendRefused(RuntimeError):
@@ -69,17 +80,33 @@ async def _fill(page, payload: dict, files: dict) -> dict:
         [payload, files],
     )
     await page.wait_for_function("window.__jobHuntResult !== undefined", timeout=FILL_TIMEOUT_MS)
+    await page.evaluate(HIDE_PANEL)
     return await page.evaluate("window.__jobHuntResult")
 
 
 async def _submit_button(page):
-    buttons = page.locator("button:visible, input[type=submit]:visible")
-    for i in range(await buttons.count()):
-        button = buttons.nth(i)
-        label = ((await button.inner_text()) or (await button.get_attribute("value")) or "").strip()
-        if "submit" in label.lower() or "send application" in label.lower():
-            return button, label
-    return None, None
+    """The form's Submit button, found by what it says. Finding it by its
+    place among the visible buttons ("the 19th") failed on Greenhouse: the
+    list changes as the page scrolls, so each look found a different button
+    and it never held still long enough to press."""
+    buttons = page.get_by_role("button", name=SUBMIT_LABEL).filter(visible=True)
+    if not await buttons.count():
+        return None, None
+    button = buttons.first
+    label = ((await button.inner_text()) or (await button.get_attribute("value")) or "").strip()
+    return button, label
+
+
+async def _can_press(button) -> bool:
+    """Whether the button can be pressed: Playwright's checks (on screen,
+    enabled, still, nothing on top of it) without pressing it."""
+    try:
+        await button.scroll_into_view_if_needed(timeout=PRESS_TIMEOUT_MS)
+        await button.click(trial=True, timeout=PRESS_TIMEOUT_MS)
+        return True
+    except Exception as e:  # noqa: BLE001 — reported to the user as "couldn't press Submit"
+        logger.warning("Can't press the Submit button: %s", str(e).splitlines()[0])
+        return False
 
 
 async def _ask_page(page, script: str, *args) -> bool:
@@ -121,6 +148,9 @@ OUTCOME_MESSAGES = {
     "dry_run": "Practice run done. Everything was filled in, and nothing was sent.",
     "incomplete": "Some questions couldn't be filled in, so nothing was sent.",
     "no_submit_button": "The app couldn't find the form's Submit button, so nothing was sent.",
+    "cant_press_submit": (
+        "Everything was filled in, but the app couldn't press the form's Submit button, so nothing was sent."
+    ),
     "human_check": (
         "The form asked to check you're a person. The app doesn't get around that, so it stopped. "
         "Send this one with the extension, or by hand."
@@ -129,7 +159,7 @@ OUTCOME_MESSAGES = {
         "The app pressed Submit but didn't see a confirmation. Check your email for one from the "
         "company before sending it again."
     ),
-    "error": "Something went wrong while filling in the form, so nothing was sent.",
+    "error": "Something went wrong on the company's form, so nothing was sent.",
 }
 
 
@@ -148,32 +178,57 @@ async def _run_form(payload: dict, *, dry_run: bool) -> tuple[dict, bytes | None
                 "coverLetter": await _attachment(payload.get("cover_letter")),
             }
             logger.info("Opening %s", payload["form_url"])
-            await page.goto(payload["form_url"], wait_until="domcontentloaded", timeout=60_000)
-            filled = await _fill(page, payload, files)
-            missing = [item for item in filled["items"] if item["status"] == "todo"]
-            logger.info("Filled in %d answers; %d need a person", filled["filled"], len(missing))
-            for item in missing:
-                logger.info("  not filled in: %s (%s)", item["label"][:70], item["note"])
-            outcome = {"filled": filled["filled"], "not_filled": missing, "url": page.url}
-
-            if missing:
-                outcome["status"] = "incomplete"
-            elif dry_run:
-                outcome["status"] = "dry_run"
-            else:
-                button, label = await _submit_button(page)
-                if button is None:
-                    outcome["status"] = "no_submit_button"
-                else:
-                    logger.info("Pressing %r", label)
-                    await button.click()
-                    outcome["status"] = await _watch_after_submit(page)
-                    outcome["url"] = page.url
-            screenshot = await page.screenshot(full_page=True)
+            try:
+                outcome = await _fill_and_press(page, payload, files, dry_run=dry_run)
+            except Exception as e:  # noqa: BLE001 — recorded for the user, with a picture of the page
+                logger.exception("Filling in the form failed")
+                outcome = {"status": "error", "detail": f"{type(e).__name__}: {e}"[:300], "url": page.url}
+            try:
+                screenshot = await page.screenshot(full_page=True)
+            except Exception as e:  # noqa: BLE001 — the outcome counts without its picture
+                logger.warning("Couldn't take a picture of the form: %s", e)
+                screenshot = None
         finally:
             await context.close()
             await browser.close()
     return outcome, screenshot
+
+
+async def _fill_and_press(page, payload: dict, files: dict, *, dry_run: bool) -> dict:
+    await page.goto(payload["form_url"], wait_until="domcontentloaded", timeout=60_000)
+    filled = await _fill(page, payload, files)
+    missing = [item for item in filled["items"] if item["status"] == "todo"]
+    logger.info("Filled in %d answers; %d need a person", filled["filled"], len(missing))
+    for item in missing:
+        logger.info("  not filled in: %s (%s)", item["label"][:70], item["note"])
+    outcome = {"filled": filled["filled"], "not_filled": missing, "url": page.url}
+    if missing:
+        outcome["status"] = "incomplete"
+        return outcome
+
+    # A practice run goes as far as checking Submit can be pressed.
+    button, label = await _submit_button(page)
+    if button is None:
+        outcome["status"] = "no_submit_button"
+    elif not await _can_press(button):
+        outcome["status"] = "cant_press_submit"
+    elif dry_run:
+        outcome["status"] = "dry_run"
+    else:
+        logger.info("Pressing %r", label)
+        try:
+            # Returns once the press is made; what the form does next is
+            # watched below.
+            await button.click(no_wait_after=True, timeout=PRESS_TIMEOUT_MS)
+        except Exception as e:  # noqa: BLE001
+            # The checks above had just passed, so this is unlikely, and
+            # whether the press landed can't be known. Watching the page
+            # tells: a confirmation means sent, anything else says to look
+            # for the company's email before trying again.
+            logger.warning("Pressing Submit raised: %s", str(e).splitlines()[0])
+        outcome["status"] = await _watch_after_submit(page)
+        outcome["url"] = page.url
+    return outcome
 
 
 async def _keep_screenshot(application: AutoApplication, what: str, content: bytes | None) -> str | None:

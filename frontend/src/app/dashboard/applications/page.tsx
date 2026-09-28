@@ -11,7 +11,7 @@ import {
 import { AutoApplyStatusPill } from "@/components/auto-apply-status";
 import { ClosedNote } from "@/components/closed-note";
 import { FillInFormButton } from "@/components/fill-in-form-button";
-import { SendForMe } from "@/components/send-for-me";
+import { SendForMe, useSendFinished } from "@/components/send-for-me";
 import { useToast } from "@/components/ui/toast";
 import { EmptyState } from "@/components/ui/empty-state";
 import type { ApplicationTracking, AutoApplication, TailoredApplication } from "@/lib/types";
@@ -91,7 +91,11 @@ function Column({ title, hint, count, children }: {
 function autoDetail(a: AutoApplication) {
   if (a.status === "needs_you") return `${a.open_count} ${a.open_count === 1 ? "question needs" : "questions need"} you`;
   if (a.status === "preparing") return "Reading the form and filling in your answers";
-  if (a.status === "queued") return a.error ?? "Everything's approved. Send it when you're ready.";
+  if (a.status === "queued") {
+    // The last try didn't go through: say so where it can't be missed.
+    if (a.error) return <span className="text-amber-500">{a.error}</span>;
+    return "Everything's approved. Send it when you're ready.";
+  }
   return a.error ?? "";
 }
 
@@ -169,6 +173,7 @@ function Dot({ status }: { status: string }) {
 export default function ApplicationsPage() {
   const { data: tracking, isLoading } = useApplicationPipeline();
   const { data: autoApplications, isLoading: autoLoading } = useAutoApplications();
+  useSendFinished(autoApplications);
   const { data: tailored } = useReviewQueue();
   const { data: reminders } = useReminders();
   const updateStatus = useUpdateStatus();
