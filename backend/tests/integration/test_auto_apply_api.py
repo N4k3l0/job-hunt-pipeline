@@ -578,6 +578,27 @@ async def test_using_the_plainer_version_clears_the_check_without_reading_it_twi
     assert reads == [dashed]  # the suggestion was read when it was made, not again
 
 
+async def test_approving_works_for_a_job_without_a_country(client):
+    # The Anthropic job's location is "Remote-Friendly | San Francisco |
+    # Seattle": no country, so remembering answers looked in the job's
+    # details, which crashed the whole request.
+    from app.core.database import engine
+
+    async with engine.begin() as conn:
+        await conn.execute(text("UPDATE jobs SET country = NULL WHERE id = :j"), {"j": JOB_A})
+        await conn.execute(text(
+            "INSERT INTO job_entities (id, job_id, skills, requirements, keywords, eligible_countries) "
+            "VALUES (gen_random_uuid(), :j, '[]', '[]', '[]', CAST('[\"US\"]' AS jsonb))"
+        ), {"j": JOB_A})
+
+    app_id = (await client.post(f"/api/v1/auto-apply/jobs/{JOB_A}")).json()["id"]
+    r = await client.put(f"/api/v1/auto-apply/{app_id}/answers", json={
+        "answers": {**APPROVE_REST, "question_why": "I led payments work at Acme."}, "approve": True,
+    })
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "queued"
+
+
 async def test_unsupported_closed_and_private(client):
     r = await client.post(f"/api/v1/auto-apply/jobs/{JOB_UNSUPPORTED}")
     assert r.json()["status"] == "unsupported" and "Greenhouse" in r.json()["error"]

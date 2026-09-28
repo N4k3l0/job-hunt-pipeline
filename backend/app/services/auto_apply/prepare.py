@@ -455,7 +455,15 @@ async def update_answers(
 
 
 async def _remember_answers(db: AsyncSession, application: AutoApplication) -> None:
-    job = await db.get(Job, application.job_id, options=[selectinload(Job.entities)])
+    # A select, not db.get: the job is usually loaded already (with the
+    # application), and db.get then skips the options, so reading its details
+    # below would load them outside async and crash the request. That broke
+    # approving any job without a country, like "Remote-Friendly | Seattle".
+    job = (await db.execute(
+        select(Job).where(Job.id == application.job_id)
+        .options(selectinload(Job.entities))
+        .execution_options(populate_existing=True)
+    )).scalar_one_or_none()
     # The country matters: "do you need sponsorship" has a different answer
     # per country, so the job's country is part of what gets remembered.
     job_facts = rules.JobFacts(company=(job.company if job else "") or "",
