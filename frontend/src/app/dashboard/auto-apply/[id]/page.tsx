@@ -9,7 +9,8 @@ import {
 } from "lucide-react";
 import {
   useApplicationDocuments, useAutoApplication, useCancelAutoApplication, useDraftFollowUp,
-  useFindJobContact, useJobContact, useKeepWording, useMarkAutoApplicationSent, usePrepareAutoApplication,
+  useFindJobContact, useJobContact, useKeepDocumentWording, useKeepWording, useMarkAutoApplicationSent,
+  usePrepareAutoApplication,
   useRewriteAnswer, useSaveAutoApplyAnswers,
 } from "@/hooks/use-api";
 import { useExtensionInstalled } from "@/hooks/use-extension";
@@ -502,12 +503,15 @@ function FollowUp({ application }: { application: AutoApplicationDetail }) {
  *  form asks for one. Both are written for this job when tailoring ran. */
 function Documents({ id }: { id: string }) {
   const { data, isLoading } = useApplicationDocuments(id);
+  const keep = useKeepDocumentWording(id);
+  const toast = useToast();
   if (isLoading || !data || (!data.resume && !data.cover_letter)) return null;
 
   const files = [
     data.resume && {
       ...data.resume,
       label: "Resume",
+      name: "resume" as const,
       note: data.tailored ? "Written for this job" : "The one on your profile",
       tailored: data.tailored,
       problems: data.writing_problems?.resume ?? [],
@@ -515,12 +519,14 @@ function Documents({ id }: { id: string }) {
     data.cover_letter && {
       ...data.cover_letter,
       label: "Cover letter",
+      name: "cover_letter" as const,
       note: "Written for this job, because the form asks for one",
       tailored: true,
       problems: data.writing_problems?.cover_letter ?? [],
     },
   ].filter(Boolean) as ({
-    url: string; filename: string; label: string; note: string; tailored: boolean; problems: string[];
+    url: string; filename: string; label: string; name: "resume" | "cover_letter"; note: string;
+    tailored: boolean; problems: string[];
   })[];
 
   return (
@@ -545,8 +551,26 @@ function Documents({ id }: { id: string }) {
                 </div>
                 <div className="ds-dim truncate" style={{ fontSize: 12 }}>{file.note}</div>
                 {file.problems.length > 0 && (
-                  <div className="text-amber-500" style={{ fontSize: 12, marginTop: 4, lineHeight: 1.5 }}>
-                    Change this before it&apos;s sent: {file.problems.join(" ")}
+                  <div style={{ fontSize: 12, marginTop: 6, lineHeight: 1.5 }}>
+                    <div className="text-amber-500" style={{ fontWeight: 500 }}>Change this before it&apos;s sent</div>
+                    <ul className="text-amber-500" style={{ margin: "2px 0 0", paddingLeft: 16 }}>
+                      {file.problems.map((p) => <li key={p}>{p}</li>)}
+                    </ul>
+                    {!file.problems.some((p) => p.includes("long dash")) && (
+                      <button
+                        type="button"
+                        className="ds-btn ghost sm"
+                        style={{ marginTop: 6 }}
+                        disabled={keep.isPending}
+                        onClick={() =>
+                          keep.mutate(file.name, {
+                            onError: (e) => toast.error("Couldn't keep it", { description: e.message }),
+                          })
+                        }
+                      >
+                        It&apos;s fine as it is
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

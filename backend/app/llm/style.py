@@ -167,8 +167,10 @@ READ_THROUGH_SYSTEM = (
     "- phrases lifted from the job ad instead of said in their own words\n"
     "- anything else that reads like a machine wrote it\n"
     "Go through it one sentence at a time before deciding. At most eight, the clearest first. Quote the "
-    "exact words (under 12) and say in plain English what to do instead. If it reads fine, record no "
-    "problems.\n\n" + STYLE_RULES
+    "exact words (under 12) and say in plain English what to do instead.\n"
+    "Mark a problem serious only when it clearly breaks these rules. Matters of taste, small polish and "
+    "anything you'd call minor are not serious. On a resume, short clipped lines without \"I\" are normal, "
+    "so don't flag them for that. If it's fine to send, record no problems.\n\n" + STYLE_RULES
 )
 
 READ_THROUGH_TOOL = {
@@ -184,8 +186,9 @@ READ_THROUGH_TOOL = {
                     "properties": {
                         "quote": {"type": "string", "description": "The exact words, under 12"},
                         "fix": {"type": "string", "description": "What to do instead, in plain English"},
+                        "serious": {"type": "boolean", "description": "It clearly breaks the rules, not a matter of taste"},
                     },
-                    "required": ["quote", "fix"],
+                    "required": ["quote", "fix", "serious"],
                 },
             },
         },
@@ -220,6 +223,10 @@ def _problems_from(raw) -> list[str]:
     problems = []
     for item in (raw if isinstance(raw, list) else [])[:8]:
         if isinstance(item, dict):
+            # Only clear problems stand in the way of sending. A reviewer
+            # always finds something, and taste isn't a reason to wait.
+            if item.get("serious") is False:
+                continue
             quote, fix = (item.get("quote") or "").strip(), plain_english((item.get("fix") or "").strip())
             if quote and fix:
                 problems.append(f"\"{quote}\": {fix}")

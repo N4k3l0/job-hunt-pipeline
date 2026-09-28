@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import asyncio
 import logging
 
-from app.llm.style import NOT_READ_YET, fingerprint, read_through, revise_plainly, writing_problems
+from app.llm.style import NOT_READ_YET, fingerprint, has_dashes, read_through, revise_plainly, writing_problems
 from app.models.auto_apply import AutoApplication
 from app.models.tailoring import TailoredApplication
 from app.services.auto_apply import answers as rules
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 DOCUMENT_NAMES = {"resume": "Your resume", "cover_letter": "Your cover letter"}
 DOCUMENT_WHAT = {
-    "resume": "the summary and bullet points of a resume written for this job",
+    "resume": "the summary and bullet points of a resume written for this job (short, clipped lines are normal)",
     "cover_letter": "a cover letter",
 }
 
@@ -145,13 +145,29 @@ def document_problems(tailored: TailoredApplication | None, *, with_cover_letter
     for name, found in checked.items():
         if name in texts:
             read = done.get(name) or {}
-            if read.get("fp") != fingerprint(texts[name]):
+            text_fp = fingerprint(texts[name])
+            if read.get("accepted") == text_fp and not has_dashes(texts[name]):
+                continue  # the user said this version is fine as it is
+            if read.get("fp") != text_fp:
                 found = found + [NOT_READ_YET]
             else:
                 found = _unique(found + read.get("problems", []))
         if found:
             out[name] = found
     return out
+
+
+def accept_document_wording(tailored: TailoredApplication, name: str, *, with_cover_letter: bool) -> None:
+    """The user keeps this version of a document despite what was flagged.
+    Long dashes still have to come out. The caller commits."""
+    text = _document_texts(tailored, with_cover_letter).get(name)
+    if not text:
+        raise ValueError("That document isn't sent with this application.")
+    if has_dashes(text):
+        raise ValueError("Take the long dashes out first. The rest can stay as it is.")
+    done = _read(tailored)
+    done[name] = {**(done.get(name) or {}), "accepted": fingerprint(text)}
+    tailored.validation_notes = {**(tailored.validation_notes or {}), "read_through": done}
 
 
 def wants_cover_letter(application: AutoApplication) -> bool:

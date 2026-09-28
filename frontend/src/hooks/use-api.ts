@@ -680,6 +680,16 @@ export function useRewriteAnswer(id: string) {
   });
 }
 
+/** The user keeps a document's wording despite what the writing check flagged. */
+export function useKeepDocumentWording(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (document: "resume" | "cover_letter") =>
+      api.post<AutoApplyDocuments>(`/api/v1/auto-apply/${id}/keep-document-wording`, { document }),
+    onSuccess: (data) => qc.setQueryData(["auto-apply", id, "documents"], data),
+  });
+}
+
 /** The user keeps an answer's wording despite what the writing check flagged. */
 export function useKeepWording(id: string) {
   const qc = useQueryClient();

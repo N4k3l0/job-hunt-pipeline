@@ -186,3 +186,43 @@ async def test_documents_are_fixed_before_anyone_sees_them():
         "Built a voice bot for a gym that books classes.",
     ]
     assert document_problems(tailored, with_cover_letter=False) == {}
+
+
+def test_only_serious_findings_stand_in_the_way():
+    from app.llm.style import _problems_from
+
+    assert _problems_from([
+        {"quote": "load-bearing step", "fix": "Say each step.", "serious": True},
+        {"quote": "checks they're real", "fix": "Minor, keep as is.", "serious": False},
+    ]) == ['"load-bearing step": Say each step.']
+
+
+def test_a_document_can_be_kept_as_it_is_but_never_with_dashes():
+    from types import SimpleNamespace
+
+    import pytest
+
+    from app.services.auto_apply.writing import accept_document_wording, document_problems
+
+    summary = "AI engineer who builds and ships LLM agents end to end."
+    tailored = SimpleNamespace(
+        tailored_resume_json={"tailored_summary": summary},
+        cover_letter=None,
+        validation_notes={"read_through": {"resume": {
+            "fp": __import__("app.llm.style", fromlist=["fingerprint"]).fingerprint(summary),
+            "problems": ['"end to end": reads like a tagline.'],
+        }}},
+    )
+    assert document_problems(tailored, with_cover_letter=False) == {"resume": ['"end to end": reads like a tagline.']}
+    accept_document_wording(tailored, "resume", with_cover_letter=False)
+    assert document_problems(tailored, with_cover_letter=False) == {}
+
+    # A changed resume needs accepting again.
+    tailored.tailored_resume_json = {"tailored_summary": summary + " Mostly Python."}
+    assert document_problems(tailored, with_cover_letter=False)
+
+    tailored.tailored_resume_json = {"tailored_summary": "AI engineer — builds agents."}
+    with pytest.raises(ValueError, match="long dashes"):
+        accept_document_wording(tailored, "resume", with_cover_letter=False)
+    with pytest.raises(ValueError, match="isn't sent"):
+        accept_document_wording(tailored, "cover_letter", with_cover_letter=False)
