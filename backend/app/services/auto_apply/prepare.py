@@ -22,7 +22,7 @@ from app.services.auto_apply.apply_links import find_apply_url, has_apply_redire
 from app.services.auto_apply.ats import detect_ats, hiring_system_name, resolve_greenhouse_board
 from app.services.auto_apply.drafting import draft_answers
 from app.services.auto_apply.forms import FormUnavailable, fetch_form, http_client
-from app.llm.style import NOT_READ_YET, read_through, revise_plainly
+from app.llm.style import NOT_READ_YET, read_is_current, read_through, revise_plainly
 from app.services.auto_apply.writing import application_document_problems, first_document_problem
 from app.services.scoring.matching import candidate_years
 
@@ -412,11 +412,14 @@ async def update_answers(
         previous = answers.get(key) or {}
         answers[key] = rules.answer(value, "user")
         # Sending back an answer unchanged keeps "fine as it is" and what
-        # the read-through found.
+        # the read-through found. Using the plainer version the app
+        # suggested keeps what it found when it read the suggestion.
         if previous.get("value") == value:
             for kept in ("wording_ok", "read_through"):
                 if kept in previous:
                     answers[key][kept] = previous[kept]
+        elif isinstance(value, str) and read_is_current(previous.get("suggested_read"), value):
+            answers[key]["read_through"] = previous["suggested_read"]
     application.answers = answers
     unread = await read_answers_through(application)
     answers = application.answers

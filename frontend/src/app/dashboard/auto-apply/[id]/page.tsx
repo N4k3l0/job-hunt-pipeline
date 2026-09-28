@@ -212,19 +212,34 @@ function CopyButton({ text }: { text: string }) {
  *  dashes, plain simple English. */
 function WritingCheck({
   field,
+  value,
   applicationId,
   onUse,
+  saving,
 }: {
   field: AutoApplyField;
+  value: AutoApplyValue | undefined;
   applicationId: string;
+  saving: boolean;
+  /** Saves the plainer version, which checks it again. */
   onUse: (text: string) => void;
 }) {
   const rewrite = useRewriteAnswer(applicationId);
   const keep = useKeepWording(applicationId);
   const toast = useToast();
-  const [suggestion, setSuggestion] = useState<string | null>(null);
+  const [suggestion, setSuggestion] = useState<{ text: string; problems: string[] } | null>(null);
   const problems = field.writing_problems ?? [];
   if (!problems.length || field.wording_ok) return null;
+  // The problems are for the saved words. Once they're changed here, they
+  // may not apply, and saving checks the new words.
+  if (typeof value === "string" && value !== field.answer?.value) {
+    return (
+      <div className="ds-dim flex items-center" style={{ fontSize: 12, marginTop: 8, gap: 6 }}>
+        {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+        {saving ? "Saving and checking the new wording\u2026" : "Changed. Save to check it again."}
+      </div>
+    );
+  }
   const hasDash = problems.some((p) => p.includes("long dash"));
 
   return (
@@ -246,7 +261,7 @@ function WritingCheck({
           disabled={rewrite.isPending}
           onClick={() =>
             rewrite.mutate(field.key, {
-              onSuccess: (r) => setSuggestion(r.suggestion),
+              onSuccess: (r) => setSuggestion({ text: r.suggestion, problems: r.writing_problems }),
               onError: (e) => toast.error("Couldn't rewrite it", { description: e.message }),
             })
           }
@@ -275,15 +290,19 @@ function WritingCheck({
           <div className="ds-dim" style={{ fontSize: 12, marginBottom: 6 }}>
             A plainer version, same facts. Use it, or keep yours and change it by hand.
           </div>
-          <p style={{ whiteSpace: "pre-line", margin: 0 }}>{suggestion}</p>
+          <p style={{ whiteSpace: "pre-line", margin: 0 }}>{suggestion.text}</p>
+          {suggestion.problems.length > 0 && (
+            <div className="text-amber-500" style={{ fontSize: 12, marginTop: 8 }}>
+              Still worth changing: {suggestion.problems.join(" ")}
+            </div>
+          )}
           <div className="flex flex-wrap" style={{ gap: 8, marginTop: 10 }}>
             <button
               type="button"
               className="ds-btn primary sm"
               onClick={() => {
-                onUse(suggestion);
+                onUse(suggestion.text);
                 setSuggestion(null);
-                toast.success("Using the plainer version", { description: "Save or approve to keep it." });
               }}
             >
               <Check className="h-3.5 w-3.5" /> Use this
@@ -300,6 +319,8 @@ function Question({
   field,
   value,
   onChange,
+  onUsePlainer,
+  saving,
   editable,
   highlighted,
   applicationId,
@@ -307,6 +328,8 @@ function Question({
   field: AutoApplyField;
   value: AutoApplyValue | undefined;
   onChange: (value: AutoApplyValue) => void;
+  onUsePlainer: (text: string) => void;
+  saving: boolean;
   editable: boolean;
   highlighted: boolean;
   applicationId: string;
@@ -356,7 +379,7 @@ function Question({
         )}
       </div>
       <AnswerMeta field={field} />
-      {editable && <WritingCheck field={field} applicationId={applicationId} onUse={(text) => onChange(text)} />}
+      {editable && <WritingCheck field={field} value={value} applicationId={applicationId} onUse={onUsePlainer} saving={saving} />}
     </div>
   );
 }
@@ -720,12 +743,38 @@ export default function AutoApplicationPage({ params }: { params: Promise<{ id: 
     });
   }
 
+  // Using the plainer version saves it right away, along with anything else
+  // changed here, so the writing check runs on it and clears.
+  function savePlainer(key: string, text: string) {
+    setValue(key, text);
+    const keys = new Set(edited).add(key);
+    const answers = Object.fromEntries(
+      [...keys]
+        .filter((k) => application!.fields.some((f) => f.key === k && f.type !== "file"))
+        .map((k) => [k, k === key ? text : values[k] ?? null]),
+    );
+    save.mutate(
+      { answers, approve: false },
+      {
+        onSuccess: (data) => {
+          const field = data.fields.find((f) => f.key === key);
+          const left = field?.wording_ok ? [] : field?.writing_problems ?? [];
+          if (left.length) toast.error("Saved, but it still needs a change", { description: left[0] });
+          else toast.success("Saved the plainer version", { description: "It passes the writing check." });
+        },
+        onError: (e: Error) => toast.error("Couldn't save it", { description: e.message }),
+      },
+    );
+  }
+
   const renderQuestion = (field: AutoApplyField) => (
     <Question
       key={field.key}
       field={field}
       value={values[field.key]}
       onChange={(v) => setValue(field.key, v)}
+      onUsePlainer={(text) => savePlainer(field.key, text)}
+      saving={save.isPending}
       editable={editable}
       highlighted={problemKeys.includes(field.key)}
       applicationId={id}

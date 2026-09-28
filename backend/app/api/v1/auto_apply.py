@@ -31,7 +31,7 @@ from app.services.auto_apply.prepare import (
 )
 from app.services.job_freshness import closed_note
 from app.services.outreach.follow_up import NotSentYet, draft_follow_up
-from app.llm.style import has_dashes, read_through, writing_problems
+from app.llm.style import has_dashes, read_through, saved_read, writing_problems
 from app.services.auto_apply.drafting import rewrite_plainly
 from app.services.auto_apply.resume_pdf import tailored_for_job
 from app.services.auto_apply.writing import (
@@ -183,9 +183,16 @@ async def rewrite_answer(application_id: UUID, body: AnswerKey, user_id: Current
     suggestion = await rewrite_plainly(item["label"], entry["value"])
     problems = writing_problems(suggestion)
     try:
-        problems += await read_through(suggestion, what=f"an answer to the question \"{item['label']}\"")
+        found = await read_through(suggestion, what=f"an answer to the question \"{item['label']}\"")
     except Exception:  # noqa: BLE001 — it's read again when the user saves it
-        pass
+        found = None
+    if found is not None:
+        problems += found
+        # Kept, so using the suggestion doesn't read the same words again.
+        answers = dict(application.answers or {})
+        answers[body.key] = {**entry, "suggested_read": saved_read(suggestion, found)}
+        application.answers = answers
+        await db.commit()
     return {"suggestion": suggestion, "writing_problems": problems}
 
 

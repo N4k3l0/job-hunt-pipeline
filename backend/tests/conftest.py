@@ -35,6 +35,7 @@ def _ai_not_paused(monkeypatch, tmp_path):
 def _read_through_finds_nothing(monkeypatch):
     """The writing read-through asks the model; tests never do. A test that
     wants it to find something, or fail, patches these itself."""
+    from app.api.v1 import auto_apply as auto_apply_api
     from app.services.auto_apply import prepare, writing
 
     async def reads_fine(text, *, what, llm=None):
@@ -45,5 +46,6 @@ def _read_through_finds_nothing(monkeypatch):
 
     monkeypatch.setattr(prepare, "read_through", reads_fine)
     monkeypatch.setattr(writing, "read_through", reads_fine)
+    monkeypatch.setattr(auto_apply_api, "read_through", reads_fine)
     monkeypatch.setattr(prepare, "revise_plainly", keeps_lines)
     monkeypatch.setattr(writing, "revise_plainly", keeps_lines)
