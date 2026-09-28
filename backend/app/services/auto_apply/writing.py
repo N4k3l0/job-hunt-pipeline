@@ -15,7 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import asyncio
 import logging
 
-from app.llm.style import NOT_READ_YET, fingerprint, has_dashes, read_through, revise_plainly, writing_problems
+from app.llm.style import (
+    NOT_READ_YET, fingerprint, has_dashes, read_is_current, read_through, revise_plainly, saved_read, writing_problems,
+)
 from app.models.auto_apply import AutoApplication
 from app.models.tailoring import TailoredApplication
 from app.services.auto_apply import answers as rules
@@ -58,7 +60,7 @@ async def read_documents_through(tailored: TailoredApplication | None, *, with_c
     done = _read(tailored)
     todo = {
         name: text for name, text in _document_texts(tailored, with_cover_letter).items()
-        if (done.get(name) or {}).get("fp") != fingerprint(text)
+        if not read_is_current(done.get(name), text)
     }
     if not todo:
         return 0
@@ -71,7 +73,7 @@ async def read_documents_through(tailored: TailoredApplication | None, *, with_c
             failed += 1
             logger.warning("Couldn't read the %s through: %s", name, found)
             continue
-        done[name] = {"fp": fingerprint(text), "problems": found}
+        done[name] = {**saved_read(text, found), **({"accepted": done[name]["accepted"]} if "accepted" in (done.get(name) or {}) else {})}
     tailored.validation_notes = {**(tailored.validation_notes or {}), "read_through": done}
     return failed
 
@@ -148,7 +150,7 @@ def document_problems(tailored: TailoredApplication | None, *, with_cover_letter
             text_fp = fingerprint(texts[name])
             if read.get("accepted") == text_fp and not has_dashes(texts[name]):
                 continue  # the user said this version is fine as it is
-            if read.get("fp") != text_fp:
+            if not read_is_current(read, texts[name]):
                 found = found + [NOT_READ_YET]
             else:
                 found = _unique(found + read.get("problems", []))

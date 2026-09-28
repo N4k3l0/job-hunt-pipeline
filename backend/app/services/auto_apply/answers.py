@@ -20,7 +20,7 @@ import hashlib
 import re
 from dataclasses import dataclass, field
 
-from app.llm.style import NOT_READ_YET, fingerprint, has_dashes, writing_problems
+from app.llm.style import NOT_READ_YET, fingerprint, has_dashes, read_is_current, saved_read, writing_problems
 from app.services.jobs_filter import work_eligible_countries
 
 COUNTRY_NAMES = {
@@ -507,11 +507,11 @@ def needs_read_through(item: dict, entry: dict | None) -> bool:
     """A written answer the model hasn't read in its current words."""
     if not is_written(item, entry):
         return False
-    return (entry.get("read_through") or {}).get("fp") != fingerprint(entry["value"])
+    return not read_is_current(entry.get("read_through"), entry["value"])
 
 
 def with_read_through(entry: dict, problems: list[str]) -> dict:
-    return {**entry, "read_through": {"fp": fingerprint(entry["value"]), "problems": problems}}
+    return {**entry, "read_through": saved_read(entry["value"], problems)}
 
 
 def answer_writing_problems(item: dict, entry: dict | None) -> list[str]:

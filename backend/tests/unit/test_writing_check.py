@@ -202,16 +202,14 @@ def test_a_document_can_be_kept_as_it_is_but_never_with_dashes():
 
     import pytest
 
+    from app.llm.style import saved_read
     from app.services.auto_apply.writing import accept_document_wording, document_problems
 
     summary = "AI engineer who builds and ships LLM agents end to end."
     tailored = SimpleNamespace(
         tailored_resume_json={"tailored_summary": summary},
         cover_letter=None,
-        validation_notes={"read_through": {"resume": {
-            "fp": __import__("app.llm.style", fromlist=["fingerprint"]).fingerprint(summary),
-            "problems": ['"end to end": reads like a tagline.'],
-        }}},
+        validation_notes={"read_through": {"resume": saved_read(summary, ['"end to end": reads like a tagline.'])}},
     )
     assert document_problems(tailored, with_cover_letter=False) == {"resume": ['"end to end": reads like a tagline.']}
     accept_document_wording(tailored, "resume", with_cover_letter=False)
@@ -226,3 +224,14 @@ def test_a_document_can_be_kept_as_it_is_but_never_with_dashes():
         accept_document_wording(tailored, "resume", with_cover_letter=False)
     with pytest.raises(ValueError, match="isn't sent"):
         accept_document_wording(tailored, "cover_letter", with_cover_letter=False)
+
+
+
+def test_findings_from_an_older_reviewer_are_read_again():
+    from app.llm.style import NOT_READ_YET, READ_THROUGH_VERSION, fingerprint, read_is_current
+
+    text = "I build agents that people use every day."
+    assert read_is_current({"fp": fingerprint(text), "v": READ_THROUGH_VERSION}, text)
+    assert not read_is_current({"fp": fingerprint(text)}, text)  # saved before versions
+    assert not read_is_current({"fp": fingerprint(text), "v": READ_THROUGH_VERSION - 1}, text)
+    assert NOT_READ_YET

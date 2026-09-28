@@ -197,6 +197,19 @@ READ_THROUGH_TOOL = {
 }
 
 NOT_READ_YET = "The app hasn't read this through yet."
+# Saved findings carry this; changing how the reviewer reads (the prompt,
+# what counts) means bumping it, so everything is read again.
+READ_THROUGH_VERSION = 2
+
+
+def read_is_current(read: dict | None, text: str) -> bool:
+    """Whether saved findings are for these exact words, by today's reviewer."""
+    read = read or {}
+    return read.get("fp") == fingerprint(text) and read.get("v") == READ_THROUGH_VERSION
+
+
+def saved_read(text: str, problems: list[str]) -> dict:
+    return {"fp": fingerprint(text), "v": READ_THROUGH_VERSION, "problems": problems}
 
 
 async def read_through(text: str, *, what: str, llm=None) -> list[str]:
