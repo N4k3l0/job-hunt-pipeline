@@ -2,6 +2,7 @@
 
 import { use, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Check, CheckCircle2, Copy, ExternalLink, FileText, Loader2, Pencil, Puzzle, RefreshCw, Search,
@@ -642,6 +643,7 @@ export default function AutoApplicationPage({ params }: { params: Promise<{ id: 
   const [watchingSince, setWatchingSince] = useState<number | null>(null);
   const watching = watchingSince !== null && Date.now() - watchingSince < WATCH_MS;
   const { data: application, isLoading, error } = useAutoApplication(id, { watch: watching });
+  const router = useRouter();
   const save = useSaveAutoApplyAnswers(id);
   const { data: documents } = useApplicationDocuments(id);
   const cancel = useCancelAutoApplication(id);
@@ -729,7 +731,14 @@ export default function AutoApplicationPage({ params }: { params: Promise<{ id: 
       {
         onSuccess: () => {
           setProblemKeys([]);
-          toast.success(approve ? "Answers approved" : "Saved");
+          if (approve) {
+            toast.success("Answers approved", {
+              description: "It's under Ready to send. Press Fill in the form there when you're ready.",
+            });
+            router.push("/dashboard/applications");
+          } else {
+            toast.success("Saved");
+          }
         },
         onError: (e: Error & { detail?: { fields?: string[] } }) => {
           const fields = e.detail?.fields;
