@@ -31,6 +31,9 @@ from app.services.auto_apply.prepare import (
 )
 from app.services.job_freshness import closed_note
 from app.services.outreach.follow_up import NotSentYet, draft_follow_up
+from app.llm.style import has_dashes, writing_problems
+from app.services.auto_apply.drafting import rewrite_plainly
+from app.services.auto_apply.writing import application_document_problems
 
 router = APIRouter()
 
@@ -75,6 +78,9 @@ def serialize(application: AutoApplication, *, detail: bool) -> dict:
                 "kind": kinds[item["key"]],
                 "answer": answers.get(item["key"]),
                 "needs_attention": rules.needs_attention(item, answers.get(item["key"])),
+                # What to change so the answer reads plainly (llm/style.py).
+                "writing_problems": rules.answer_writing_problems(item, answers.get(item["key"])),
+                "wording_ok": rules.wording_accepted(answers.get(item["key"])),
             }
             for item in application.form or []
         ]
@@ -131,7 +137,9 @@ async def prepare_for_job(
 async def documents(application_id: UUID, user_id: CurrentUserId, db: DbSession):
     """The files this application will attach, for the user to look at."""
     application = await _load(db, user_id, application_id)
-    return await application_files(db, application)
+    files = await application_files(db, application)
+    files["writing_problems"] = await application_document_problems(db, application)
+    return files
 
 
 @router.get("/{application_id}")
@@ -148,6 +156,43 @@ async def save_answers(application_id: UUID, body: AnswersUpdate, user_id: Curre
         await update_answers(db, application, body.answers, approve=body.approve)
     except AnswerError as e:
         raise _answer_error(e) from e
+    return serialize(await _load(db, user_id, application_id), detail=True)
+
+
+class AnswerKey(BaseModel):
+    key: str
+
+
+def _written_answer(application: AutoApplication, key: str) -> tuple[dict, dict]:
+    item = next((f for f in application.form or [] if f["key"] == key), None)
+    entry = (application.answers or {}).get(key)
+    if item is None or not entry or not isinstance(entry.get("value"), str):
+        raise HTTPException(status_code=404, detail="That question has no written answer.")
+    return item, entry
+
+
+@router.post("/{application_id}/rewrite")
+async def rewrite_answer(application_id: UUID, body: AnswerKey, user_id: CurrentUserId, db: DbSession):
+    """A plainer version of one answer, for the user to use or not. Nothing
+    is saved until they choose it."""
+    application = await _load(db, user_id, application_id)
+    item, entry = _written_answer(application, body.key)
+    suggestion = await rewrite_plainly(item["label"], entry["value"])
+    return {"suggestion": suggestion, "writing_problems": writing_problems(suggestion)}
+
+
+@router.post("/{application_id}/keep-wording")
+async def keep_wording(application_id: UUID, body: AnswerKey, user_id: CurrentUserId, db: DbSession):
+    """The user says an answer is fine as it is, despite what the writing
+    check flagged. Long dashes still have to come out."""
+    application = await _load(db, user_id, application_id)
+    item, entry = _written_answer(application, body.key)
+    if has_dashes(entry["value"]):
+        raise HTTPException(status_code=422, detail="Take the long dashes out first. The rest can stay as it is.")
+    answers = dict(application.answers or {})
+    answers[body.key] = rules.accept_wording(entry)
+    application.answers = answers
+    await db.commit()
     return serialize(await _load(db, user_id, application_id), detail=True)
 
 

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Bell, Briefcase, ChevronDown, ChevronRight, FileText, Loader2, Send } from "lucide-react";
+import { Bell, Briefcase, ChevronDown, FileText, Loader2, Send } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -34,38 +34,51 @@ function timeAgo(iso: string | null | undefined) {
   return days < 14 ? `${days}d ago` : `${Math.round(days / 7)}w ago`;
 }
 
-/** One row for something still on its way out: an application being
- *  prepared, or a resume written for a job. */
-function ToDoRow({ href, company, title, detail, right, note }: {
-  href: string; company?: string; title?: string; detail: string; right: React.ReactNode;
-  note?: string | null;
+/** One application on the board. */
+function BoardCard({ href, company, title, detail, note, children }: {
+  href: string; company?: string; title?: string; detail?: React.ReactNode;
+  note?: string | null; children?: React.ReactNode;
 }) {
   return (
-    <Link href={href} className="ds-row" style={{ gridTemplateColumns: "minmax(0, 1fr) auto auto", alignItems: "center" }}>
-      <div className="min-w-0">
-        <div className="ds-muted truncate" style={{ fontSize: 13 }}>{company}</div>
-        <div className="truncate" style={{ fontSize: 15, fontWeight: 500 }}>{title || "Unknown role"}</div>
-        <div className="ds-dim truncate" style={{ fontSize: 12, marginTop: 2 }}>{detail}</div>
-        {note && <ClosedNote note={note} />}
-      </div>
-      <div className="flex items-center" style={{ gap: 10 }}>{right}</div>
-      <ChevronRight className="h-4 w-4 ds-dim" />
-    </Link>
+    <div className="ds-card" style={{ padding: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+      <Link href={href} className="min-w-0" style={{ textDecoration: "none", color: "inherit" }}>
+        <div className="ds-muted truncate" style={{ fontSize: 12 }}>{company}</div>
+        <div style={{
+          fontSize: 14, fontWeight: 500, lineHeight: 1.35,
+          display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden",
+        }}>
+          {title || "Unknown role"}
+        </div>
+        {detail && <div className="ds-dim" style={{ fontSize: 12, marginTop: 4, lineHeight: 1.45 }}>{detail}</div>}
+      </Link>
+      {note && <ClosedNote note={note} />}
+      {children && <div className="flex flex-wrap items-center" style={{ gap: 6 }}>{children}</div>}
+    </div>
   );
 }
 
-function Section({ title, hint, count, children }: {
-  title: string; hint?: string; count: number; children: React.ReactNode;
+/** One stage of applying, as a column. The stages sit side by side. */
+function Column({ title, hint, count, children, empty }: {
+  title: string; hint?: string; count: number; children: React.ReactNode; empty: string;
 }) {
   return (
-    <section className="space-y-2">
-      <div className="flex items-baseline justify-between" style={{ gap: 12 }}>
-        <h2 className="ds-h3">
-          {title} <span className="ds-mono ds-dim" style={{ fontSize: 13 }}>{count}</span>
-        </h2>
-        {hint && <span className="ds-dim" style={{ fontSize: 12 }}>{hint}</span>}
-      </div>
-      <div className="ds-card" style={{ overflow: "hidden" }}>{children}</div>
+    <section
+      style={{
+        scrollSnapAlign: "start", display: "flex", flexDirection: "column", gap: 8, minWidth: 0,
+        padding: 10, borderRadius: "var(--ds-r-lg)", border: "1px solid var(--ds-line)",
+        background: "var(--ds-bg-chrome)",
+      }}
+    >
+      <header style={{ padding: "2px 4px 4px" }}>
+        <div className="flex items-baseline justify-between" style={{ gap: 8 }}>
+          <h2 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>{title}</h2>
+          <span className="ds-mono ds-dim" style={{ fontSize: 12 }}>{count}</span>
+        </div>
+        {hint && <div className="ds-dim" style={{ fontSize: 12, marginTop: 2 }}>{hint}</div>}
+      </header>
+      {count === 0 ? (
+        <div className="ds-dim" style={{ fontSize: 12, padding: "8px 4px" }}>{empty}</div>
+      ) : children}
     </section>
   );
 }
@@ -123,7 +136,7 @@ const STATUS_DOT: Record<string, string> = {
 
 const DUE_COLOR = {
   due: "var(--ds-accent)",
-  past: "var(--ds-accent)",
+  past: "#f59e0b", // overdue
   soon: "var(--ds-fg-muted)",
   neutral: "var(--ds-fg-dim)",
 };
@@ -189,9 +202,13 @@ export default function ApplicationsPage() {
     );
   };
 
-  const grouped = STATUS_ORDER
-    .map((status) => ({ status, items: items.filter((t) => t.status === status) }))
-    .filter((group) => group.items.length > 0);
+  const trackedIn = (...statuses: string[]) =>
+    STATUS_ORDER.flatMap((status) => items.filter((t) => t.status === status && statuses.includes(status)));
+  const approvedToApply = trackedIn("approved");
+  const sent = trackedIn("follow_up_due", "applied");
+  const talking = trackedIn("interviewing", "offered");
+  const closed = trackedIn("rejected", "ghosted", "archived");
+  const closedCount = closed.length + stopped.length + olderResumes.length;
 
   if (isLoading || autoLoading) {
     return (
@@ -201,15 +218,104 @@ export default function ApplicationsPage() {
     );
   }
 
+  const trackedCard = (item: ApplicationTracking, status: string) => {
+    const due = relativeDate(item.follow_up_date);
+    const next = NEXT_STATUSES[status] ?? [];
+    const waiting = WAITING_STATUSES.includes(status);
+    return (
+      <BoardCard
+        key={item.id}
+        href={`/dashboard/jobs/${item.job_id}`}
+        company={item.job?.company}
+        title={item.job?.title}
+        note={waiting ? item.job?.closed_note : null}
+      >
+        <span className="ds-pill" style={{ fontSize: 11 }}>
+          <Dot status={status} />
+          {STATUS_LABELS[status] ?? status}
+        </span>
+        {due && (
+          <span
+            className="ds-mono"
+            style={{ fontSize: 12, color: DUE_COLOR[due.tone], fontWeight: due.tone === "due" || due.tone === "past" ? 600 : 400 }}
+            title={due.tone === "past" ? "Follow-up overdue" : "Follow-up date"}
+          >
+            {due.tone === "past" ? `Follow up: ${due.text}` : due.text}
+          </span>
+        )}
+        <span style={{ flex: 1 }} />
+        {status === "approved" && (
+          <button
+            type="button"
+            className="ds-btn primary sm"
+            onClick={() => changeStatus(item, "applied")}
+            title="Mark this application as applied"
+          >
+            <Send className="h-3 w-3" />
+            Mark applied
+          </button>
+        )}
+        {status !== "archived" && (
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <button type="button" className="ds-btn ghost sm" aria-label="Change status">
+                  <ChevronDown className="h-3.5 w-3.5" />
+                </button>
+              }
+            />
+            <DropdownMenuContent align="end">
+              {next.map((nextStatus) => (
+                <DropdownMenuItem key={nextStatus} onClick={() => changeStatus(item, nextStatus)}>
+                  Mark as {STATUS_LABELS[nextStatus].toLowerCase()}
+                </DropdownMenuItem>
+              ))}
+              <DropdownMenuItem onClick={() => changeStatus(item, "archived")}>Archive</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      </BoardCard>
+    );
+  };
+
+  const autoCard = (a: AutoApplication) => (
+    <BoardCard
+      key={a.id}
+      href={`/dashboard/auto-apply/${a.id}`}
+      company={a.job?.company}
+      title={a.job?.title}
+      detail={autoDetail(a)}
+      note={["failed", "unsupported", "cancelled"].includes(a.status) ? null : a.job?.closed_note}
+    >
+      <AutoApplyStatusPill status={a.status} />
+    </BoardCard>
+  );
+
+  const resumeCard = (t: TailoredApplication, detail: string, withNote: boolean) => (
+    <BoardCard
+      key={t.id}
+      href="/dashboard/review"
+      company={t.job?.company}
+      title={t.job?.title}
+      detail={detail}
+      note={withNote ? t.job?.closed_note : null}
+    >
+      <span className="ds-dim" style={{ fontSize: 12 }}>
+        <FileText className="inline h-3.5 w-3.5" style={{ verticalAlign: -2 }} /> {timeAgo(t.updated_at)}
+      </span>
+    </BoardCard>
+  );
+
+  const nothingYet = items.length === 0 && autos.length === 0 && resumes.length === 0;
+
   return (
     <div className="ds-root ds-page-fade" style={{ background: "var(--ds-bg)" }}>
-      <div className="space-y-6" style={{ maxWidth: 900, margin: "0 auto" }}>
+      <div className="space-y-6" style={{ maxWidth: 1480, margin: "0 auto" }}>
         <div className="flex flex-wrap items-end justify-between" style={{ gap: 12 }}>
           <div>
             <h1 className="ds-h1">Applications</h1>
             <p className="ds-muted" style={{ marginTop: 6, maxWidth: 620 }}>
-              Everything you&apos;re applying to: what still needs you, what&apos;s ready to send, and what
-              you&apos;ve sent.
+              Every application, from the questions that still need you to the ones you&apos;ve heard back on.
             </p>
           </div>
           {reminderCount > 0 && (
@@ -220,70 +326,7 @@ export default function ApplicationsPage() {
           )}
         </div>
 
-        {inProgress > 0 && (
-          <Section title="Needs you" hint="Answer the questions or check the resume" count={inProgress}>
-            {needsYou.map((a) => (
-              <ToDoRow
-                key={a.id}
-                href={`/dashboard/auto-apply/${a.id}`}
-                company={a.job?.company}
-                title={a.job?.title}
-                detail={autoDetail(a)}
-                right={<AutoApplyStatusPill status={a.status} />}
-                note={a.job?.closed_note}
-              />
-            ))}
-            {resumesToCheck.map((t) => (
-              <ToDoRow
-                key={t.id}
-                href="/dashboard/review"
-                company={t.job?.company}
-                title={t.job?.title}
-                detail={t.approval_status === "ready" ? "Resume and cover letter ready to check" : "Writing your resume"}
-                note={t.job?.closed_note}
-                right={<span className="ds-mono ds-dim hidden sm:inline" style={{ fontSize: 12 }}>
-                  <FileText className="inline h-3.5 w-3.5" style={{ verticalAlign: -2 }} /> {timeAgo(t.updated_at)}
-                </span>}
-              />
-            ))}
-          </Section>
-        )}
-
-        {readyToSend.length > 0 && (
-          <Section title="Ready to send" hint="Every answer is approved" count={readyToSend.length}>
-            {readyToSend.map((a) => (
-              <ToDoRow
-                key={a.id}
-                href={`/dashboard/auto-apply/${a.id}`}
-                company={a.job?.company}
-                title={a.job?.title}
-                detail={autoDetail(a)}
-                right={<AutoApplyStatusPill status={a.status} />}
-                note={a.job?.closed_note}
-              />
-            ))}
-          </Section>
-        )}
-
-        {(inProgress > 0 || readyToSend.length > 0) && items.length > 0 && (
-          <h2 className="ds-overline ds-mono ds-dim" style={{ fontSize: 12, letterSpacing: "0.08em", paddingTop: 8 }}>
-            SENT
-          </h2>
-        )}
-
-        {grouped.length > 1 && (
-          <div className="flex flex-wrap" style={{ gap: 8 }}>
-            {grouped.map(({ status, items: statusItems }) => (
-              <span key={status} className="ds-pill">
-                <Dot status={status} />
-                {STATUS_LABELS[status]}
-                <span className="ds-mono" style={{ color: "var(--ds-fg)" }}>{statusItems.length}</span>
-              </span>
-            ))}
-          </div>
-        )}
-
-        {items.length === 0 && inProgress === 0 && readyToSend.length === 0 ? (
+        {nothingYet ? (
           <div className="ds-card">
             <EmptyState
               icon={Briefcase}
@@ -292,112 +335,41 @@ export default function ApplicationsPage() {
               action={{ label: "Go to inbox", href: "/dashboard/jobs" }}
             />
           </div>
-        ) : items.length === 0 ? null : (
-          grouped.map(({ status, items: statusItems }) => (
-            <section key={status} className="space-y-2">
-              <div className="flex items-center" style={{ gap: 8 }}>
-                <Dot status={status} />
-                <h2 className="ds-h3">{STATUS_LABELS[status]}</h2>
-                <span className="ds-mono ds-dim" style={{ fontSize: 13 }}>{statusItems.length}</span>
-              </div>
-              <div className="ds-card" style={{ overflow: "hidden" }}>
-                {statusItems.map((item) => {
-                  const due = relativeDate(item.follow_up_date);
-                  const next = NEXT_STATUSES[status] ?? [];
-                  return (
-                    <div
-                      key={item.id}
-                      className="ds-row"
-                      style={{ gridTemplateColumns: "minmax(0, 1fr) auto", alignItems: "center" }}
-                    >
-                      <Link href={`/dashboard/jobs/${item.job_id}`} className="min-w-0">
-                        <div className="truncate" style={{ fontSize: 15, fontWeight: 500 }}>
-                          {item.job?.title || "Unknown role"}
-                        </div>
-                        <div className="ds-muted truncate" style={{ fontSize: 13, marginTop: 2 }}>
-                          {item.job?.company || ""}
-                        </div>
-                        {item.job?.closed_note && WAITING_STATUSES.includes(status) && (
-                          <ClosedNote note={item.job.closed_note} />
-                        )}
-                      </Link>
-                      <div className="flex items-center" style={{ gap: 8 }}>
-                        {due && (
-                          <span
-                            className="ds-mono"
-                            style={{ fontSize: 12, color: DUE_COLOR[due.tone], fontWeight: due.tone === "due" ? 600 : 400 }}
-                            title="Follow-up date"
-                          >
-                            {due.text}
-                          </span>
-                        )}
-                        {status === "approved" && (
-                          <button
-                            type="button"
-                            className="ds-btn primary sm"
-                            onClick={() => changeStatus(item, "applied")}
-                            title="Mark this application as applied"
-                          >
-                            <Send className="h-3 w-3" />
-                            Mark applied
-                          </button>
-                        )}
-                        {status !== "archived" && (
-                          <DropdownMenu>
-                            <DropdownMenuTrigger
-                              render={
-                                <button type="button" className="ds-btn ghost sm" aria-label="Change status">
-                                  <ChevronDown className="h-3.5 w-3.5" />
-                                </button>
-                              }
-                            />
-                            <DropdownMenuContent align="end">
-                              {next.map((nextStatus) => (
-                                <DropdownMenuItem key={nextStatus} onClick={() => changeStatus(item, nextStatus)}>
-                                  Mark as {STATUS_LABELS[nextStatus].toLowerCase()}
-                                </DropdownMenuItem>
-                              ))}
-                              <DropdownMenuItem onClick={() => changeStatus(item, "archived")}>Archive</DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-          ))
-        )}
+        ) : (
+          <div
+            style={{
+              display: "grid", gridAutoFlow: "column", gridAutoColumns: "minmax(260px, 1fr)",
+              gap: 12, overflowX: "auto", scrollSnapType: "x mandatory", paddingBottom: 8, alignItems: "start",
+            }}
+          >
+            <Column title="Needs you" hint="Answer the questions or check the resume" count={inProgress}
+                    empty="Nothing needs you right now.">
+              {needsYou.map(autoCard)}
+              {resumesToCheck.map((t) =>
+                resumeCard(t, t.approval_status === "ready" ? "Resume and cover letter ready to check" : "Writing your resume", true),
+              )}
+            </Column>
 
-        {(stopped.length > 0 || olderResumes.length > 0) && (
-          <details className="space-y-2">
-            <summary className="ds-dim" style={{ fontSize: 13, cursor: "pointer" }}>
-              Stopped, couldn&apos;t apply, and older resumes ({stopped.length + olderResumes.length})
-            </summary>
-            <div className="ds-card" style={{ overflow: "hidden", marginTop: 8 }}>
-              {stopped.map((a) => (
-                <ToDoRow
-                  key={a.id}
-                  href={`/dashboard/auto-apply/${a.id}`}
-                  company={a.job?.company}
-                  title={a.job?.title}
-                  detail={autoDetail(a)}
-                  right={<AutoApplyStatusPill status={a.status} />}
-                />
-              ))}
-              {olderResumes.map((t) => (
-                <ToDoRow
-                  key={t.id}
-                  href="/dashboard/review"
-                  company={t.job?.company}
-                  title={t.job?.title}
-                  detail="Resume written, never sent"
-                  right={<span className="ds-mono ds-dim" style={{ fontSize: 12 }}>{timeAgo(t.updated_at)}</span>}
-                />
-              ))}
-            </div>
-          </details>
+            <Column title="Ready to send" hint="Everything checked and approved" count={readyToSend.length + approvedToApply.length}
+                    empty="Nothing waiting to go out.">
+              {readyToSend.map(autoCard)}
+              {approvedToApply.map((item) => trackedCard(item, item.status))}
+            </Column>
+
+            <Column title="Sent" hint="Waiting to hear back" count={sent.length} empty="Nothing sent yet.">
+              {sent.map((item) => trackedCard(item, item.status))}
+            </Column>
+
+            <Column title="Interviews and offers" count={talking.length} empty="No interviews yet.">
+              {talking.map((item) => trackedCard(item, item.status))}
+            </Column>
+
+            <Column title="Closed" hint="Heard no, stopped, or put away" count={closedCount} empty="Nothing closed.">
+              {closed.map((item) => trackedCard(item, item.status))}
+              {stopped.map(autoCard)}
+              {olderResumes.map((t) => resumeCard(t, "Resume written, never sent", false))}
+            </Column>
+          </div>
         )}
       </div>
     </div>

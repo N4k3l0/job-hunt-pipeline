@@ -98,3 +98,21 @@ async def draft_answers(items: list[dict], facts_text: str, job: dict, llm=None)
         note = "Drafted from your profile" + (f": {basis}" if basis and basis.lower() != "none" else "") + ". Check it before sending."
         drafted[item["key"]] = answer(value, "drafted", note)
     return drafted
+
+
+async def rewrite_plainly(question: str, text: str, llm=None) -> str:
+    """The same answer in plain English that sounds like the person: every
+    fact and claim kept, nothing added. The user decides whether to use it."""
+    if llm is None:
+        from app.llm.client import llm_client as llm
+    from app.llm.style import STYLE_RULES
+
+    system = (
+        "You rewrite a person's answer to a job application question so it reads the way they'd say it "
+        "out loud. Keep every fact, name, number and claim. Add nothing new. Keep it first person and about "
+        "the same length. Return only the rewritten answer.\n\n" + STYLE_RULES
+    )
+    rewritten = await llm.generate(
+        "applying", system, f"Question: {question}\n\nTheir answer:\n{text}", max_tokens=1500,
+    )
+    return plain_english(rewritten.strip().strip('"'))

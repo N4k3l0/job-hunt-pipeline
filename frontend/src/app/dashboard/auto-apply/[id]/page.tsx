@@ -9,8 +9,8 @@ import {
 } from "lucide-react";
 import {
   useApplicationDocuments, useAutoApplication, useCancelAutoApplication, useDraftFollowUp,
-  useFindJobContact, useJobContact, useMarkAutoApplicationSent, usePrepareAutoApplication,
-  useSaveAutoApplyAnswers,
+  useFindJobContact, useJobContact, useKeepWording, useMarkAutoApplicationSent, usePrepareAutoApplication,
+  useRewriteAnswer, useSaveAutoApplyAnswers,
 } from "@/hooks/use-api";
 import { useExtensionInstalled } from "@/hooks/use-extension";
 import { useToast } from "@/components/ui/toast";
@@ -206,18 +206,109 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+/** What the writing check flagged in an answer, with a plainer version on
+ *  request. Everything sent has to read like the person wrote it: no long
+ *  dashes, plain simple English. */
+function WritingCheck({
+  field,
+  applicationId,
+  onUse,
+}: {
+  field: AutoApplyField;
+  applicationId: string;
+  onUse: (text: string) => void;
+}) {
+  const rewrite = useRewriteAnswer(applicationId);
+  const keep = useKeepWording(applicationId);
+  const toast = useToast();
+  const [suggestion, setSuggestion] = useState<string | null>(null);
+  const problems = field.writing_problems ?? [];
+  if (!problems.length || field.wording_ok) return null;
+  const hasDash = problems.some((p) => p.includes("long dash"));
+
+  return (
+    <div
+      style={{
+        marginTop: 10, padding: "10px 12px", fontSize: 13, lineHeight: 1.5,
+        border: "1px solid rgba(245, 158, 11, 0.35)", borderRadius: "var(--ds-r-card)",
+        background: "rgba(245, 158, 11, 0.06)",
+      }}
+    >
+      <div className="text-amber-500" style={{ fontWeight: 500 }}>Change this before it&apos;s sent</div>
+      <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+        {problems.map((p) => <li key={p}>{p}</li>)}
+      </ul>
+      <div className="flex flex-wrap" style={{ gap: 8, marginTop: 10 }}>
+        <button
+          type="button"
+          className="ds-btn sm"
+          disabled={rewrite.isPending}
+          onClick={() =>
+            rewrite.mutate(field.key, {
+              onSuccess: (r) => setSuggestion(r.suggestion),
+              onError: (e) => toast.error("Couldn't rewrite it", { description: e.message }),
+            })
+          }
+        >
+          {rewrite.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
+          Rewrite in plain English
+        </button>
+        {!hasDash && (
+          <button
+            type="button"
+            className="ds-btn ghost sm"
+            disabled={keep.isPending}
+            onClick={() =>
+              keep.mutate(field.key, {
+                onError: (e) => toast.error("Couldn't keep it", { description: e.message }),
+              })
+            }
+            title="Keep the words as they are"
+          >
+            It&apos;s fine as it is
+          </button>
+        )}
+      </div>
+      {suggestion && (
+        <div className="ds-card" style={{ marginTop: 10, padding: 12 }}>
+          <div className="ds-dim" style={{ fontSize: 12, marginBottom: 6 }}>
+            A plainer version, same facts. Use it, or keep yours and change it by hand.
+          </div>
+          <p style={{ whiteSpace: "pre-line", margin: 0 }}>{suggestion}</p>
+          <div className="flex flex-wrap" style={{ gap: 8, marginTop: 10 }}>
+            <button
+              type="button"
+              className="ds-btn primary sm"
+              onClick={() => {
+                onUse(suggestion);
+                setSuggestion(null);
+                toast.success("Using the plainer version", { description: "Save or approve to keep it." });
+              }}
+            >
+              <Check className="h-3.5 w-3.5" /> Use this
+            </button>
+            <button type="button" className="ds-btn ghost sm" onClick={() => setSuggestion(null)}>Keep mine</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Question({
   field,
   value,
   onChange,
   editable,
   highlighted,
+  applicationId,
 }: {
   field: AutoApplyField;
   value: AutoApplyValue | undefined;
   onChange: (value: AutoApplyValue) => void;
   editable: boolean;
   highlighted: boolean;
+  applicationId: string;
 }) {
   const [editing, setEditing] = useState(false);
   const showInput = editable && (field.needs_attention || editing);
@@ -264,6 +355,7 @@ function Question({
         )}
       </div>
       <AnswerMeta field={field} />
+      {editable && <WritingCheck field={field} applicationId={applicationId} onUse={(text) => onChange(text)} />}
     </div>
   );
 }
@@ -418,14 +510,18 @@ function Documents({ id }: { id: string }) {
       label: "Resume",
       note: data.tailored ? "Written for this job" : "The one on your profile",
       tailored: data.tailored,
+      problems: data.writing_problems?.resume ?? [],
     },
     data.cover_letter && {
       ...data.cover_letter,
       label: "Cover letter",
       note: "Written for this job, because the form asks for one",
       tailored: true,
+      problems: data.writing_problems?.cover_letter ?? [],
     },
-  ].filter(Boolean) as ({ url: string; filename: string; label: string; note: string; tailored: boolean })[];
+  ].filter(Boolean) as ({
+    url: string; filename: string; label: string; note: string; tailored: boolean; problems: string[];
+  })[];
 
   return (
     <Section title="What gets sent" hint="Attached to the application">
@@ -448,6 +544,11 @@ function Documents({ id }: { id: string }) {
                   )}
                 </div>
                 <div className="ds-dim truncate" style={{ fontSize: 12 }}>{file.note}</div>
+                {file.problems.length > 0 && (
+                  <div className="text-amber-500" style={{ fontSize: 12, marginTop: 4, lineHeight: 1.5 }}>
+                    Change this before it&apos;s sent: {file.problems.join(" ")}
+                  </div>
+                )}
               </div>
             </div>
             <a href={file.url} target="_blank" rel="noopener noreferrer" className="ds-btn ghost">
@@ -603,6 +704,7 @@ export default function AutoApplicationPage({ params }: { params: Promise<{ id: 
       onChange={(v) => setValue(field.key, v)}
       editable={editable}
       highlighted={problemKeys.includes(field.key)}
+      applicationId={id}
     />
   );
 
