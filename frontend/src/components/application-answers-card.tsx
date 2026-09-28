@@ -193,9 +193,13 @@ export function ApplicationAnswersPrompt() {
 
   useEffect(() => setDismissed(readDismissed()), []);
 
+  // Work rights count as answered for every country the user wants to work
+  // in except where they live, which never needs asking.
   const home = profile?.home_country;
+  const rights = profile?.visa_statuses ?? {};
+  const abroad = (profile?.preferred_countries ?? []).filter((c) => c !== home && c !== "WW");
   const answered = Boolean(
-    profile?.phone && profile?.current_location && home && (profile?.visa_statuses ?? {})[home],
+    profile?.phone && profile?.current_location && home && abroad.every((c) => rights[c]),
   );
   if (dismissed || !profile || answered) return null;
 
