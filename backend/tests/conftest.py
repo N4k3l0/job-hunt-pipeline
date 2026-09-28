@@ -40,5 +40,10 @@ def _read_through_finds_nothing(monkeypatch):
     async def reads_fine(text, *, what, llm=None):
         return []
 
+    async def keeps_lines(lines, problems, *, what, llm=None):
+        return lines
+
     monkeypatch.setattr(prepare, "read_through", reads_fine)
     monkeypatch.setattr(writing, "read_through", reads_fine)
+    monkeypatch.setattr(prepare, "revise_plainly", keeps_lines)
+    monkeypatch.setattr(writing, "revise_plainly", keeps_lines)

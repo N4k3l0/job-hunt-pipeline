@@ -513,6 +513,39 @@ async def test_preparing_takes_up_a_renamed_posting_and_writes_the_resume_again(
     assert len(tailored) == 2
 
 
+async def test_the_apps_own_drafts_are_fixed_but_the_users_words_are_not(client, monkeypatch):
+    from app.services.auto_apply import answers as rules
+    from app.services.auto_apply import prepare
+
+    async def drafter(items, facts_text, job):
+        return {"question_why": rules.answer(
+            "I spearheaded a synergy-driven payments revamp at Acme that moved the needle for everyone involved.",
+            "drafted", "Drafted from your profile.")}
+
+    async def reader(text, *, what, llm=None):
+        return ['"synergy-driven": say what it was.'] if "synergy" in text else []
+
+    async def reviser(lines, problems, *, what, llm=None):
+        return ["I led the payments rewrite at Acme, and checkout errors fell by a third after it shipped."]
+
+    monkeypatch.setattr(prepare, "draft_answers", drafter)
+    monkeypatch.setattr(prepare, "read_through", reader)
+    monkeypatch.setattr(prepare, "revise_plainly", reviser)
+
+    body = (await client.post(f"/api/v1/auto-apply/jobs/{JOB_A}")).json()
+    why = by_key(body)["question_why"]
+    assert why["answer"]["value"] == "I led the payments rewrite at Acme, and checkout errors fell by a third after it shipped."
+    assert why["answer"]["source"] == "drafted"  # still theirs to confirm
+    assert why["writing_problems"] == []
+
+    # The same words typed by the user are flagged, never changed.
+    mine = "I spearheaded a synergy-driven payments revamp at Acme that moved the needle for everyone involved."
+    r = await client.put(f"/api/v1/auto-apply/{body['id']}/answers", json={"answers": {"question_why": mine}})
+    why = by_key(r.json())["question_why"]
+    assert why["answer"]["value"] == mine
+    assert '"synergy-driven": say what it was.' in why["writing_problems"]
+
+
 async def test_unsupported_closed_and_private(client):
     r = await client.post(f"/api/v1/auto-apply/jobs/{JOB_UNSUPPORTED}")
     assert r.json()["status"] == "unsupported" and "Greenhouse" in r.json()["error"]

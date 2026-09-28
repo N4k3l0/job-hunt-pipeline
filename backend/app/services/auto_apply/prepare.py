@@ -22,7 +22,7 @@ from app.services.auto_apply.apply_links import find_apply_url, has_apply_redire
 from app.services.auto_apply.ats import detect_ats, hiring_system_name, resolve_greenhouse_board
 from app.services.auto_apply.drafting import draft_answers
 from app.services.auto_apply.forms import FormUnavailable, fetch_form, http_client
-from app.llm.style import read_through
+from app.llm.style import NOT_READ_YET, read_through, revise_plainly
 from app.services.auto_apply.writing import application_document_problems, first_document_problem
 from app.services.scoring.matching import candidate_years
 
@@ -141,10 +141,12 @@ def _job_country(job: Job) -> str | None:
     return eligible[0] if len(eligible) == 1 else None
 
 
-async def read_answers_through(application: AutoApplication, reader=None) -> int:
+async def read_answers_through(application: AutoApplication, reader=None, reviser=None, revise: bool = True) -> int:
     """Have the model read every written answer it hasn't read in its
-    current words, and keep what it found on the answer. Returns how many
-    couldn't be read (AI paused, say); those stay "not read yet"."""
+    current words, and keep what it found on the answer. Answers the app
+    drafted are then fixed and read again; the user's own words are only
+    ever changed by them. Returns how many couldn't be read (AI paused,
+    say); those stay "not read yet"."""
     reader = reader or read_through
     form = application.form or []
     answers = dict(application.answers or {})
@@ -163,7 +165,30 @@ async def read_answers_through(application: AutoApplication, reader=None) -> int
             continue
         answers[item["key"]] = rules.with_read_through(answers[item["key"]], found)
     application.answers = answers
-    return failed
+    if not revise:
+        return failed
+
+    reviser = reviser or revise_plainly
+    drafts = []
+    for item in form:
+        entry = answers.get(item["key"])
+        if (entry or {}).get("source") == "drafted":
+            problems = [p for p in rules.answer_writing_problems(item, entry) if p != NOT_READ_YET]
+            if problems:
+                drafts.append((item, entry, problems))
+    if not drafts:
+        return failed
+    revised = await asyncio.gather(
+        *(reviser([entry["value"]], problems, what=f"an answer to the question \"{item['label']}\"")
+          for item, entry, problems in drafts),
+        return_exceptions=True,
+    )
+    for (item, entry, _), new in zip(drafts, revised):
+        if isinstance(new, Exception) or new == [entry["value"]]:
+            continue
+        answers[item["key"]] = {k: v for k, v in {**entry, "value": new[0]}.items() if k != "read_through"}
+    application.answers = answers
+    return await read_answers_through(application, reader=reader, revise=False)
 
 
 def _status_for(form: list[dict], answers: dict) -> str:

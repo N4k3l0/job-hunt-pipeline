@@ -50,6 +50,7 @@ def test_unsubscribe_tokens(monkeypatch):
     token = unsubscribe_token(user)
     assert valid_unsubscribe_token(user, token)
     assert not valid_unsubscribe_token(uuid.uuid4(), token)
-    assert not valid_unsubscribe_token(user, token[:-1] + "0")
+    tampered = token[:-1] + ("1" if token.endswith("0") else "0")  # always a different token
+    assert not valid_unsubscribe_token(user, tampered)
     monkeypatch.setattr(get_settings(), "supabase_jwt_secret", "")
     assert not valid_unsubscribe_token(user, token)
