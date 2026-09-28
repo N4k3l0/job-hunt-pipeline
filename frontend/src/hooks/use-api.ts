@@ -672,6 +672,26 @@ export function useSaveAutoApplyAnswers(id: string) {
   });
 }
 
+/** A plainer version of one answer. Nothing is saved until the user uses it. */
+export function useRewriteAnswer(id: string) {
+  return useMutation({
+    mutationFn: (key: string) =>
+      api.post<{ suggestion: string; writing_problems: string[] }>(`/api/v1/auto-apply/${id}/rewrite`, { key }),
+  });
+}
+
+/** The user keeps an answer's wording despite what the writing check flagged. */
+export function useKeepWording(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (key: string) => api.post<AutoApplicationDetail>(`/api/v1/auto-apply/${id}/keep-wording`, { key }),
+    onSuccess: (data) => {
+      qc.setQueryData(["auto-apply", id], data);
+      qc.invalidateQueries({ queryKey: ["auto-apply"], exact: true });
+    },
+  });
+}
+
 export function useCancelAutoApplication(id: string) {
   const qc = useQueryClient();
   return useMutation({

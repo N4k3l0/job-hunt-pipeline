@@ -341,6 +341,93 @@ async def test_scheduler_finds_the_forms_behind_job_board_listings(client, monke
     assert r.json()["checked"] == 0
 
 
+APPROVE_REST = {"phone": "+234 800 111 2222", "question_hear": "12", "question_interviewed": "0", "question_arb": "1"}
+
+
+async def test_an_answer_with_a_long_dash_is_never_ready(client):
+    app_id = (await client.post(f"/api/v1/auto-apply/jobs/{JOB_A}")).json()["id"]
+    dashed = "I want to work at Stripe because payments matter — I built payment tools for five years."
+
+    r = await client.put(f"/api/v1/auto-apply/{app_id}/answers",
+                         json={"answers": {**APPROVE_REST, "question_why": dashed}, "approve": True})
+    assert r.status_code == 422
+    assert r.json()["detail"]["message"] == (
+        "“Why Stripe?” needs plainer wording before it can be sent. "
+        "It has a long dash. Use a comma or a full stop instead."
+    )
+    assert r.json()["detail"]["fields"] == ["question_why"]
+
+    # Saved without approving, it shows what to change, and "fine as it is" won't do for dashes.
+    r = await client.put(f"/api/v1/auto-apply/{app_id}/answers", json={"answers": {"question_why": dashed}})
+    why = by_key(r.json())["question_why"]
+    assert why["needs_attention"] and why["writing_problems"] and not why["wording_ok"]
+    r = await client.post(f"/api/v1/auto-apply/{app_id}/keep-wording", json={"key": "question_why"})
+    assert r.status_code == 422
+
+
+async def test_flagged_words_can_be_kept(client):
+    app_id = (await client.post(f"/api/v1/auto-apply/jobs/{JOB_A}")).json()["id"]
+    wordy = "I mapped the whole customer journey for our payments product and shipped it in six weeks."
+    await client.put(f"/api/v1/auto-apply/{app_id}/answers", json={"answers": {**APPROVE_REST, "question_why": wordy}})
+
+    r = await client.post(f"/api/v1/auto-apply/{app_id}/keep-wording", json={"key": "question_why"})
+    assert r.status_code == 200, r.text
+    assert by_key(r.json())["question_why"]["wording_ok"] is True
+
+    # Approving sends the same answer back; it stays accepted.
+    r = await client.put(f"/api/v1/auto-apply/{app_id}/answers",
+                         json={"answers": {"question_why": wordy}, "approve": True})
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "queued"
+
+
+async def test_a_cover_letter_that_needs_work_blocks_approval(client, monkeypatch):
+    from app.core.database import engine
+    from app.services.auto_apply import writing
+
+    app_id = (await client.post(f"/api/v1/auto-apply/jobs/{JOB_A}")).json()["id"]
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "INSERT INTO tailored_applications (id, job_id, user_id, approval_status, tailored_resume_json, cover_letter) "
+            "VALUES (gen_random_uuid(), :j, :u, 'ready', CAST(:resume AS jsonb), :letter)"
+        ), {"j": JOB_A, "u": USER, "resume": '{"tailored_summary": "I build payment tools."}',
+            "letter": "I am thrilled to leverage my skills at Stripe."})
+    monkeypatch.setattr(writing, "wants_cover_letter", lambda application: True)
+
+    r = await client.put(f"/api/v1/auto-apply/{app_id}/answers", json={
+        "answers": {**APPROVE_REST, "question_why": "I led payments work at Acme."}, "approve": True,
+    })
+    assert r.status_code == 422
+    assert r.json()["detail"]["message"].startswith("Your cover letter needs plainer wording first: ")
+
+
+async def test_rewrite_suggests_a_plainer_answer(client, monkeypatch):
+    from app.services.auto_apply import drafting
+
+    app_id = (await client.post(f"/api/v1/auto-apply/jobs/{JOB_A}")).json()["id"]
+    dashed = "I want to work at Stripe because payments matter — I built payment tools for five years."
+    await client.put(f"/api/v1/auto-apply/{app_id}/answers", json={"answers": {"question_why": dashed}})
+
+    asked = {}
+
+    class FakeLLM:
+        async def generate(self, task, system, prompt, max_tokens=0):
+            asked.update(task=task, prompt=prompt)
+            return "I want to work at Stripe because payments matter. I built payment tools for five years."
+
+    monkeypatch.setattr("app.llm.client.llm_client", FakeLLM())
+    r = await client.post(f"/api/v1/auto-apply/{app_id}/rewrite", json={"key": "question_why"})
+    assert r.status_code == 200, r.text
+    assert r.json() == {
+        "suggestion": "I want to work at Stripe because payments matter. I built payment tools for five years.",
+        "writing_problems": [],
+    }
+    assert "Why Stripe?" in asked["prompt"] and dashed in asked["prompt"]
+    # Nothing is saved until the user chooses it.
+    app = (await client.get(f"/api/v1/auto-apply/{app_id}")).json()
+    assert by_key(app)["question_why"]["answer"]["value"] == dashed
+
+
 async def test_unsupported_closed_and_private(client):
     r = await client.post(f"/api/v1/auto-apply/jobs/{JOB_UNSUPPORTED}")
     assert r.json()["status"] == "unsupported" and "Greenhouse" in r.json()["error"]

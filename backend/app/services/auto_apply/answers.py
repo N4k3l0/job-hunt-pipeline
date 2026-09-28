@@ -20,6 +20,7 @@ import hashlib
 import re
 from dataclasses import dataclass, field
 
+from app.llm.style import has_dashes, writing_problems
 from app.services.jobs_filter import work_eligible_countries
 
 COUNTRY_NAMES = {
@@ -487,7 +488,44 @@ def kinds(form: list[dict], job: JobFacts) -> dict[str, str]:
     return {item["key"]: classify(item, job) for item in form}
 
 
+# Written answers (not short facts like a name or a link) are checked like
+# everything else the application sends (llm/style.py), whoever wrote them.
+WRITTEN_TYPES = ("text", "textarea")
+MIN_WRITTEN_WORDS = 8
+
+
+def _fingerprint(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
+
+
+def answer_writing_problems(item: dict, entry: dict | None) -> list[str]:
+    value = (entry or {}).get("value")
+    if item["type"] not in WRITTEN_TYPES or not isinstance(value, str) or len(value.split()) < MIN_WRITTEN_WORDS:
+        return []
+    return writing_problems(value)
+
+
+def wording_accepted(entry: dict | None) -> bool:
+    """The user said this exact answer is fine as it is. Never for long
+    dashes: those always come out."""
+    value = (entry or {}).get("value")
+    return (
+        isinstance(value, str) and not has_dashes(value)
+        and (entry or {}).get("wording_ok") == _fingerprint(value)
+    )
+
+
+def accept_wording(entry: dict) -> dict:
+    return {**entry, "wording_ok": _fingerprint(entry["value"])}
+
+
+def writing_blocks(item: dict, entry: dict | None) -> bool:
+    return bool(answer_writing_problems(item, entry)) and not wording_accepted(entry)
+
+
 def needs_attention(item: dict, entry: dict | None) -> bool:
     if entry is None or is_empty(entry.get("value")):
         return bool(item["required"])
+    if writing_blocks(item, entry):
+        return True
     return not entry.get("confirmed")

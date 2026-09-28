@@ -99,6 +99,10 @@ export interface AutoApplyField {
   kind: string;
   answer: AutoApplyAnswer | null;
   needs_attention: boolean;
+  /** What to change so the answer reads plainly. Empty when it's fine. */
+  writing_problems?: string[];
+  /** The user said this answer is fine as it is. */
+  wording_ok?: boolean;
 }
 
 export interface AutoApplication {
@@ -129,6 +133,8 @@ export interface AutoApplyDocuments {
   /** Whether the resume was written for this job. */
   tailored: boolean;
   tailored_id: string | null;
+  /** Writing to change in the resume or cover letter before it's sent. */
+  writing_problems?: { resume?: string[]; cover_letter?: string[] };
 }
 
 /** What the extension gets to fill in the company's form. */

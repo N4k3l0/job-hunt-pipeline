@@ -21,6 +21,7 @@ from app.services.auto_apply.apply_links import find_apply_url, has_apply_redire
 from app.services.auto_apply.ats import detect_ats, hiring_system_name, resolve_greenhouse_board
 from app.services.auto_apply.drafting import draft_answers
 from app.services.auto_apply.forms import FormUnavailable, fetch_form, http_client
+from app.services.auto_apply.writing import application_document_problems, first_document_problem
 from app.services.scoring.matching import candidate_years
 
 logger = logging.getLogger(__name__)
@@ -263,6 +264,10 @@ async def prepare_application(
     if tailor:
         await _tailor_for(db, user_id, job_id)
         await db.refresh(application)  # a failed tailoring rolls back, which expires it
+    # Ready to send only when the documents read plainly too.
+    if application.status == "queued" and await application_document_problems(db, application):
+        application.status = "needs_you"
+        await db.commit()
     return application
 
 
@@ -321,14 +326,29 @@ async def update_answers(
         value = _clean_value(by_key[key], raw)
         if value is None:
             answers.pop(key, None)
-        else:
-            answers[key] = rules.answer(value, "user")
+            continue
+        previous = answers.get(key) or {}
+        answers[key] = rules.answer(value, "user")
+        # Sending back an answer unchanged keeps "fine as it is".
+        if previous.get("value") == value and rules.wording_accepted(previous):
+            answers[key] = rules.accept_wording(answers[key])
     application.answers = answers
 
     open_fields = [f for f in application.form if rules.needs_attention(f, answers.get(f["key"]))]
     if approve:
+        wording = [f for f in open_fields if rules.writing_blocks(f, answers.get(f["key"]))]
+        if wording:
+            first = wording[0]
+            problem = rules.answer_writing_problems(first, answers.get(first["key"]))[0]
+            raise AnswerError(
+                f"“{first['label']}” needs plainer wording before it can be sent. {problem}",
+                [f["key"] for f in wording],
+            )
         if open_fields:
             raise AnswerError("Answer or confirm every question before sending.", [f["key"] for f in open_fields])
+        document = first_document_problem(await application_document_problems(db, application))
+        if document:
+            raise AnswerError(f"{document} Change the wording on the Review page, then approve again.")
         application.status = "queued"
         await _remember_answers(db, application)
     elif open_fields:
