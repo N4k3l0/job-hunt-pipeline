@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CheckCircle2, Eye, Loader2, Send } from "lucide-react";
 import { useSendForMe } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/toast";
@@ -70,6 +70,38 @@ export function SendForMe({ application, compact = false }: { application: AutoA
       </button>
     </span>
   );
+}
+
+/** Says how it went when a send or practice run finishes while the page is
+ *  open. Otherwise the spinner just stops and the card looks the same. */
+export function useSendFinished(applications: AutoApplication[] | undefined) {
+  const toast = useToast();
+  const waiting = useRef<Map<string, boolean> | null>(null);
+
+  useEffect(() => {
+    if (!applications) return;
+    const before = waiting.current;
+    const now = new Map<string, boolean>();
+    for (const a of applications) {
+      if (a.sending?.waiting) {
+        now.set(a.id, a.sending.waiting.practice);
+        continue;
+      }
+      if (!before?.has(a.id)) continue;
+      const practice = before.get(a.id);
+      const outcome = practice ? a.sending?.practice : a.sending?.send;
+      const company = a.job?.company ?? "The company";
+      if (!outcome) continue;
+      if (outcome.status === "submitted") {
+        toast.success(`Sent to ${company}`, { description: outcome.message });
+      } else if (outcome.status === "dry_run") {
+        toast.success("Practice run done", { description: outcome.message });
+      } else {
+        toast.error(practice ? "The practice run stopped" : `Not sent to ${company}`, { description: outcome.message });
+      }
+    }
+    waiting.current = now;
+  }, [applications, toast]);
 }
 
 /** How the last practice run or send went, with the picture of the form. */

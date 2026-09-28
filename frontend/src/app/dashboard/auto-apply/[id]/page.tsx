@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft, Check, CheckCircle2, Copy, ExternalLink, FileText, Loader2, Pencil, RefreshCw, Search,
+  ArrowLeft, Check, CheckCircle2, ChevronDown, Copy, ExternalLink, FileText, Loader2, Pencil, RefreshCw, Search,
   Sparkles, UserSearch, Wand2,
 } from "lucide-react";
 import {
@@ -15,7 +15,7 @@ import {
   useRewriteAnswer, useSaveAutoApplyAnswers,
 } from "@/hooks/use-api";
 import { useExtensionInstalled } from "@/hooks/use-extension";
-import { SendForMe, SendOutcome } from "@/components/send-for-me";
+import { SendForMe, SendOutcome, useSendFinished } from "@/components/send-for-me";
 import { useToast } from "@/components/ui/toast";
 import { api } from "@/lib/api-client";
 import { askExtension } from "@/lib/extension";
@@ -658,6 +658,9 @@ export default function AutoApplicationPage({ params }: { params: Promise<{ id: 
   const [edited, setEdited] = useState<Set<string>>(new Set());
   const [problemKeys, setProblemKeys] = useState<string[]>([]);
   const [filling, setFilling] = useState(false);
+  const [showDone, setShowDone] = useState(false);
+  const asList = useMemo(() => (application ? [application] : undefined), [application]);
+  useSendFinished(asList);
 
   // The extension reports the form as sent; tell the user once it shows up.
   useEffect(() => {
@@ -817,6 +820,7 @@ export default function AutoApplicationPage({ params }: { params: Promise<{ id: 
   );
 
   const total = application.fields.length;
+  const doneCount = groups.filled.length + groups.voluntary.length + groups.blank.length;
   const job = application.job;
 
   return (
@@ -848,9 +852,11 @@ export default function AutoApplicationPage({ params }: { params: Promise<{ id: 
         <div className="ds-card" style={{ padding: 16, fontSize: 14, lineHeight: 1.5 }}>
           {application.status === "needs_you" && (
             <p>
-              <strong>{groups.needsYou.length} of {total}</strong> questions need you. The app filled in the rest from
-              your profile. Check the answers below and approve them, then the extension fills in the company&apos;s
-              form for you.
+              <strong>
+                {groups.needsYou.length === 1 ? "1 question needs" : `${groups.needsYou.length} questions need`} you.
+              </strong>{" "}
+              The app filled in the other {total - groups.needsYou.length} from your profile. Answer{" "}
+              {groups.needsYou.length === 1 ? "it" : "them"} below and approve. Then the app can send it for you.
             </p>
           )}
           {(application.status === "queued" || application.status === "submitting") && (
@@ -945,20 +951,31 @@ export default function AutoApplicationPage({ params }: { params: Promise<{ id: 
             {groups.needsYou.map(renderQuestion)}
           </Section>
         )}
-        {groups.filled.length > 0 && (
-          <Section title="Filled in for you" hint="Change anything that's wrong">
-            {groups.filled.map(renderQuestion)}
-          </Section>
-        )}
-        {groups.voluntary.length > 0 && (
-          <Section title="Voluntary questions" hint="Declined where the form allows it">
-            {groups.voluntary.map(renderQuestion)}
-          </Section>
-        )}
-        {groups.blank.length > 0 && (
-          <Section title="Optional, left blank">
-            {groups.blank.map(renderQuestion)}
-          </Section>
+        {/* While something needs the user, the questions already done are
+            folded away, so the page shows only what's left to do. */}
+        {groups.needsYou.length > 0 && !showDone && doneCount > 0 ? (
+          <button type="button" className="ds-btn ghost" onClick={() => setShowDone(true)} style={{ width: "fit-content" }}>
+            <ChevronDown className="h-4 w-4" />
+            Show the other {doneCount} {doneCount === 1 ? "question" : "questions"}. {doneCount === 1 ? "It's" : "They're"} already done.
+          </button>
+        ) : (
+          <>
+            {groups.filled.length > 0 && (
+              <Section title="Filled in for you" hint="Change anything that's wrong">
+                {groups.filled.map(renderQuestion)}
+              </Section>
+            )}
+            {groups.voluntary.length > 0 && (
+              <Section title="Voluntary questions" hint="Declined where the form allows it">
+                {groups.voluntary.map(renderQuestion)}
+              </Section>
+            )}
+            {groups.blank.length > 0 && (
+              <Section title="Optional, left blank">
+                {groups.blank.map(renderQuestion)}
+              </Section>
+            )}
+          </>
         )}
 
         {editable && (

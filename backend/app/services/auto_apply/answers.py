@@ -427,7 +427,7 @@ def fill_answers(
         if result is None and kind == "marketing":
             value = yes_no(item, False)
             if value is not None:
-                result = answer(value, "default", "Declined messages that aren't about this application.")
+                result = answer(value, "default", "Said no for you. It's optional and doesn't change your application.")
 
         if result is None and kind == "preferred_name" and item["required"] and facts.full_name:
             result = answer(facts.full_name.split()[0], "suggested")
