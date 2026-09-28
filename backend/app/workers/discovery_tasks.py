@@ -427,8 +427,8 @@ async def _run_arbeitnow_async():
 
 async def _run_jsearch_async():
     """JSearch is RapidAPI-rate-limited (free tier ~150 req/month).
-    Use top 5 user roles only so the daily run stays inside budget
-    (5 queries × 30 days = 150/month — at the wire). Skip if no users
+    Use top 5 user roles only, one page each, so the daily run stays inside
+    budget (5 queries × 30 days = 150/month, at the wire). Skip if no users
     have roles set."""
     from app.services.discovery.jsearch_service import fetch_jobs
 
