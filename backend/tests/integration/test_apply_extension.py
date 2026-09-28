@@ -243,3 +243,102 @@ async def test_a_follow_up_is_written_only_after_the_application_is_sent(client,
     body = (await client.get(f"/api/v1/auto-apply/{app_id}")).json()
     assert body["follow_up"]["message"] == message
     assert "Product Manager" in prompts[0] and "Stripe" in prompts[0]
+
+
+async def _approved(client) -> str:
+    app_id = (await client.post(f"/api/v1/auto-apply/jobs/{JOB}")).json()["id"]
+    r = await client.put(f"/api/v1/auto-apply/{app_id}/answers", json={"answers": {"question_hear": "12"}, "approve": True})
+    assert r.json()["status"] == "queued", r.text
+    return app_id
+
+
+def _fake_browser(monkeypatch, status: str):
+    """The sender's browser, without a browser: says what the form did."""
+    from app.services.auto_apply import sender
+
+    runs = []
+
+    async def run_form(payload, *, dry_run):
+        runs.append(dry_run)
+        return {"filled": 3, "not_filled": [], "url": payload["form_url"], "status": "dry_run" if dry_run else status}, b"png"
+
+    async def keep(application, what, content):
+        return f"applications/{application.user_id}/{application.id}-{what}.png"
+
+    monkeypatch.setattr(sender, "_run_form", run_form)
+    monkeypatch.setattr(sender, "_keep_screenshot", keep)
+    return runs
+
+
+async def test_send_it_for_me_practises_then_sends(client, monkeypatch):
+    from app.services.auto_apply.sender import run_requested
+
+    runs = _fake_browser(monkeypatch, "submitted")
+    app_id = await _approved(client)
+
+    # A practice run: filled in, nothing sent, a picture of the form kept.
+    r = await client.post(f"/api/v1/auto-apply/{app_id}/send", json={"practice": True})
+    assert r.status_code == 200, r.text
+    assert r.json()["sending"]["waiting"]["practice"] is True
+    assert (await client.post(f"/api/v1/auto-apply/{app_id}/send", json={})).status_code == 409  # already waiting
+
+    await run_requested()
+    body = (await client.get(f"/api/v1/auto-apply/{app_id}")).json()
+    assert body["status"] == "queued"
+    assert body["sending"]["waiting"] is None
+    assert body["sending"]["practice"]["status"] == "dry_run"
+    assert body["sending"]["practice"]["message"].startswith("Practice run done.")
+    assert body["sending"]["practice"]["has_screenshot"] is True
+    assert await _tracking(JOB) == []
+
+    # Then the real one.
+    await client.post(f"/api/v1/auto-apply/{app_id}/send", json={})
+    await run_requested()
+    body = (await client.get(f"/api/v1/auto-apply/{app_id}")).json()
+    assert body["status"] == "submitted"
+    assert body["sending"]["send"]["message"] == "Sent. The company's form confirmed it."
+    assert await _tracking(JOB) == ["applied"]
+    assert runs == [True, False]
+
+
+async def test_a_form_that_asks_for_a_person_goes_back_to_ready(client, monkeypatch):
+    from app.services.auto_apply.sender import run_requested
+
+    _fake_browser(monkeypatch, "human_check")
+    app_id = await _approved(client)
+    await client.post(f"/api/v1/auto-apply/{app_id}/send", json={})
+    await run_requested()
+
+    body = (await client.get(f"/api/v1/auto-apply/{app_id}")).json()
+    assert body["status"] == "queued"  # still approved, to send another way
+    assert body["error"].startswith("The form asked to check you're a person.")
+    assert body["sending"]["send"]["status"] == "human_check"
+    assert await _tracking(JOB) == []
+
+
+async def test_a_send_that_stopped_halfway_is_let_go(client, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    from app.core.database import engine
+    from app.services.auto_apply.sender import STOPPED_MESSAGE, run_requested
+
+    _fake_browser(monkeypatch, "submitted")
+    app_id = await _approved(client)
+    started = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "UPDATE auto_applications SET status = 'submitting', "
+            "result = jsonb_build_object('running', jsonb_build_object('practice', false, 'started', CAST(:s AS text))) "
+            "WHERE id = :id"
+        ), {"id": app_id, "s": started})
+
+    assert await run_requested() == []
+    body = (await client.get(f"/api/v1/auto-apply/{app_id}")).json()
+    assert body["status"] == "queued" and body["error"] == STOPPED_MESSAGE
+    assert body["sending"]["waiting"] is None
+
+
+async def test_sending_needs_approved_answers(client):
+    app_id = (await client.post(f"/api/v1/auto-apply/jobs/{JOB}")).json()["id"]
+    r = await client.post(f"/api/v1/auto-apply/{app_id}/send", json={"practice": True})
+    assert r.status_code == 409 and r.json()["detail"] == "Approve the answers first."

@@ -115,9 +115,86 @@ async def _human_check_showing(page) -> bool:
     )
 
 
-async def send_application(application_id: uuid.UUID, *, dry_run: bool) -> dict:
+# What each outcome means for the user, in plain words.
+OUTCOME_MESSAGES = {
+    "submitted": "Sent. The company's form confirmed it.",
+    "dry_run": "Practice run done. Everything was filled in, and nothing was sent.",
+    "incomplete": "Some questions couldn't be filled in, so nothing was sent.",
+    "no_submit_button": "The app couldn't find the form's Submit button, so nothing was sent.",
+    "human_check": (
+        "The form asked to check you're a person. The app doesn't get around that, so it stopped. "
+        "Send this one with the extension, or by hand."
+    ),
+    "no_confirmation": (
+        "The app pressed Submit but didn't see a confirmation. Check your email for one from the "
+        "company before sending it again."
+    ),
+    "error": "Something went wrong while filling in the form, so nothing was sent.",
+}
+
+
+async def _run_form(payload: dict, *, dry_run: bool) -> tuple[dict, bytes | None]:
+    """Open the form, fill it in and (unless dry_run) submit it. Returns
+    what happened and a screenshot of the page at the end."""
     from playwright.async_api import async_playwright
 
+    async with async_playwright() as playwright:
+        browser = await playwright.chromium.launch()
+        context = await browser.new_context(viewport={"width": 1280, "height": 1600})
+        page = await context.new_page()
+        try:
+            files = {
+                "resume": await _attachment(payload.get("resume")),
+                "coverLetter": await _attachment(payload.get("cover_letter")),
+            }
+            logger.info("Opening %s", payload["form_url"])
+            await page.goto(payload["form_url"], wait_until="domcontentloaded", timeout=60_000)
+            filled = await _fill(page, payload, files)
+            missing = [item for item in filled["items"] if item["status"] == "todo"]
+            logger.info("Filled in %d answers; %d need a person", filled["filled"], len(missing))
+            for item in missing:
+                logger.info("  not filled in: %s (%s)", item["label"][:70], item["note"])
+            outcome = {"filled": filled["filled"], "not_filled": missing, "url": page.url}
+
+            if missing:
+                outcome["status"] = "incomplete"
+            elif dry_run:
+                outcome["status"] = "dry_run"
+            else:
+                button, label = await _submit_button(page)
+                if button is None:
+                    outcome["status"] = "no_submit_button"
+                else:
+                    logger.info("Pressing %r", label)
+                    await button.click()
+                    outcome["status"] = await _watch_after_submit(page)
+                    outcome["url"] = page.url
+            screenshot = await page.screenshot(full_page=True)
+        finally:
+            await context.close()
+            await browser.close()
+    return outcome, screenshot
+
+
+async def _keep_screenshot(application: AutoApplication, what: str, content: bytes | None) -> str | None:
+    if not content:
+        return None
+    from app.services.storage import upload_file
+
+    path = f"applications/{application.user_id}/{application.id}-{what}.png"
+    try:
+        await upload_file("resumes", path, content, "image/png")
+        return path
+    except Exception as e:  # noqa: BLE001 — the outcome still counts without its picture
+        logger.warning("Couldn't keep the screenshot for %s: %s", application.id, e)
+        return None
+
+
+async def send_application(application_id: uuid.UUID, *, dry_run: bool, claimed: bool = False) -> dict:
+    """Fill in (and unless dry_run, send) one approved application, and
+    record what happened on it: `result["practice"]` for a practice run,
+    `result["send"]` for a real one. `claimed` is for requests from the app,
+    already marked as being sent."""
     session = create_worker_session()
     async with session() as db:
         application = await db.get(AutoApplication, application_id)
@@ -125,58 +202,104 @@ async def send_application(application_id: uuid.UUID, *, dry_run: bool) -> dict:
             raise SendRefused("No such application")
         if application.status == "submitted":
             raise SendRefused("This application was already sent")
-        if application.status != "queued":
+        expected = "submitting" if claimed and not dry_run else "queued"
+        if application.status != expected:
             raise SendRefused(f"The answers aren't approved yet (status: {application.status})")
         payload = await fill_details(db, application)
         if not payload.get("form_url"):
             raise SendRefused("This application has no form to fill in")
 
-        async with async_playwright() as playwright:
-            browser = await playwright.chromium.launch()
-            context = await browser.new_context(viewport={"width": 1280, "height": 1600})
-            page = await context.new_page()
-            try:
-                files = {
-                    "resume": await _attachment(payload.get("resume")),
-                    "coverLetter": await _attachment(payload.get("cover_letter")),
-                }
-                logger.info("Opening %s", payload["form_url"])
-                await page.goto(payload["form_url"], wait_until="domcontentloaded", timeout=60_000)
-                filled = await _fill(page, payload, files)
-                missing = [item for item in filled["items"] if item["status"] == "todo"]
-                logger.info("Filled in %d answers; %d need a person", filled["filled"], len(missing))
-                for item in missing:
-                    logger.info("  not filled in: %s — %s", item["label"][:70], item["note"])
-                outcome = {"filled": filled["filled"], "not_filled": missing, "url": page.url,
-                           "at": datetime.now(timezone.utc).isoformat()}
+        try:
+            outcome, screenshot = await _run_form(payload, dry_run=dry_run)
+        except Exception as e:  # noqa: BLE001 — recorded for the user, never left half-sent
+            logger.exception("Filling in the form failed for %s", application_id)
+            outcome, screenshot = {"status": "error", "detail": f"{type(e).__name__}: {e}"[:300]}, None
 
-                if missing:
-                    outcome["status"] = "incomplete"
-                elif dry_run:
-                    outcome["status"] = "dry_run"
-                else:
-                    button, label = await _submit_button(page)
-                    if button is None:
-                        outcome["status"] = "no_submit_button"
-                    else:
-                        logger.info("Pressing %r", label)
-                        await button.click()
-                        outcome["status"] = await _watch_after_submit(page)
-                        outcome["url"] = page.url
+        what = "practice" if dry_run else "send"
+        outcome["at"] = datetime.now(timezone.utc).isoformat()
+        outcome["message"] = OUTCOME_MESSAGES.get(outcome["status"], outcome["status"])
+        outcome["screenshot"] = await _keep_screenshot(application, what, screenshot)
+        result = {k: v for k, v in (application.result or {}).items() if k not in ("request", "running")}
+        result[what] = outcome
+        application.result = result
 
-                path = Path(os.environ.get("SENDER_SCREENSHOT_DIR", "/tmp")) / f"sender-{application_id}.png"
-                await page.screenshot(path=str(path), full_page=True)
-                logger.info("Screenshot: %s", path)
-            finally:
-                await context.close()
-                await browser.close()
-
-        application.result = outcome
         if outcome["status"] == "submitted":
+            application.error = None
             await mark_sent(db, application)
         else:
+            if not dry_run:
+                application.status = "queued"  # still approved; the user can try another way
+                application.error = outcome["message"]
             await db.commit()
     return outcome
+
+
+STALE_RUN_MINUTES = 20
+STOPPED_MESSAGE = (
+    "The last try stopped before it finished. Check your email for a confirmation from the company "
+    "before sending it again."
+)
+
+
+def _without_run(result: dict | None) -> dict:
+    return {k: v for k, v in (result or {}).items() if k not in ("request", "running")}
+
+
+async def run_requested(limit: int = 3, send=None, now: datetime | None = None) -> list[dict]:
+    """Send (or practise) the applications the user asked the app to send,
+    oldest request first. Each is claimed before it runs (its request moves
+    to "running"), so a run that overlaps another never takes it twice. A
+    run that stopped halfway is let go after STALE_RUN_MINUTES."""
+    from datetime import timedelta
+
+    from sqlalchemy import select
+
+    send = send or send_application
+    now = now or datetime.now(timezone.utc)
+    session = create_worker_session()
+    async with session() as db:
+        running = (await db.execute(
+            select(AutoApplication).where(AutoApplication.result.has_key("running"))
+        )).scalars().all()
+        for application in running:
+            started = datetime.fromisoformat(application.result["running"].get("started") or now.isoformat())
+            if started < now - timedelta(minutes=STALE_RUN_MINUTES):
+                application.result = _without_run(application.result)
+                if application.status == "submitting":
+                    application.status = "queued"
+                    application.error = STOPPED_MESSAGE
+        await db.commit()
+
+        pending = (await db.execute(
+            select(AutoApplication)
+            .where(AutoApplication.status == "queued", AutoApplication.result.has_key("request"))
+            .order_by(AutoApplication.updated_at)
+            .limit(limit)
+        )).scalars().all()
+        claimed = []
+        for application in pending:
+            request = (application.result or {}).get("request") or {}
+            practice = bool(request.get("practice"))
+            if not practice:
+                application.status = "submitting"
+            application.result = {**_without_run(application.result), "running": {**request, "started": now.isoformat()}}
+            claimed.append((application.id, practice))
+        await db.commit()
+
+    outcomes = []
+    for application_id, practice in claimed:
+        try:
+            outcomes.append(await send(application_id, dry_run=practice, claimed=True))
+        except SendRefused as e:
+            logger.info("Not sending %s: %s", application_id, e)
+            async with session() as db:
+                application = await db.get(AutoApplication, application_id)
+                if application is not None:
+                    application.result = _without_run(application.result)
+                    if application.status == "submitting":
+                        application.status = "queued"
+                    await db.commit()
+    return outcomes
 
 
 async def _watch_after_submit(page) -> str:
@@ -198,7 +321,10 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true", default=os.environ.get("SEND_DRY_RUN") == "true")
     args = parser.parse_args()
     if not args.application_id:
-        logger.info("Nothing to send: no application id. Set SEND_APPLICATION_ID to send one.")
+        # Every few minutes on a schedule: send what users asked to send.
+        outcomes = asyncio.run(run_requested())
+        logger.info("Sent or practised %d requested applications: %s", len(outcomes),
+                    [o.get("status") for o in outcomes] or "none waiting")
         return
     try:
         outcome = asyncio.run(send_application(uuid.UUID(args.application_id), dry_run=args.dry_run))

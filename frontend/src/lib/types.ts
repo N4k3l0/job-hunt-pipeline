@@ -117,6 +117,25 @@ export interface AutoApplication {
   submitted_at: string | null;
   created_at: string | null;
   updated_at: string | null;
+  /** Where "Send it for me" stands. */
+  sending?: AutoApplySending;
+}
+
+/** How one run of the app's own browser went. */
+export interface AutoApplySendOutcome {
+  status: string;
+  message: string;
+  filled: number | null;
+  not_filled: string[];
+  at: string | null;
+  has_screenshot: boolean;
+}
+
+export interface AutoApplySending {
+  /** Asked for and not finished yet; `running` once the browser has started. */
+  waiting: { practice: boolean; since: string | null; running: boolean } | null;
+  practice: AutoApplySendOutcome | null;
+  send: AutoApplySendOutcome | null;
 }
 
 export interface AutoApplicationDetail extends AutoApplication {

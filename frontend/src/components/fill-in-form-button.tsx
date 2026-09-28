@@ -12,15 +12,19 @@ import type { AutoApplyFill } from "@/lib/types";
 
 /** Opens the company's form with the approved answers filled in, through
  *  the Chrome extension. The user looks it over and presses Submit there. */
-export function FillInFormButton({ applicationId, onOpened }: {
+export function FillInFormButton({ applicationId, onOpened, onlyIfInstalled = false, quiet = false }: {
   applicationId: string;
   onOpened?: () => void;
+  /** Show nothing rather than "Add the extension" when it isn't installed. */
+  onlyIfInstalled?: boolean;
+  quiet?: boolean;
 }) {
   const installed = useExtensionInstalled();
   const toast = useToast();
   const qc = useQueryClient();
   const [filling, setFilling] = useState(false);
 
+  if (onlyIfInstalled && installed !== true) return null;
   if (installed === false) {
     return (
       <Link href="/dashboard/extension" className="ds-btn sm">
@@ -51,7 +55,7 @@ export function FillInFormButton({ applicationId, onOpened }: {
   return (
     <button
       type="button"
-      className="ds-btn primary sm"
+      className={quiet ? "ds-btn ghost sm" : "ds-btn primary sm"}
       onClick={(e) => {
         e.preventDefault();
         fill();
@@ -59,7 +63,7 @@ export function FillInFormButton({ applicationId, onOpened }: {
       disabled={filling || installed === null}
     >
       {filling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
-      Fill in the form
+      {quiet ? "Use the extension" : "Fill in the form"}
     </button>
   );
 }

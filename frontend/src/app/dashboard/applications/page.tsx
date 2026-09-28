@@ -11,6 +11,7 @@ import {
 import { AutoApplyStatusPill } from "@/components/auto-apply-status";
 import { ClosedNote } from "@/components/closed-note";
 import { FillInFormButton } from "@/components/fill-in-form-button";
+import { SendForMe } from "@/components/send-for-me";
 import { useToast } from "@/components/ui/toast";
 import { EmptyState } from "@/components/ui/empty-state";
 import type { ApplicationTracking, AutoApplication, TailoredApplication } from "@/lib/types";
@@ -90,7 +91,7 @@ function Column({ title, hint, count, children }: {
 function autoDetail(a: AutoApplication) {
   if (a.status === "needs_you") return `${a.open_count} ${a.open_count === 1 ? "question needs" : "questions need"} you`;
   if (a.status === "preparing") return "Reading the form and filling in your answers";
-  if (a.status === "queued") return "Answers approved. Fill in the form and send it.";
+  if (a.status === "queued") return a.error ?? "Everything's approved. Send it when you're ready.";
   return a.error ?? "";
 }
 
@@ -292,10 +293,11 @@ export default function ApplicationsPage() {
       note={["failed", "unsupported", "cancelled"].includes(a.status) ? null : a.job?.closed_note}
     >
       <AutoApplyStatusPill status={a.status} />
-      {a.status === "queued" && (
+      {(a.status === "queued" || a.sending?.waiting) && (
         <>
           <span style={{ flex: 1 }} />
-          <FillInFormButton applicationId={a.id} />
+          <SendForMe application={a} compact />
+          {!a.sending?.waiting && <FillInFormButton applicationId={a.id} onlyIfInstalled quiet />}
         </>
       )}
     </BoardCard>
