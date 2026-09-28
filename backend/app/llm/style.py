@@ -6,6 +6,7 @@ model still slips on, mainly em dashes.
 """
 
 import hashlib
+import json
 import logging
 import re
 
@@ -205,9 +206,58 @@ async def read_through(text: str, *, what: str, llm=None) -> list[str]:
         "review", READ_THROUGH_SYSTEM, f"This is {what}:\n\n{text}",
         tools=[READ_THROUGH_TOOL], max_tokens=1200,
     )
+    return _problems_from(result.get("problems"))
+
+
+def _problems_from(raw) -> list[str]:
+    """The model's findings as sentences. It usually sends quote and fix
+    pairs, but sometimes plain strings, or the list as a JSON string."""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            raw = [raw]
     problems = []
-    for item in (result.get("problems") or [])[:8]:
-        quote, fix = (item.get("quote") or "").strip(), plain_english((item.get("fix") or "").strip())
-        if quote and fix:
-            problems.append(f"\"{quote}\": {fix}")
+    for item in (raw if isinstance(raw, list) else [])[:8]:
+        if isinstance(item, dict):
+            quote, fix = (item.get("quote") or "").strip(), plain_english((item.get("fix") or "").strip())
+            if quote and fix:
+                problems.append(f"\"{quote}\": {fix}")
+        elif isinstance(item, str) and item.strip():
+            problems.append(plain_english(item.strip()))
     return problems
+
+
+REVISE_TOOL = {
+    "name": "record_revision",
+    "description": "Record the revised lines, the same number as given, in the same order.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"lines": {"type": "array", "items": {"type": "string"}}},
+        "required": ["lines"],
+    },
+}
+
+
+async def revise_plainly(lines: list[str], problems: list[str], *, what: str, llm=None) -> list[str]:
+    """The lines rewritten to fix what the read-through found: every fact,
+    name and number kept, nothing added, the same number of lines. Lines
+    come back unchanged if the model's answer doesn't fit."""
+    if not problems or not lines:
+        return lines
+    if llm is None:
+        from app.llm.client import llm_client as llm
+    numbered = "\n".join(f"{i + 1}. {line}" for i, line in enumerate(lines))
+    listed = "\n".join(f"- {p}" for p in problems)
+    prompt = (
+        f"This is {what}, one numbered line each:\n\n{numbered}\n\n"
+        f"A careful reader wants these changed:\n{listed}\n\n"
+        "Rewrite the lines to fix them, so they sound like the person talking. Keep every fact, name and "
+        "number, and add nothing new. Lines with nothing to fix stay exactly as they are. Return the same "
+        f"number of lines ({len(lines)}), in the same order, without the numbers."
+    )
+    result = await llm.generate_structured("review", STYLE_RULES, prompt, tools=[REVISE_TOOL], max_tokens=3000)
+    revised = result.get("lines")
+    if not isinstance(revised, list) or len(revised) != len(lines) or not all(isinstance(x, str) for x in revised):
+        return lines
+    return [plain_english(re.sub(r"^\s*\d+\.\s+", "", x).strip()) or old for x, old in zip(revised, lines)]

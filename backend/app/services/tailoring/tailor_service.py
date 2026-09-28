@@ -383,11 +383,12 @@ async def generate_tailored_application(
         db.add(application)
     await db.flush()
 
-    # Read the documents through now, so the writing check has its answer
-    # ready when they're looked at or sent (services/auto_apply/writing.py).
-    from app.services.auto_apply.writing import read_documents_through
+    # Read the documents through, fix what was found and read them again,
+    # so they reach the user already reading plainly and the writing check
+    # has its answer ready (services/auto_apply/writing.py).
+    from app.services.auto_apply.writing import make_documents_plain
     try:
-        await read_documents_through(application, with_cover_letter=True)
+        await make_documents_plain(application, with_cover_letter=True)
         await db.flush()
     except Exception as e:  # noqa: BLE001 — read again before anything is sent
         logger.warning("Couldn't read the documents for job %s through: %s", job_id, e)

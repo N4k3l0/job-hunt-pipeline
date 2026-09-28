@@ -128,3 +128,61 @@ async def test_documents_are_read_through_once_per_version():
 
     tailored.cover_letter = "Hi, I build agents people use every day."
     assert document_problems(tailored, with_cover_letter=True) == {"cover_letter": [NOT_READ_YET]}
+
+
+def test_findings_come_back_in_whatever_shape_the_model_sends():
+    from app.llm.style import _problems_from
+
+    assert _problems_from([{"quote": "load-bearing step", "fix": "Say each step."}]) == ['"load-bearing step": Say each step.']
+    assert _problems_from(["Split the second sentence."]) == ["Split the second sentence."]
+    assert _problems_from('[{"quote": "synergy", "fix": "Cut it."}]') == ['"synergy": Cut it.']
+    assert _problems_from(None) == [] and _problems_from([{"quote": "", "fix": "x"}]) == []
+
+
+async def test_revise_keeps_the_lines_when_the_answer_doesnt_fit():
+    from app.llm.style import revise_plainly
+
+    class Model:
+        def __init__(self, lines):
+            self.lines = lines
+
+        async def generate_structured(self, task, system, prompt, tools, max_tokens=0):
+            assert task == "review" and "Keep every fact" in prompt
+            return {"lines": self.lines}
+
+    lines = ["I tuned cost at each load-bearing step.", "I built a bot."]
+    assert await revise_plainly(lines, ['"load-bearing step": say each step'], what="a resume",
+                                llm=Model(["1. I tuned the cost of each step.", "I built a bot."])) == [
+        "I tuned the cost of each step.", "I built a bot.",
+    ]
+    assert await revise_plainly(lines, ["x"], what="a resume", llm=Model(["only one line"])) == lines
+    assert await revise_plainly(lines, [], what="a resume", llm=Model([])) == lines
+
+
+async def test_documents_are_fixed_before_anyone_sees_them():
+    from types import SimpleNamespace
+
+    from app.services.auto_apply.writing import document_problems, make_documents_plain
+
+    tailored = SimpleNamespace(
+        tailored_resume_json={
+            "tailored_summary": "Engineer tuning cost at each load-bearing step in the agent chain.",
+            "selected_experience": [{"bullets": ["Built a voice bot for a gym that books classes."]}],
+        },
+        tailored_summary="Engineer tuning cost at each load-bearing step in the agent chain.",
+        cover_letter=None,
+        validation_notes=None,
+    )
+
+    async def reader(text, *, what):
+        return ['"load-bearing step": say each step.'] if "load-bearing" in text else []
+
+    async def reviser(lines, problems, *, what):
+        return [line.replace("at each load-bearing step in the agent chain", "at each step") for line in lines]
+
+    assert await make_documents_plain(tailored, with_cover_letter=False, reader=reader, reviser=reviser) == 0
+    assert tailored.tailored_summary == "Engineer tuning cost at each step."
+    assert tailored.tailored_resume_json["selected_experience"][0]["bullets"] == [
+        "Built a voice bot for a gym that books classes.",
+    ]
+    assert document_problems(tailored, with_cover_letter=False) == {}

@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import asyncio
 import logging
 
-from app.llm.style import NOT_READ_YET, fingerprint, read_through, writing_problems
+from app.llm.style import NOT_READ_YET, fingerprint, read_through, revise_plainly, writing_problems
 from app.models.auto_apply import AutoApplication
 from app.models.tailoring import TailoredApplication
 from app.services.auto_apply import answers as rules
@@ -78,6 +78,57 @@ async def read_documents_through(tailored: TailoredApplication | None, *, with_c
 
 def _unique(problems) -> list[str]:
     return list(dict.fromkeys(problems))
+
+
+async def make_documents_plain(
+    tailored: TailoredApplication | None, *, with_cover_letter: bool = True, reader=None, reviser=None,
+) -> int:
+    """Read the documents through, fix what was found (same facts, nothing
+    added), and read them again, so what reaches the user already reads
+    plainly and only what's left is flagged. Returns how many couldn't be
+    read. The caller commits."""
+    if tailored is None:
+        return 0
+    reviser = reviser or revise_plainly
+    failed = await read_documents_through(tailored, with_cover_letter=with_cover_letter, reader=reader)
+    found = document_problems(tailored, with_cover_letter=with_cover_letter)
+    changed = False
+
+    resume_problems = [p for p in found.get("resume", []) if p != NOT_READ_YET]
+    if resume_problems:
+        resume = dict(tailored.tailored_resume_json or {})
+        roles = [dict(role) for role in resume.get("selected_experience") or []]
+        lines = [resume.get("tailored_summary") or ""] + [b for role in roles for b in role.get("bullets") or []]
+        try:
+            revised = await reviser(lines, resume_problems, what="a resume summary followed by its bullet points")
+        except Exception as e:  # noqa: BLE001 — the problems stay flagged for the user
+            logger.warning("Couldn't revise the resume: %s", e)
+            revised = lines
+        if revised != lines:
+            summary, bullets = revised[0], revised[1:]
+            for role in roles:
+                count = len(role.get("bullets") or [])
+                role["bullets"], bullets = bullets[:count], bullets[count:]
+            resume.update(tailored_summary=summary, selected_experience=roles)
+            tailored.tailored_resume_json = resume
+            tailored.tailored_summary = summary
+            changed = True
+
+    letter_problems = [p for p in found.get("cover_letter", []) if p != NOT_READ_YET]
+    if letter_problems and tailored.cover_letter:
+        paragraphs = tailored.cover_letter.split("\n\n")
+        try:
+            revised = await reviser(paragraphs, letter_problems, what="a cover letter, one paragraph per line")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Couldn't revise the cover letter: %s", e)
+            revised = paragraphs
+        if revised != paragraphs:
+            tailored.cover_letter = "\n\n".join(revised)
+            changed = True
+
+    if changed:
+        failed = await read_documents_through(tailored, with_cover_letter=with_cover_letter, reader=reader)
+    return failed
 
 
 def document_problems(tailored: TailoredApplication | None, *, with_cover_letter: bool) -> dict[str, list[str]]:
