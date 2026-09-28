@@ -107,6 +107,7 @@ Keep a single head: `alembic heads` should print one revision.
 - Preparing an application takes up the live posting (Greenhouse sends it with the form): a changed title or description updates the job, rescores it, marks it for the job reader again, and writes the resume and cover letter again (`_take_up_posting` in `prepare.py`)
 - All generated content validated against candidate's structured profile before showing to user
 - Track token usage per call for cost management
+- Startup: `app/core/warmup.py` runs in the app's lifespan before Uvicorn opens the port (Railway waits for `/health`): loads every module, opens the database pool's connections, fetches the login keys, draws a PDF and creates the AI client, each step timed and allowed to fail. Without it the first page after a deploy waited ~27s per request. Token checks run in a thread (`deps.get_current_user`): PyJWKClient fetches keys with a blocking call
 - Logs: `app/core/logging.py` sends the app's own messages to stdout at `LOG_LEVEL` (INFO), which is what Railway shows. Before 2026-09-25 nothing but uvicorn's lines reached the logs. httpx and friends stay at WARNING because they log full URLs, signed links included. Use `logger.debug` for anything logged once per job
 
 ### Job Pipeline
