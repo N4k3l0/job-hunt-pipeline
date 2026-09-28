@@ -10,6 +10,7 @@ import {
 } from "@/hooks/use-api";
 import { AutoApplyStatusPill } from "@/components/auto-apply-status";
 import { ClosedNote } from "@/components/closed-note";
+import { FillInFormButton } from "@/components/fill-in-form-button";
 import { useToast } from "@/components/ui/toast";
 import { EmptyState } from "@/components/ui/empty-state";
 import type { ApplicationTracking, AutoApplication, TailoredApplication } from "@/lib/types";
@@ -291,6 +292,12 @@ export default function ApplicationsPage() {
       note={["failed", "unsupported", "cancelled"].includes(a.status) ? null : a.job?.closed_note}
     >
       <AutoApplyStatusPill status={a.status} />
+      {a.status === "queued" && (
+        <>
+          <span style={{ flex: 1 }} />
+          <FillInFormButton applicationId={a.id} />
+        </>
+      )}
     </BoardCard>
   );
 
