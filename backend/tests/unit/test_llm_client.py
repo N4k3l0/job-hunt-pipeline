@@ -220,3 +220,24 @@ def test_an_unreadable_or_old_pause_file_does_not_pause():
     assert not credits_paused()
     llm_module.PAUSE_FILE.write_text(repr(llm_module.time.time() - 5))
     assert not credits_paused()
+
+
+async def test_a_crash_comes_back_readable_with_cors_headers():
+    import httpx
+
+    from app.core.config import get_settings
+    from app.main import create_app
+
+    app = create_app()
+
+    async def broken():
+        raise RuntimeError("something inside failed")
+
+    app.add_api_route("/broken", broken)
+    origin = get_settings().cors_origin_list[0]
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+                                 base_url="http://test") as c:
+        r = await c.get("/broken", headers={"Origin": origin})
+    assert r.status_code == 500
+    assert r.json()["detail"].startswith("Something went wrong on our side.")
+    assert r.headers.get("access-control-allow-origin") == origin
