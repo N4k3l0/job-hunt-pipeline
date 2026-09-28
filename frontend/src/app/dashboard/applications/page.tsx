@@ -57,14 +57,19 @@ function BoardCard({ href, company, title, detail, note, children }: {
   );
 }
 
-/** One stage of applying, as a column. The stages sit side by side. */
-function Column({ title, hint, count, children, empty }: {
-  title: string; hint?: string; count: number; children: React.ReactNode; empty: string;
+// The narrowest a column gets. Columns share the width and wrap onto a new
+// row when there isn't room, so the board fits any screen: side by side on
+// a laptop, one under another on a phone.
+const COLUMN_MIN = 250;
+
+/** One stage of applying, as a column. */
+function Column({ title, hint, count, children }: {
+  title: string; hint?: string; count: number; children: React.ReactNode;
 }) {
   return (
     <section
       style={{
-        scrollSnapAlign: "start", display: "flex", flexDirection: "column", gap: 8, minWidth: 0,
+        display: "flex", flexDirection: "column", gap: 8, minWidth: 0,
         padding: 10, borderRadius: "var(--ds-r-lg)", border: "1px solid var(--ds-line)",
         background: "var(--ds-bg-chrome)",
       }}
@@ -76,9 +81,7 @@ function Column({ title, hint, count, children, empty }: {
         </div>
         {hint && <div className="ds-dim" style={{ fontSize: 12, marginTop: 2 }}>{hint}</div>}
       </header>
-      {count === 0 ? (
-        <div className="ds-dim" style={{ fontSize: 12, padding: "8px 4px" }}>{empty}</div>
-      ) : children}
+      {children}
     </section>
   );
 }
@@ -338,37 +341,42 @@ export default function ApplicationsPage() {
         ) : (
           <div
             style={{
-              display: "grid", gridAutoFlow: "column", gridAutoColumns: "minmax(260px, 1fr)",
-              gap: 12, overflowX: "auto", scrollSnapType: "x mandatory", paddingBottom: 8, alignItems: "start",
+              display: "grid", gridTemplateColumns: `repeat(auto-fit, minmax(min(${COLUMN_MIN}px, 100%), 1fr))`,
+              gap: 12, alignItems: "start",
             }}
           >
-            <Column title="Needs you" hint="Answer the questions or check the resume" count={inProgress}
-                    empty="Nothing needs you right now.">
-              {needsYou.map(autoCard)}
-              {resumesToCheck.map((t) =>
-                resumeCard(t, t.approval_status === "ready" ? "Resume and cover letter ready to check" : "Writing your resume", true),
-              )}
-            </Column>
-
-            <Column title="Ready to send" hint="Everything checked and approved" count={readyToSend.length + approvedToApply.length}
-                    empty="Nothing waiting to go out.">
-              {readyToSend.map(autoCard)}
-              {approvedToApply.map((item) => trackedCard(item, item.status))}
-            </Column>
-
-            <Column title="Sent" hint="Waiting to hear back" count={sent.length} empty="Nothing sent yet.">
-              {sent.map((item) => trackedCard(item, item.status))}
-            </Column>
-
-            <Column title="Interviews and offers" count={talking.length} empty="No interviews yet.">
-              {talking.map((item) => trackedCard(item, item.status))}
-            </Column>
-
-            <Column title="Closed" hint="Heard no, stopped, or put away" count={closedCount} empty="Nothing closed.">
-              {closed.map((item) => trackedCard(item, item.status))}
-              {stopped.map(autoCard)}
-              {olderResumes.map((t) => resumeCard(t, "Resume written, never sent", false))}
-            </Column>
+            {/* Only stages with something in them. */}
+            {inProgress > 0 && (
+              <Column title="Needs you" hint="Answer the questions or check the resume" count={inProgress}>
+                {needsYou.map(autoCard)}
+                {resumesToCheck.map((t) =>
+                  resumeCard(t, t.approval_status === "ready" ? "Resume and cover letter ready to check" : "Writing your resume", true),
+                )}
+              </Column>
+            )}
+            {readyToSend.length + approvedToApply.length > 0 && (
+              <Column title="Ready to send" hint="Everything checked and approved" count={readyToSend.length + approvedToApply.length}>
+                {readyToSend.map(autoCard)}
+                {approvedToApply.map((item) => trackedCard(item, item.status))}
+              </Column>
+            )}
+            {sent.length > 0 && (
+              <Column title="Sent" hint="Waiting to hear back" count={sent.length}>
+                {sent.map((item) => trackedCard(item, item.status))}
+              </Column>
+            )}
+            {talking.length > 0 && (
+              <Column title="Interviews and offers" count={talking.length}>
+                {talking.map((item) => trackedCard(item, item.status))}
+              </Column>
+            )}
+            {closedCount > 0 && (
+              <Column title="Closed" hint="Heard no, stopped, or put away" count={closedCount}>
+                {closed.map((item) => trackedCard(item, item.status))}
+                {stopped.map(autoCard)}
+                {olderResumes.map((t) => resumeCard(t, "Resume written, never sent", false))}
+              </Column>
+            )}
           </div>
         )}
       </div>
