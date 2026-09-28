@@ -29,6 +29,7 @@ from app.services.auto_apply.prepare import (
     cancel_application,
     prepare_application,
     update_answers,
+    write_first_go,
 )
 from app.services.job_freshness import closed_note
 from app.services.outreach.follow_up import NotSentYet, draft_follow_up
@@ -196,6 +197,18 @@ async def rewrite_answer(application_id: UUID, body: AnswerKey, user_id: Current
         application.answers = answers
         await db.commit()
     return {"suggestion": suggestion, "writing_problems": problems}
+
+
+@router.post("/{application_id}/first-go")
+async def first_go(application_id: UUID, body: AnswerKey, user_id: CurrentUserId, db: DbSession):
+    """The app writes a first go at a question it left empty, from the
+    user's profile and the job. It's saved as a draft for them to change."""
+    application = await _load(db, user_id, application_id)
+    try:
+        await write_first_go(db, application, body.key)
+    except AnswerError as e:
+        raise _answer_error(e) from e
+    return serialize(await _load(db, user_id, application_id), detail=True)
 
 
 @router.post("/{application_id}/keep-wording")
