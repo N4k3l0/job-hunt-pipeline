@@ -1,3 +1,4 @@
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -18,8 +19,9 @@ settings = get_settings()
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     # Ready before the first request: Uvicorn opens the port only after
-    # this, and Railway waits for /health (app/core/warmup.py).
-    if settings.environment != "test":
+    # this, and Railway waits for /health (app/core/warmup.py). Not on
+    # Vercel, where every cold start would pay for it.
+    if settings.environment != "test" and not os.environ.get("VERCEL"):
         from app.core.warmup import warm_up
         await warm_up()
     yield
