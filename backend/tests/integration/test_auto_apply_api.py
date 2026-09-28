@@ -546,6 +546,38 @@ async def test_the_apps_own_drafts_are_fixed_but_the_users_words_are_not(client,
     assert '"synergy-driven": say what it was.' in why["writing_problems"]
 
 
+async def test_using_the_plainer_version_clears_the_check_without_reading_it_twice(client, monkeypatch):
+    from app.services.auto_apply import prepare
+
+    dashed = "I want to work at Stripe because payments matter \u2014 I built payment tools for five years."
+    plainer = "I want to work at Stripe because payments matter. I built payment tools for five years."
+    reads = []
+
+    async def reader(text, *, what, llm=None):
+        reads.append(text)
+        return []
+
+    class FakeLLM:
+        async def generate(self, task, system, prompt, max_tokens=0):
+            return plainer
+
+    monkeypatch.setattr(prepare, "read_through", reader)
+    monkeypatch.setattr("app.llm.client.llm_client", FakeLLM())
+
+    app_id = (await client.post(f"/api/v1/auto-apply/jobs/{JOB_A}")).json()["id"]
+    await client.put(f"/api/v1/auto-apply/{app_id}/answers", json={"answers": {"question_why": dashed}})
+    assert reads == [dashed]
+
+    r = await client.post(f"/api/v1/auto-apply/{app_id}/rewrite", json={"key": "question_why"})
+    assert r.json() == {"suggestion": plainer, "writing_problems": []}
+
+    r = await client.put(f"/api/v1/auto-apply/{app_id}/answers", json={"answers": {"question_why": plainer}})
+    why = by_key(r.json())["question_why"]
+    assert why["answer"]["value"] == plainer
+    assert why["writing_problems"] == []  # "Change this before it's sent" goes away
+    assert reads == [dashed]  # the suggestion was read when it was made, not again
+
+
 async def test_unsupported_closed_and_private(client):
     r = await client.post(f"/api/v1/auto-apply/jobs/{JOB_UNSUPPORTED}")
     assert r.json()["status"] == "unsupported" and "Greenhouse" in r.json()["error"]
