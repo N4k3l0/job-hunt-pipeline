@@ -17,7 +17,9 @@ def _get_jwks_client() -> PyJWKClient:
     global _jwks_client
     if _jwks_client is None:
         jwks_url = f"{settings.supabase_url}/auth/v1/.well-known/jwks.json"
-        _jwks_client = PyJWKClient(jwks_url)
+        # Keys are fetched again after an hour, or at once if a token is
+        # signed with a key that isn't in the set.
+        _jwks_client = PyJWKClient(jwks_url, lifespan=3600)
     return _jwks_client
 
 

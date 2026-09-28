@@ -1,3 +1,4 @@
+import asyncio
 from typing import Annotated
 from uuid import UUID
 
@@ -22,7 +23,9 @@ async def get_current_user(
 ) -> User:
     """Verify JWT token and return the User record, creating it on first login."""
     token = credentials.credentials
-    user_id = verify_token(token)
+    # In a thread: fetching the login keys is a blocking network call, and
+    # it made every other request wait each time the keys were refreshed.
+    user_id = await asyncio.to_thread(verify_token, token)
     if not user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

@@ -1,3 +1,6 @@
+import os
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -13,9 +16,21 @@ from app.api.v1 import (
 settings = get_settings()
 
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    # Ready before the first request: Uvicorn opens the port only after
+    # this, and Railway waits for /health (app/core/warmup.py). Not on
+    # Vercel, where every cold start would pay for it.
+    if settings.environment != "test" and not os.environ.get("VERCEL"):
+        from app.core.warmup import warm_up
+        await warm_up()
+    yield
+
+
 def create_app() -> FastAPI:
     setup_logging()
     app = FastAPI(
+        lifespan=_lifespan,
         title="Job Hunt Pipeline",
         description="Automated job discovery, scoring, and application tailoring",
         version="0.1.0",
