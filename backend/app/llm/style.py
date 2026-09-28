@@ -167,8 +167,10 @@ READ_THROUGH_SYSTEM = (
     "- phrases lifted from the job ad instead of said in their own words\n"
     "- anything else that reads like a machine wrote it\n"
     "Go through it one sentence at a time before deciding. At most eight, the clearest first. Quote the "
-    "exact words (under 12) and say in plain English what to do instead. If it reads fine, record no "
-    "problems.\n\n" + STYLE_RULES
+    "exact words (under 12) and say in plain English what to do instead.\n"
+    "Mark a problem serious only when it clearly breaks these rules. Matters of taste, small polish and "
+    "anything you'd call minor are not serious. On a resume, short clipped lines without \"I\" are normal, "
+    "so don't flag them for that. If it's fine to send, record no problems.\n\n" + STYLE_RULES
 )
 
 READ_THROUGH_TOOL = {
@@ -184,8 +186,9 @@ READ_THROUGH_TOOL = {
                     "properties": {
                         "quote": {"type": "string", "description": "The exact words, under 12"},
                         "fix": {"type": "string", "description": "What to do instead, in plain English"},
+                        "serious": {"type": "boolean", "description": "It clearly breaks the rules, not a matter of taste"},
                     },
-                    "required": ["quote", "fix"],
+                    "required": ["quote", "fix", "serious"],
                 },
             },
         },
@@ -194,6 +197,19 @@ READ_THROUGH_TOOL = {
 }
 
 NOT_READ_YET = "The app hasn't read this through yet."
+# Saved findings carry this; changing how the reviewer reads (the prompt,
+# what counts) means bumping it, so everything is read again.
+READ_THROUGH_VERSION = 2
+
+
+def read_is_current(read: dict | None, text: str) -> bool:
+    """Whether saved findings are for these exact words, by today's reviewer."""
+    read = read or {}
+    return read.get("fp") == fingerprint(text) and read.get("v") == READ_THROUGH_VERSION
+
+
+def saved_read(text: str, problems: list[str]) -> dict:
+    return {"fp": fingerprint(text), "v": READ_THROUGH_VERSION, "problems": problems}
 
 
 async def read_through(text: str, *, what: str, llm=None) -> list[str]:
@@ -220,6 +236,10 @@ def _problems_from(raw) -> list[str]:
     problems = []
     for item in (raw if isinstance(raw, list) else [])[:8]:
         if isinstance(item, dict):
+            # Only clear problems stand in the way of sending. A reviewer
+            # always finds something, and taste isn't a reason to wait.
+            if item.get("serious") is False:
+                continue
             quote, fix = (item.get("quote") or "").strip(), plain_english((item.get("fix") or "").strip())
             if quote and fix:
                 problems.append(f"\"{quote}\": {fix}")

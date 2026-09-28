@@ -33,7 +33,10 @@ from app.services.job_freshness import closed_note
 from app.services.outreach.follow_up import NotSentYet, draft_follow_up
 from app.llm.style import has_dashes, read_through, writing_problems
 from app.services.auto_apply.drafting import rewrite_plainly
-from app.services.auto_apply.writing import application_document_problems
+from app.services.auto_apply.resume_pdf import tailored_for_job
+from app.services.auto_apply.writing import (
+    accept_document_wording, application_document_problems, wants_cover_letter,
+)
 
 router = APIRouter()
 
@@ -199,6 +202,28 @@ async def keep_wording(application_id: UUID, body: AnswerKey, user_id: CurrentUs
     application.answers = answers
     await db.commit()
     return serialize(await _load(db, user_id, application_id), detail=True)
+
+
+class DocumentName(BaseModel):
+    document: str  # "resume" or "cover_letter"
+
+
+@router.post("/{application_id}/keep-document-wording")
+async def keep_document_wording(application_id: UUID, body: DocumentName, user_id: CurrentUserId, db: DbSession):
+    """The user says a document is fine as it is, despite what the writing
+    check flagged. Long dashes still have to come out."""
+    application = await _load(db, user_id, application_id)
+    tailored = await tailored_for_job(db, application.user_id, application.job_id)
+    if tailored is None:
+        raise HTTPException(status_code=404, detail="This application has no document written for the job.")
+    try:
+        accept_document_wording(tailored, body.document, with_cover_letter=wants_cover_letter(application))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    await db.commit()
+    files = await application_files(db, application)
+    files["writing_problems"] = await application_document_problems(db, application)
+    return files
 
 
 @router.get("/{application_id}/fill")
