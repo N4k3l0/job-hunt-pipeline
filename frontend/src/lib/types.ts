@@ -119,6 +119,34 @@ export interface AutoApplication {
   updated_at: string | null;
   /** Where "Send it for me" stands. */
   sending?: AutoApplySending;
+  /** "app" when the app picked this job by itself. */
+  prepared_by?: "app" | "user";
+}
+
+/** How many of the user's best matches the app prepares by itself each day. */
+export interface AutoPrepareSettings {
+  per_day: number;
+  choices: number[];
+  min_score: number;
+  cost_each_usd: number;
+}
+
+/** What the app spent on AI one day, by task (admin only). */
+export interface AiCreditDay {
+  day: string;
+  total: number;
+  tasks: { task: string; name: string; cost: number; calls: number }[];
+}
+
+export interface AiCreditStatus {
+  paused: boolean;
+  low: boolean;
+  warning: string | null;
+  balance: { amount: number; recorded_at: string } | null;
+  left: number | null;
+  per_day: number | null;
+  days_left: number | null;
+  days: AiCreditDay[];
 }
 
 /** How one run of the app's own browser went. */

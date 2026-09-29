@@ -29,6 +29,13 @@ from app.services.scoring.matching import candidate_years
 logger = logging.getLogger(__name__)
 
 LOCKED_STATUSES = ("submitting", "submitted")
+# Preparing needs the AI (answers, the resume, the writing check). While it's
+# paused, the application waits in "preparing" and the scheduler finishes it
+# once the AI is back (services/auto_apply/auto_prepare.py).
+WAITING_FOR_AI = (
+    "The app's AI is paused for now. It finishes preparing this by itself once it's back, "
+    "so there's nothing you need to do."
+)
 # Not "previous_company_contact": whether someone interviewed or applied
 # somewhere before is never in their profile, so a draft could only guess.
 DRAFTABLE_KINDS = {"question", "years_experience", "salary"}
@@ -279,7 +286,13 @@ async def prepare_application(
     client: httpx.AsyncClient | None = None,
     drafter=None,
     tailor: bool = False,
+    prepared_by: str | None = None,
 ) -> AutoApplication:
+    """Read the job's form, answer what the profile answers, draft the rest
+    and (with `tailor`) write a resume for it. `prepared_by="app"` marks one
+    the app picked by itself."""
+    from app.llm.client import credits_paused
+
     drafter = drafter or draft_answers
     job = (await db.execute(
         select(Job).where(Job.id == job_id).options(selectinload(Job.entities))
@@ -291,9 +304,19 @@ async def prepare_application(
         select(AutoApplication).where(AutoApplication.user_id == user_id, AutoApplication.job_id == job_id)
     )).scalar_one_or_none()
     if application is None:
-        application = AutoApplication(user_id=user_id, job_id=job_id, status="preparing", answers={})
+        application = AutoApplication(
+            user_id=user_id, job_id=job_id, status="preparing", answers={},
+            result={"prepared_by": prepared_by} if prepared_by else None,
+        )
         db.add(application)
     elif application.status in LOCKED_STATUSES:
+        return application
+    if credits_paused():
+        # Answers already there stay as they are; anything else waits.
+        if application.status not in ("needs_you", "queued"):
+            application.status = "preparing"
+            application.error = WAITING_FOR_AI
+            await db.commit()
         return application
     previous_answers = dict(application.answers or {})
 
@@ -383,6 +406,12 @@ async def prepare_application(
     # Ready to send only when the documents read plainly too.
     if application.status == "queued" and await application_document_problems(db, application):
         application.status = "needs_you"
+        await db.commit()
+    if credits_paused():
+        # The credit ran out part way through: the answers or the resume may
+        # be missing, so it's finished again once the AI is back.
+        application.status = "preparing"
+        application.error = WAITING_FOR_AI
         await db.commit()
     return application
 

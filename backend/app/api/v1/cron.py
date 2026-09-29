@@ -391,6 +391,20 @@ async def cron_send_digests(authorization: str | None = Header(None)):
     return outcome
 
 
+@router.get("/prepare-applications")
+async def cron_prepare_applications(authorization: str | None = Header(None), limit: int = 3):
+    """Finish applications that waited for the AI, then prepare users' best
+    new matches for those who turned it on, `limit` in all. Nothing while
+    the AI is paused. Cost: about $0.15 per application (Claude Sonnet 5)."""
+    _verify_cron(authorization)
+
+    from app.services.auto_apply.auto_prepare import run
+
+    outcome = await run(limit=max(0, min(limit, 5)))
+    outcome["errors"] = outcome["errors"][:5]
+    return outcome
+
+
 @router.get("/review-top-matches")
 async def cron_review_top_matches(
     authorization: str | None = Header(None),

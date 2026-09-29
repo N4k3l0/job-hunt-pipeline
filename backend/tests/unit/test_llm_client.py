@@ -241,3 +241,26 @@ async def test_a_crash_comes_back_readable_with_cors_headers():
     assert r.status_code == 500
     assert r.json()["detail"].startswith("Something went wrong on our side.")
     assert r.headers.get("access-control-allow-origin") == origin
+
+
+async def test_every_call_is_counted_under_its_task(ai_calls_counted):
+    llm, messages, _ = _client_with(_response(SimpleNamespace(type="text", text="ok")))
+    await llm.generate("review", "system", "user")
+    # Callers that build their own requests name what the call is for; the
+    # SDK never sees that name.
+    await llm.client.messages.create(usage_task="contact", model="claude-sonnet-5", max_tokens=10, messages=[])
+    assert "usage_task" not in messages.calls[-1] and messages.calls[-1]["model"] == "claude-sonnet-5"
+    assert [task for task, _ in ai_calls_counted] == ["review", "contact"]
+
+
+def test_what_a_call_costs():
+    from decimal import Decimal
+
+    from app.services.ai_credit import call_cost
+
+    sonnet = SimpleNamespace(input_tokens=1000, output_tokens=500)
+    assert call_cost("claude-sonnet-5", sonnet) == Decimal("0.007")
+    haiku = SimpleNamespace(input_tokens=2000, output_tokens=400, server_tool_use=SimpleNamespace(web_search_requests=3))
+    assert call_cost("claude-haiku-4-5-20251001", haiku) == Decimal("0.004") + Decimal("0.03")
+    # A model the app doesn't know is counted at the dearest price, never the cheapest.
+    assert call_cost("claude-new-9", sonnet) == Decimal("0.0175")

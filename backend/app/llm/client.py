@@ -126,12 +126,33 @@ async def _guarded(call, **kwargs):
         raise
 
 
+async def _count_call(task: str, requested_model: str, response) -> None:
+    """Log the call and add it to what the app has spent (services/ai_credit.py)."""
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return
+    model = getattr(response, "model", None) or requested_model
+    if not isinstance(model, str):
+        model = requested_model
+    from app.services.ai_credit import record_usage, web_searches
+
+    logger.info(
+        "LLM call: task=%s model=%s served_by=%s input_tokens=%s output_tokens=%s web_searches=%d stop=%s",
+        task, requested_model, model, usage.input_tokens, usage.output_tokens,
+        web_searches(usage), getattr(response, "stop_reason", None),
+    )
+    await record_usage(task, model, usage)
+
+
 class _GuardedMessages:
     def __init__(self, messages):
         self._messages = messages
 
-    async def create(self, **kwargs):
-        return await _guarded(self._messages.create, **kwargs)
+    async def create(self, *, usage_task: str = "other", **kwargs):
+        """`usage_task` names what the call is for in the spending counts."""
+        response = await _guarded(self._messages.create, **kwargs)
+        await _count_call(usage_task, kwargs.get("model", "unknown"), response)
+        return response
 
 
 class _GuardedClient:
@@ -225,12 +246,7 @@ class LLMClient:
         else:
             response = await _guarded(client.messages.create, **kwargs)
 
-        usage = response.usage
-        logger.info(
-            "LLM call: task=%s model=%s served_by=%s input_tokens=%d output_tokens=%d stop=%s",
-            task_type, model, response.model, usage.input_tokens,
-            usage.output_tokens, response.stop_reason,
-        )
+        await _count_call(task_type, model, response)
 
         if response.stop_reason == "refusal":
             details = getattr(response, "stop_details", None)

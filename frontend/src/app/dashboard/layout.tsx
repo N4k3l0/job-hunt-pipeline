@@ -4,6 +4,7 @@ import { QueueWatcher } from "@/components/queue-watcher";
 import { RoleAutoSuggest } from "@/components/role-auto-suggest";
 import { PageTransition } from "@/components/page-transition";
 import { OnboardingGate } from "@/components/onboarding-gate";
+import { AiCreditBanner } from "@/components/ai-credit";
 
 export default function DashboardLayout({
   children,
@@ -24,6 +25,7 @@ export default function DashboardLayout({
             <SidebarTrigger />
           </div>
           <div className="p-4 sm:p-6">
+            <AiCreditBanner />
             {/* OnboardingGate is a no-op once the user has a name +
                 resume + countries; before that it replaces the requested
                 page with the 3-step setup wizard. */}

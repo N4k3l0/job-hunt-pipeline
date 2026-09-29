@@ -538,6 +538,7 @@ async def find_direct_apply_via_claude(
     try:
         from app.llm.client import llm_client, model_for, effort_for
         response = await llm_client.client.messages.create(
+            usage_task="apply_link",
             model=model_for("search"),
             max_tokens=5500,
             output_config={"effort": effort_for("search")},

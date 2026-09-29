@@ -102,6 +102,7 @@ async def find_contact_for_job(
     from app.llm.client import llm_client, model_for, effort_for
 
     response = await llm_client.client.messages.create(
+        usage_task="contact",
         model=model_for("search"),
         max_tokens=6000,
         output_config={"effort": effort_for("search")},

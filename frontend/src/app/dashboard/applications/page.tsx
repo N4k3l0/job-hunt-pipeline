@@ -12,6 +12,7 @@ import { AutoApplyStatusPill } from "@/components/auto-apply-status";
 import { ClosedNote } from "@/components/closed-note";
 import { FillInFormButton } from "@/components/fill-in-form-button";
 import { SendForMe, useSendFinished } from "@/components/send-for-me";
+import { AutoPrepareCard } from "@/components/auto-prepare-card";
 import { useToast } from "@/components/ui/toast";
 import { EmptyState } from "@/components/ui/empty-state";
 import type { ApplicationTracking, AutoApplication, TailoredApplication } from "@/lib/types";
@@ -89,8 +90,12 @@ function Column({ title, hint, count, children }: {
 }
 
 function autoDetail(a: AutoApplication) {
+  if (a.status === "needs_you" && a.prepared_by === "app") {
+    return `Picked for you by the app. ${a.open_count} ${a.open_count === 1 ? "question needs" : "questions need"} you`;
+  }
   if (a.status === "needs_you") return `${a.open_count} ${a.open_count === 1 ? "question needs" : "questions need"} you`;
-  if (a.status === "preparing") return "Reading the form and filling in your answers";
+  // A job the app waits to prepare says why, in plain words.
+  if (a.status === "preparing") return a.error ?? "Reading the form and filling in your answers";
   if (a.status === "queued") {
     // The last try didn't go through: say so where it can't be missed.
     if (a.error) return <span className="text-amber-500">{a.error}</span>;
@@ -342,6 +347,8 @@ export default function ApplicationsPage() {
             </span>
           )}
         </div>
+
+        <AutoPrepareCard />
 
         {nothingYet ? (
           <div className="ds-card">
