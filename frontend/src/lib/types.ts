@@ -297,6 +297,17 @@ export interface JobAlertStatus {
   searches: { search: string; location: string | null; jobs: number }[];
 }
 
+/** Where the user forwards their LinkedIn alerts: the app's shared inbox. */
+export interface JobAlertForwarding {
+  /** An admin's script reads a shared inbox. */
+  ready: boolean;
+  address: string | null;
+  /** This user's own script reads the shared inbox. */
+  inbox_owner: boolean;
+  /** Gmail's code to confirm the forwarding address, once it arrives. */
+  confirmation: { code: string; from: string | null; at: string } | null;
+}
+
 export interface JobEntity {
   skills: string[] | null;
   requirements: string[] | null;
