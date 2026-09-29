@@ -160,7 +160,32 @@ OUTCOME_MESSAGES = {
         "company before sending it again."
     ),
     "error": "Something went wrong on the company's form, so nothing was sent.",
+    "form_rejected": "The form didn't accept some answers, so nothing was sent.",
 }
+REHEARSED_MESSAGE = (
+    "Practice run done. Everything was filled in, the form accepted every answer, and nothing was sent."
+)
+REHEARSAL_WAIT_MS = 3000
+
+# The answers a form turned down when Submit was pressed: forms mark them
+# invalid for screen readers (Greenhouse, Lever and Ashby all do).
+FORM_ERRORS = r"""() => {
+  const form = document.querySelector('#application-form, #application_form, form') || document.body;
+  const shown = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  const name = (e) => {
+    const label = (e.id && document.querySelector(`label[for="${CSS.escape(e.id)}"]`)) || e.closest('label');
+    const text = (label && label.textContent) || e.getAttribute('aria-label') || e.name || e.id || '';
+    return text.replace(/\*/g, '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  };
+  return [...new Set([...form.querySelectorAll('[aria-invalid="true"]')].filter(shown).map(name).filter(Boolean))];
+}"""
+
+
+def _rejected_message(labels: list[str], *, practice: bool) -> str:
+    listed = "; ".join(labels[:6]) + ("; and more" if len(labels) > 6 else "")
+    if practice:
+        return f"Practice run stopped: the form didn't accept these answers: {listed}. Nothing was sent."
+    return f"The form didn't accept these answers, so nothing was sent: {listed}."
 
 
 async def _run_form(payload: dict, *, dry_run: bool) -> tuple[dict, bytes | None]:
@@ -170,7 +195,9 @@ async def _run_form(payload: dict, *, dry_run: bool) -> tuple[dict, bytes | None
 
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch()
-        context = await browser.new_context(viewport={"width": 1280, "height": 1600})
+        # Service workers blocked so every request goes through the routes
+        # a practice run sets (see _rehearse_submit).
+        context = await browser.new_context(viewport={"width": 1280, "height": 1600}, service_workers="block")
         page = await context.new_page()
         try:
             files = {
@@ -178,20 +205,50 @@ async def _run_form(payload: dict, *, dry_run: bool) -> tuple[dict, bytes | None
                 "coverLetter": await _attachment(payload.get("cover_letter")),
             }
             logger.info("Opening %s", payload["form_url"])
+            screenshot = None
             try:
                 outcome = await _fill_and_press(page, payload, files, dry_run=dry_run)
+                screenshot = outcome.pop("_screenshot", None)
             except Exception as e:  # noqa: BLE001 — recorded for the user, with a picture of the page
                 logger.exception("Filling in the form failed")
                 outcome = {"status": "error", "detail": f"{type(e).__name__}: {e}"[:300], "url": page.url}
-            try:
-                screenshot = await page.screenshot(full_page=True)
-            except Exception as e:  # noqa: BLE001 — the outcome counts without its picture
-                logger.warning("Couldn't take a picture of the form: %s", e)
-                screenshot = None
+            if screenshot is None:
+                screenshot = await _picture(page)
         finally:
             await context.close()
             await browser.close()
     return outcome, screenshot
+
+
+async def _picture(page) -> bytes | None:
+    try:
+        return await page.screenshot(full_page=True)
+    except Exception as e:  # noqa: BLE001 — the outcome counts without its picture
+        logger.warning("Couldn't take a picture of the form: %s", e)
+        return None
+
+
+async def _form_errors(page) -> list[str]:
+    try:
+        return await page.evaluate(FORM_ERRORS) or []
+    except Exception:  # noqa: BLE001 — the page navigated mid-check
+        return []
+
+
+async def _rehearse_submit(page, button) -> list[str]:
+    """Press Submit with the browser offline and every request refused, so
+    the form checks each answer the way it would for real and nothing can
+    leave. Returns the answers it turned down."""
+    context = page.context
+
+    async def refuse(route):
+        await route.abort()
+
+    await context.route("**/*", refuse)
+    await context.set_offline(True)
+    await button.click(no_wait_after=True, timeout=PRESS_TIMEOUT_MS)
+    await page.wait_for_timeout(REHEARSAL_WAIT_MS)
+    return await _form_errors(page)
 
 
 async def _fill_and_press(page, payload: dict, files: dict, *, dry_run: bool) -> dict:
@@ -213,7 +270,15 @@ async def _fill_and_press(page, payload: dict, files: dict, *, dry_run: bool) ->
     elif not await _can_press(button):
         outcome["status"] = "cant_press_submit"
     elif dry_run:
-        outcome["status"] = "dry_run"
+        # The picture is of the filled-in form, taken before the rehearsal:
+        # offline, the form may show a "couldn't submit" notice.
+        outcome["_screenshot"] = await _picture(page)
+        rejected = await _rehearse_submit(page, button)
+        if rejected:
+            logger.info("The form didn't accept: %s", rejected)
+            outcome.update(status="form_rejected", rejected=rejected, _screenshot=await _picture(page))
+        else:
+            outcome.update(status="dry_run", rehearsed=True)
     else:
         logger.info("Pressing %r", label)
         try:
@@ -228,6 +293,9 @@ async def _fill_and_press(page, payload: dict, files: dict, *, dry_run: bool) ->
             logger.warning("Pressing Submit raised: %s", str(e).splitlines()[0])
         outcome["status"] = await _watch_after_submit(page)
         outcome["url"] = page.url
+        if outcome["status"] == "form_rejected":
+            outcome["rejected"] = await _form_errors(page)
+            logger.info("The form didn't accept: %s", outcome["rejected"])
     return outcome
 
 
@@ -272,7 +340,12 @@ async def send_application(application_id: uuid.UUID, *, dry_run: bool, claimed:
 
         what = "practice" if dry_run else "send"
         outcome["at"] = datetime.now(timezone.utc).isoformat()
-        outcome["message"] = OUTCOME_MESSAGES.get(outcome["status"], outcome["status"])
+        if outcome["status"] == "form_rejected" and outcome.get("rejected"):
+            outcome["message"] = _rejected_message(outcome["rejected"], practice=dry_run)
+        elif outcome["status"] == "dry_run" and outcome.get("rehearsed"):
+            outcome["message"] = REHEARSED_MESSAGE
+        else:
+            outcome["message"] = OUTCOME_MESSAGES.get(outcome["status"], outcome["status"])
         outcome["screenshot"] = await _keep_screenshot(application, what, screenshot)
         result = {k: v for k, v in (application.result or {}).items() if k not in ("request", "running")}
         result[what] = outcome
@@ -366,6 +439,9 @@ async def _watch_after_submit(page) -> str:
         if await _human_check_showing(page):
             logger.info("The form is asking the applicant to prove they're human. Stopping.")
             return "human_check"
+        # The form checked the answers and turned some down: it wasn't sent.
+        if await _form_errors(page):
+            return "form_rejected"
     return "no_confirmation"
 
 
