@@ -361,6 +361,11 @@
         // aren't worth bothering the user about.
         if (outcome.status === "todo" && field.group === "voluntary" && !field.required) continue;
         results.push(outcome);
+        // Let the page catch up before the next answer. Greenhouse keeps
+        // its answers in React state; picking several dropdowns in one go
+        // left each pick overwriting the one before, so the boxes showed
+        // an answer the form didn't have ("This field is required").
+        await sleep(150);
       }
       showResults(adapter, results);
       // Greenhouse puts the form below the job description.

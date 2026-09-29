@@ -342,3 +342,47 @@ async def test_sending_needs_approved_answers(client):
     app_id = (await client.post(f"/api/v1/auto-apply/jobs/{JOB}")).json()["id"]
     r = await client.post(f"/api/v1/auto-apply/{app_id}/send", json={"practice": True})
     assert r.status_code == 409 and r.json()["detail"] == "Approve the answers first."
+
+
+async def test_answers_the_form_turned_down_are_named_and_nothing_is_sent(client, monkeypatch):
+    from app.services.auto_apply import sender
+    from app.services.auto_apply.sender import run_requested
+
+    rejected = ["Are you open to relocation for this role?", "Agreement to Arbitrate"]
+
+    async def run_form(payload, *, dry_run):
+        if dry_run:  # the practice run rehearsed Submit offline and the form accepted everything
+            return {"filled": 3, "not_filled": [], "status": "dry_run", "rehearsed": True}, b"png"
+        return {"filled": 3, "not_filled": [], "status": "form_rejected", "rejected": rejected}, b"png"
+
+    async def keep(application, what, content):
+        return f"applications/{application.user_id}/{application.id}-{what}.png"
+
+    monkeypatch.setattr(sender, "_run_form", run_form)
+    monkeypatch.setattr(sender, "_keep_screenshot", keep)
+    app_id = await _approved(client)
+
+    await client.post(f"/api/v1/auto-apply/{app_id}/send", json={"practice": True})
+    await run_requested()
+    body = (await client.get(f"/api/v1/auto-apply/{app_id}")).json()
+    assert body["sending"]["practice"]["message"] == sender.REHEARSED_MESSAGE
+
+    await client.post(f"/api/v1/auto-apply/{app_id}/send", json={})
+    await run_requested()
+    body = (await client.get(f"/api/v1/auto-apply/{app_id}")).json()
+    assert body["status"] == "queued"  # still approved; nothing went
+    assert body["error"] == (
+        "The form didn't accept these answers, so nothing was sent: "
+        "Are you open to relocation for this role?; Agreement to Arbitrate."
+    )
+    assert await _tracking(JOB) == []
+
+
+def test_a_long_list_of_turned_down_answers_is_cut_short():
+    from app.services.auto_apply.sender import _rejected_message
+
+    message = _rejected_message([f"Question {n}" for n in range(1, 10)], practice=True)
+    assert message == (
+        "Practice run stopped: the form didn't accept these answers: "
+        "Question 1; Question 2; Question 3; Question 4; Question 5; Question 6; and more. Nothing was sent."
+    )
