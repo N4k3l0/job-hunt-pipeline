@@ -65,6 +65,7 @@ async def translate_title_to_english(title: str) -> Tuple[str | None, str | None
 
     try:
         response = await llm_client.client.messages.create(
+            usage_task="translation",
             model="claude-haiku-4-5",
             max_tokens=200,
             messages=[{"role": "user", "content": _PROMPT.format(title=title.strip())}],
@@ -158,6 +159,7 @@ async def translate_description_to_english(
 
     try:
         response = await llm_client.client.messages.create(
+            usage_task="translation",
             model="claude-haiku-4-5",
             # Output cap roughly mirrors the input cap — translations
             # are usually similar length to the source, plus a little

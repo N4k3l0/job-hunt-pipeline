@@ -32,6 +32,21 @@ def _ai_not_paused(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def ai_calls_counted(monkeypatch):
+    """Counting an AI call writes to the database; tests keep the counts in
+    a list instead. tests/integration/test_ai_credit.py tests the real one."""
+    from app.services import ai_credit
+
+    counted = []
+
+    async def record(task, model, usage, *, session_factory=None):
+        counted.append((task, model))
+
+    monkeypatch.setattr(ai_credit, "record_usage", record)
+    return counted
+
+
+@pytest.fixture(autouse=True)
 def _read_through_finds_nothing(monkeypatch):
     """The writing read-through asks the model; tests never do. A test that
     wants it to find something, or fail, patches these itself."""

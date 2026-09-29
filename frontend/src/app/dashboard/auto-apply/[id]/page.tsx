@@ -886,6 +886,17 @@ export default function AutoApplicationPage({ params }: { params: Promise<{ id: 
 
         {/* What's happening, and what the user can do about it. */}
         <div className="ds-card" style={{ padding: 16, fontSize: 14, lineHeight: 1.5 }}>
+          {application.status === "preparing" && (
+            <p className="flex items-start" style={{ gap: 8 }}>
+              <Loader2 className="h-4 w-4 animate-spin" style={{ marginTop: 3, flexShrink: 0 }} />
+              {application.error ?? "Reading the form and filling in your answers."}
+            </p>
+          )}
+          {application.status === "needs_you" && application.prepared_by === "app" && (
+            <p className="ds-muted" style={{ fontSize: 13, marginBottom: 8 }}>
+              The app picked this job for you: it&apos;s one of your best new matches.
+            </p>
+          )}
           {application.status === "needs_you" && (
             <p>
               <strong>

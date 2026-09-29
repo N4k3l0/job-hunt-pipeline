@@ -700,3 +700,29 @@ async def test_write_a_first_go_at_a_question_left_empty(client, monkeypatch):
     r = await client.post(f"/api/v1/auto-apply/{app_id}/first-go", json={"key": "question_why"},
                           headers={"x-test-user": str(OTHER_USER)})
     assert r.status_code == 404
+
+
+async def test_apply_for_me_while_the_ai_is_paused_waits_then_finishes(client):
+    import time
+    from datetime import datetime, timedelta, timezone
+
+    from app.core.database import async_session
+    from app.llm import client as llm_module
+    from app.services.auto_apply import auto_prepare
+    from app.services.auto_apply.prepare import WAITING_FOR_AI
+
+    llm_module.PAUSE_FILE.write_text(repr(time.time() + 1800))
+    r = await client.post(f"/api/v1/auto-apply/jobs/{JOB_A}")
+    body = r.json()
+    assert r.status_code == 200 and body["status"] == "preparing" and body["error"] == WAITING_FOR_AI
+    assert client.drafted_for == []  # nothing asked of the AI
+
+    # The AI is back: the next scheduler run finishes it, nobody presses anything.
+    llm_module.end_credits_pause()
+    later = datetime.now(timezone.utc) + timedelta(minutes=15)
+    outcome = await auto_prepare.run(limit=3, now=later, session_factory=async_session)
+    assert outcome["finished"] == 1, outcome
+    body = (await client.get(f"/api/v1/auto-apply/{body['id']}")).json()
+    assert body["status"] == "needs_you" and body["error"] is None
+    assert by_key(body)["question_why"]["answer"]["source"] == "drafted"
+    assert body["prepared_by"] == "user"

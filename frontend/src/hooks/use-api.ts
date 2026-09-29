@@ -9,10 +9,12 @@ import type {
   TailoredApplication,
   ApplicationTracking,
   AnalyticsOverview,
+  AiCreditStatus,
   AutoApplication,
   AutoApplicationDetail,
   AutoApplyDocuments,
   AutoApplyValue,
+  AutoPrepareSettings,
   JobAlertStatus,
   NotificationSettings,
   Skill,
@@ -939,12 +941,51 @@ export interface InviteRequestRow {
 }
 
 /** Admin: people who asked for an invite on the homepage. */
-/** Whether AI is paused because the Anthropic credits ran out. */
-export function useAiStatus() {
+/** Whether AI is paused because the Anthropic credits ran out, or the
+ *  credit is running low. Admin only. */
+export function useAiStatus(enabled = true) {
   return useQuery({
     queryKey: ["admin", "ai-status"],
-    queryFn: () => api.get<{ paused: boolean; message: string | null }>("/api/v1/auth/admin/ai-status"),
+    queryFn: () => api.get<{ paused: boolean; low: boolean; message: string | null }>("/api/v1/auth/admin/ai-status"),
     staleTime: 60 * 1000,
+    enabled,
+  });
+}
+
+/** What the app spent on AI this week, and what's left (admin only). */
+export function useAiCredit() {
+  return useQuery({
+    queryKey: ["admin", "ai-credit"],
+    queryFn: () => api.get<AiCreditStatus>("/api/v1/auth/admin/ai-credit"),
+    staleTime: 60 * 1000,
+  });
+}
+
+/** The admin topped up: record the new balance and turn AI back on now. */
+export function useRecordAiCredit() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (balance_usd: number) => api.post<AiCreditStatus>("/api/v1/auth/admin/ai-credit", { balance_usd }),
+    onSuccess: (data) => {
+      qc.setQueryData(["admin", "ai-credit"], data);
+      qc.invalidateQueries({ queryKey: ["admin", "ai-status"] });
+    },
+  });
+}
+
+export function useAutoPrepareSettings() {
+  return useQuery({
+    queryKey: ["auto-apply", "settings"],
+    queryFn: () => api.get<AutoPrepareSettings>("/api/v1/auto-apply/settings"),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useUpdateAutoPrepareSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (per_day: number) => api.put<AutoPrepareSettings>("/api/v1/auto-apply/settings", { per_day }),
+    onSuccess: (data) => qc.setQueryData(["auto-apply", "settings"], data),
   });
 }
 

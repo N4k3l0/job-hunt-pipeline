@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import CurrentUserId, DbSession
+from app.api.deps import CurrentUser, CurrentUserId, DbSession
 from app.models.auto_apply import AutoApplication
 from app.models.job import Job
 from app.services.auto_apply import answers as rules
@@ -75,6 +75,7 @@ def serialize(application: AutoApplication, *, detail: bool) -> dict:
         "updated_at": application.updated_at.isoformat() if application.updated_at else None,
     }
     body["sending"] = sending_state(application)
+    body["prepared_by"] = (application.result or {}).get("prepared_by") or "user"
     if detail:
         answers = application.answers or {}
         kinds = rules.kinds(application.form or [], rules.JobFacts(company=(job.company if job else "") or ""))
@@ -108,6 +109,40 @@ async def _load(db, user_id, application_id: UUID) -> AutoApplication:
 
 def _answer_error(e: AnswerError) -> HTTPException:
     return HTTPException(status_code=422, detail={"message": str(e), "fields": e.fields})
+
+
+class AutoPrepareSettings(BaseModel):
+    per_day: int
+
+
+def _auto_prepare_settings(user) -> dict:
+    from app.services.auto_apply import auto_prepare
+
+    return {
+        "per_day": auto_prepare.per_day(user),
+        "choices": list(auto_prepare.PER_DAY_CHOICES),
+        "min_score": auto_prepare.MIN_SCORE,
+        "cost_each_usd": auto_prepare.COST_EACH_USD,
+    }
+
+
+# Declared before "/{application_id}" so "settings" isn't read as an id.
+@router.get("/settings")
+async def get_auto_prepare_settings(user: CurrentUser):
+    """How many of the user's best matches the app prepares by itself each day."""
+    return _auto_prepare_settings(user)
+
+
+@router.put("/settings")
+async def update_auto_prepare_settings(body: AutoPrepareSettings, user: CurrentUser, db: DbSession):
+    from app.services.auto_apply import auto_prepare
+
+    if body.per_day not in auto_prepare.PER_DAY_CHOICES:
+        raise HTTPException(status_code=422, detail="Choose one of the numbers offered.")
+    # A new dict, so the change to the JSON column is saved.
+    user.preferences = {**(user.preferences or {}), auto_prepare.PREFERENCE_KEY: body.per_day}
+    await db.commit()
+    return _auto_prepare_settings(user)
 
 
 @router.get("")

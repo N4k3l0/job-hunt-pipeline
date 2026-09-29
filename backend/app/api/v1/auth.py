@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
 
 from app.api.deps import CurrentUser, AdminUser, DbSession
@@ -329,11 +329,40 @@ async def admin_stale_jobs_cleanup(
 
 
 @router.get("/admin/ai-status")
-async def admin_ai_status(admin: AdminUser):
-    """Whether AI calls are paused because the Anthropic credits ran out."""
-    from app.llm.client import CREDITS_MESSAGE, credits_paused
-    paused = credits_paused()
-    return {"paused": paused, "message": CREDITS_MESSAGE if paused else None}
+async def admin_ai_status(admin: AdminUser, db: DbSession):
+    """Whether AI calls are paused because the Anthropic credits ran out,
+    or the credit is running low. `message` is what to tell the admin."""
+    from app.services.ai_credit import credit_status
+
+    status = await credit_status(db, days=4)
+    return {"paused": status["paused"], "low": status["low"], "message": status["warning"]}
+
+
+@router.get("/admin/ai-credit")
+async def admin_ai_credit(admin: AdminUser, db: DbSession):
+    """What the app has spent on AI each day this week, by task, and what's
+    left of the balance the admin last recorded."""
+    from app.services.ai_credit import credit_status
+
+    return await credit_status(db)
+
+
+class CreditBalance(BaseModel):
+    balance_usd: float = Field(ge=0, le=100_000)
+
+
+@router.post("/admin/ai-credit")
+async def admin_record_credit(body: CreditBalance, admin: AdminUser, db: DbSession):
+    """The admin topped up: record the balance Anthropic's billing page
+    shows, and turn AI back on now instead of within half an hour."""
+    from decimal import Decimal
+
+    from app.llm.client import end_credits_pause
+    from app.services.ai_credit import credit_status, record_balance
+
+    await record_balance(db, Decimal(str(round(body.balance_usd, 2))), admin.id)
+    end_credits_pause()
+    return await credit_status(db)
 
 
 @router.get("/admin/debug/source-health")

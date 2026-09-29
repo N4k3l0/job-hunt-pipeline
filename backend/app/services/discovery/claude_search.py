@@ -206,6 +206,7 @@ async def search_jobs_for_user(
 
     try:
         response = await llm_client.client.messages.create(
+            usage_task="job_search",
             model=model_for("search"),
             max_tokens=12000,
             output_config={"effort": effort_for("search")},

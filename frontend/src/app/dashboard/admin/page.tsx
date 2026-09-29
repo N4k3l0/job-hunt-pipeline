@@ -39,7 +39,8 @@ import {
   useStaleJobsVerifyDebug,
 } from "@/hooks/use-api";
 
-import { AiPausedNotice, FeedbackCard, InviteRequestsCard } from "@/components/admin-requests";
+import { FeedbackCard, InviteRequestsCard } from "@/components/admin-requests";
+import { AiCreditCard } from "@/components/ai-credit";
 
 interface UserRecord {
   id: string;
@@ -167,7 +168,7 @@ export default function AdminPage() {
         </p>
       </div>
 
-      <AiPausedNotice />
+      <AiCreditCard />
 
       {/* Invite User */}
       <Card style={{ background: "linear-gradient(135deg, rgba(251,191,36,0.02) 0%, transparent 60%)" }}>

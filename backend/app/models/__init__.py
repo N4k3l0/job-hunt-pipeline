@@ -17,8 +17,11 @@ from app.models.invite_request import InviteRequest
 from app.models.auto_apply import AutoApplication, SavedAnswer
 from app.models.job_rating import JobRating
 from app.models.job_alert import JobAlertEmail, JobAlertHit, JobAlertKey, LinkedInJob
+from app.models.ai_usage import AiCreditBalance, AiUsageHour
 
 __all__ = [
+    "AiCreditBalance",
+    "AiUsageHour",
     "User",
     "CandidateProfile",
     "CandidateWorkHistory",

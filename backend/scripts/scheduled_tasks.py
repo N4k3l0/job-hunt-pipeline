@@ -32,6 +32,8 @@ from datetime import datetime, timezone
 
 DISCOVERY_TIMEOUT = 300
 TASK_TIMEOUT = 180
+# Preparing an application takes up to a minute; a run does up to three.
+PREPARE_TIMEOUT = 240
 
 
 def call(base_url: str, secret: str, path: str, timeout: int) -> bool:
@@ -97,6 +99,9 @@ def main() -> int:
     results.append(call(base_url, secret, "/api/v1/cron/job-alert-details?limit=10", TASK_TIMEOUT))
     results.append(call(base_url, secret, "/api/v1/cron/expire-stale?verify_limit=40", TASK_TIMEOUT))
     results.append(call(base_url, secret, "/api/v1/cron/send-digests", TASK_TIMEOUT))
+    # Applications that waited for the AI, and users' best matches for those
+    # who asked the app to prepare them.
+    results.append(call(base_url, secret, "/api/v1/cron/prepare-applications?limit=3", PREPARE_TIMEOUT))
     # After a scoring change, users whose scores are from the old version
     # are rescored a couple at a time until none are left.
     results.append(call(base_url, secret, "/api/v1/cron/rescore-outdated?max_users=2", TASK_TIMEOUT))
