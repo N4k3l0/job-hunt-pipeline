@@ -223,7 +223,10 @@ export default function JobsInboxPage() {
   const total = data?.total ?? 0;
   const totalPages = Math.ceil(total / 25) || 1;
 
-  // ── LinkedIn jumping-off URL (preserved from previous version) ─────
+  // ── LinkedIn search to make an alert from ──────────────────────────
+  // It opens LinkedIn's job search for the user's roles. Switching on
+  // "Set alert" there makes LinkedIn email that search daily, and the alert
+  // sync (Profile → Preferences) brings those jobs into this inbox.
   const linkedInSearchUrl = useMemo(() => {
     const roles = (profile?.target_roles || []).slice(0, 3);
     if (roles.length === 0) return null;
@@ -382,10 +385,16 @@ export default function JobsInboxPage() {
                 target="_blank"
                 rel="noopener noreferrer"
                 className="ds-btn"
-                title="Opens LinkedIn's job search with your target roles + remote preference pre-applied, filtered to the past week."
+                title="Opens LinkedIn's job search for your target roles. Switch on Set alert there, and LinkedIn emails you new jobs from it every day. They then come into this inbox."
+                onClick={() =>
+                  toast.success("On LinkedIn, switch on Set alert", {
+                    description:
+                      "It's at the top of the search results. LinkedIn then emails you new jobs from this search every day, and they come into your inbox here.",
+                  })
+                }
               >
                 <Linkedin className="h-3.5 w-3.5" />
-                LinkedIn
+                Make a LinkedIn alert
               </a>
             )}
             <Link href="/dashboard/import" className="ds-btn">
