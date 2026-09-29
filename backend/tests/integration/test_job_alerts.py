@@ -84,12 +84,14 @@ async def test_alert_emails_become_jobs(client, monkeypatch):
 
     r = await _send(client, key, _email("m1"))
     assert r.status_code == 200, r.text
-    assert r.json() == {"emails_read": 1, "emails_already_read": 0, "jobs_found": 4, "jobs_added": 3}
+    assert r.json() == {"emails_read": 1, "emails_already_read": 0, "jobs_found": 4, "jobs_added": 3,
+                        "users": 1, "confirmations": 0, "not_for_anyone": 0}
 
     # The same email again changes nothing; a later email with the same jobs counts them again.
     assert (await _send(client, key, _email("m1"))).json()["emails_already_read"] == 1
     assert (await _send(client, key, _email("m2"))).json() == {
         "emails_read": 1, "emails_already_read": 0, "jobs_found": 4, "jobs_added": 0,
+        "users": 1, "confirmations": 0, "not_for_anyone": 0,
     }
 
     async with engine.connect() as conn:
@@ -160,3 +162,62 @@ async def test_alert_emails_become_jobs(client, monkeypatch):
     # A deleted key stops working.
     assert (await client.delete("/api/v1/job-alerts/key")).status_code == 204
     assert (await _send(client, key, _email("m3"))).status_code == 401
+
+
+async def test_a_shared_inbox_carries_everyones_forwarded_alerts(client):
+    from app.api.deps import DbSession, get_current_user
+    from app.core.database import engine
+    from app.main import app
+    from app.models.user import User
+
+    async def me(db: DbSession, x_test_user: str = Header()) -> User:
+        return await db.get(User, uuid.UUID(x_test_user))
+
+    app.dependency_overrides[get_current_user] = me
+    as_other = {"x-test-user": str(OTHER)}
+
+    # Before an admin's script reads an inbox, there's nowhere to forward to.
+    assert (await client.get("/api/v1/job-alerts/forwarding", headers=as_other)).json()["ready"] is False
+
+    async with engine.begin() as conn:
+        await conn.execute(text("UPDATE users SET role = 'admin' WHERE id = :u"), {"u": USER})
+    admin_key = (await client.post("/api/v1/job-alerts/key")).json()["key"]
+    # The admin's script says which inbox it reads, with its first sync.
+    await client.post("/api/v1/job-alerts/linkedin", json={"inbox": "Alerts.Inbox@gmail.com", "messages": []},
+                      headers={"Authorization": f"Bearer {admin_key}"})
+
+    details = (await client.get("/api/v1/job-alerts/forwarding", headers=as_other)).json()
+    assert details["ready"] is True and details["inbox_owner"] is False and details["confirmation"] is None
+    address = details["address"]
+    assert address.startswith("alerts.inbox+") and address.endswith("@gmail.com")
+    # The same address every time.
+    assert (await client.get("/api/v1/job-alerts/forwarding", headers=as_other)).json()["address"] == address
+    assert (await client.get("/api/v1/job-alerts/forwarding")).json()["inbox_owner"] is True
+
+    forwarded = {**_email("f1"), "recipients": [f"Delivered-To: {address}", "To: other@test.dev"]}
+    confirmation = {
+        "message_id": "c1", "kind": "confirmation", "recipients": [f"Delivered-To: {address}"],
+        "subject": "(#482913765) Gmail Forwarding Confirmation - Receive Mail from other@test.dev",
+        "text": "other@test.dev has requested to automatically forward mail to your email address. Confirmation code: 482913765",
+    }
+    stranger = {**_email("s1"), "recipients": ["Delivered-To: alerts.inbox+zzzzzzzz@gmail.com"]}
+    r = await _send(client, admin_key, _email("own1"), forwarded, confirmation, stranger)
+    assert r.status_code == 200, r.text
+    assert r.json()["users"] == 2 and r.json()["confirmations"] == 1 and r.json()["not_for_anyone"] == 1
+
+    async with engine.connect() as conn:
+        hits = dict((await conn.execute(text(
+            "SELECT user_id, count(*) FROM job_alert_hits GROUP BY user_id"
+        ))).all())
+    assert hits == {USER: 4, OTHER: 4}
+    details = (await client.get("/api/v1/job-alerts/forwarding", headers=as_other)).json()
+    assert details["confirmation"]["code"] == "482913765" and details["confirmation"]["from"] == "other@test.dev"
+    status = (await client.get("/api/v1/job-alerts/status", headers=as_other)).json()
+    assert status["emails_read"] == 1 and status["jobs_sent"] == 4
+
+    # Only an admin's inbox carries other people's alerts: anyone else's
+    # key keeps what it sends as its own.
+    other_key = (await client.post("/api/v1/job-alerts/key", headers=as_other)).json()["key"]
+    sneaky = {**_email("x1"), "recipients": [f"Delivered-To: {address.replace('+', '+x')}"]}
+    r = await _send(client, other_key, sneaky)
+    assert r.json()["users"] == 1 and r.json()["not_for_anyone"] == 0

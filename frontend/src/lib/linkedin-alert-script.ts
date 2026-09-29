@@ -3,6 +3,11 @@
  * their LinkedIn job alerts. It sends new alert emails to the backend
  * (POST /api/v1/job-alerts/linkedin) with the user's alert key.
  *
+ * Run by an admin, that Gmail also becomes the shared inbox other users
+ * forward their alerts to (backend services/job_alerts/forwarding.py): the
+ * script sends the addresses each email was delivered to, and Gmail's
+ * forwarding confirmation emails, so the backend can tell whose they are.
+ *
  * The backend reads the jobs out of each email (services/job_alerts), so
  * changes to LinkedIn's layout are fixed there, not in every user's copy
  * of this script. Links lose their query strings, which carry LinkedIn's
@@ -12,12 +17,14 @@
 export function buildLinkedInAlertScript(apiBase: string, key: string): string {
   const url = `${apiBase.replace(/\/$/, "")}/api/v1/job-alerts/linkedin`;
   return `/**
- * Job Hunt: jobs from your LinkedIn job alerts, on your dashboard.
+ * Job Hunt: jobs from LinkedIn job alerts, on the dashboard.
  *
- * Every hour this reads new emails from jobalerts-noreply@linkedin.com in
- * this Gmail account and sends them to Job Hunt, which adds their jobs to
- * your dashboard. No other email is read. Links are sent without
- * LinkedIn's tracking and sign-in codes.
+ * Every 10 minutes this reads new emails from jobalerts-noreply@linkedin.com
+ * in this Gmail account and sends them to Job Hunt, which adds their jobs to
+ * the dashboard. It also sends Gmail's forwarding confirmation emails, so
+ * people who forward their alerts here can see their code in Job Hunt. No
+ * other email is read. Links are sent without LinkedIn's tracking and
+ * sign-in codes.
  *
  * To start: pick "setUp" in the menu next to Run above, then press Run.
  * To stop: delete this project, or remove the key on your Job Hunt profile.
@@ -25,12 +32,13 @@ export function buildLinkedInAlertScript(apiBase: string, key: string): string {
 const JOB_HUNT_URL = ${JSON.stringify(url)};
 const JOB_HUNT_KEY = ${JSON.stringify(key)};
 const ALERT_SENDER = "jobalerts-noreply@linkedin.com";
+const FORWARDING_SENDER = "forwarding-noreply@google.com";
 
 function setUp() {
   ScriptApp.getProjectTriggers().forEach(function (trigger) {
     if (trigger.getHandlerFunction() === "syncLinkedInAlerts") ScriptApp.deleteTrigger(trigger);
   });
-  ScriptApp.newTrigger("syncLinkedInAlerts").timeBased().everyHours(1).create();
+  ScriptApp.newTrigger("syncLinkedInAlerts").timeBased().everyMinutes(10).create();
   syncLinkedInAlerts();
 }
 
@@ -38,17 +46,22 @@ function syncLinkedInAlerts() {
   const properties = PropertiesService.getUserProperties();
   const sent = JSON.parse(properties.getProperty("sentMessageIds") || "[]");
   const pending = [];
-  GmailApp.search("from:" + ALERT_SENDER + " newer_than:7d", 0, 100).forEach(function (thread) {
-    thread.getMessages().forEach(function (message) {
-      if (message.getFrom().indexOf(ALERT_SENDER) === -1) return;
-      if (sent.indexOf(message.getId()) !== -1) return;
-      pending.push(message);
+  function collect(query, sender, kind) {
+    GmailApp.search(query, 0, 100).forEach(function (thread) {
+      thread.getMessages().forEach(function (message) {
+        if (message.getFrom().indexOf(sender) === -1) return;
+        if (sent.indexOf(message.getId()) !== -1) return;
+        pending.push({ message: message, kind: kind });
+      });
     });
-  });
+  }
+  collect("from:" + ALERT_SENDER + " newer_than:7d", ALERT_SENDER, "alert");
+  collect("from:" + FORWARDING_SENDER + " newer_than:3d", FORWARDING_SENDER, "confirmation");
   if (!pending.length) {
     console.log("No new LinkedIn job alert emails.");
     return;
   }
+  const inbox = Session.getEffectiveUser().getEmail();
   for (let i = 0; i < pending.length; i += 10) {
     const batch = pending.slice(i, i + 10);
     const response = UrlFetchApp.fetch(JOB_HUNT_URL, {
@@ -56,12 +69,22 @@ function syncLinkedInAlerts() {
       contentType: "application/json",
       headers: { Authorization: "Bearer " + JOB_HUNT_KEY },
       payload: JSON.stringify({
-        messages: batch.map(function (message) {
-          return {
+        inbox: inbox,
+        messages: batch.map(function (item) {
+          const message = item.message;
+          const entry = {
             message_id: message.getId(),
             received_at: message.getDate().toISOString(),
-            html: withoutLinkCodes(message.getBody()),
+            kind: item.kind,
+            recipients: recipientsOf(message),
           };
+          if (item.kind === "alert") {
+            entry.html = withoutLinkCodes(message.getBody());
+          } else {
+            entry.subject = message.getSubject();
+            entry.text = message.getPlainBody().slice(0, 5000);
+          }
+          return entry;
         }),
       }),
       muteHttpExceptions: true,
@@ -70,10 +93,19 @@ function syncLinkedInAlerts() {
       console.error("Job Hunt answered " + response.getResponseCode() + ": " + response.getContentText().slice(0, 300));
       return;
     }
-    batch.forEach(function (message) { sent.push(message.getId()); });
+    batch.forEach(function (item) { sent.push(item.message.getId()); });
     properties.setProperty("sentMessageIds", JSON.stringify(sent.slice(-300)));
-    console.log("Sent " + batch.length + " alert emails: " + response.getContentText());
+    console.log("Sent " + batch.length + " emails: " + response.getContentText());
   }
+}
+
+// The addresses Gmail delivered the email to. For an alert someone
+// forwarded here, one of them has their code after a plus.
+function recipientsOf(message) {
+  const head = message.getRawContent().replace(/\\r/g, "").split("\\n\\n")[0].replace(/\\n[ \\t]+/g, " ");
+  return head.split("\\n").filter(function (line) {
+    return /^(delivered-to|x-forwarded-to|x-forwarded-for|to):/i.test(line);
+  }).map(function (line) { return line.slice(0, 300); }).slice(0, 10);
 }
 
 function withoutLinkCodes(html) {

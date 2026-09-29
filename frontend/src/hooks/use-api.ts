@@ -15,6 +15,7 @@ import type {
   AutoApplyDocuments,
   AutoApplyValue,
   AutoPrepareSettings,
+  JobAlertForwarding,
   JobAlertStatus,
   NotificationSettings,
   Skill,
@@ -826,6 +827,17 @@ export function useJobAlertStatus() {
     queryKey: ["job-alerts", "status"],
     queryFn: () => api.get<JobAlertStatus>("/api/v1/job-alerts/status"),
     staleTime: 60 * 1000,
+  });
+}
+
+/** The user's personal address for forwarding LinkedIn alerts. While they
+ *  set it up, Gmail's confirmation code is looked for every 30 seconds. */
+export function useJobAlertForwarding(waiting = false) {
+  return useQuery({
+    queryKey: ["job-alerts", "forwarding"],
+    queryFn: () => api.get<JobAlertForwarding>("/api/v1/job-alerts/forwarding"),
+    staleTime: 60 * 1000,
+    refetchInterval: (query) => (waiting && query.state.data?.ready && !query.state.data.confirmation ? 30 * 1000 : false),
   });
 }
 
