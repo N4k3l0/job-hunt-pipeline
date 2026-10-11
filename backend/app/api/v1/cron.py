@@ -23,10 +23,12 @@ logger = logging.getLogger(__name__)
 # Per-source budget: ANY single source taking longer than this is killed
 # and reported as `timeout`. Sources run concurrently via asyncio.gather,
 # so the function's total wall time is ~max(per-source) + a few seconds
-# of overhead. We pick 50s — the curated source can do real work
-# (fetch 65 companies + ingest hundreds of jobs + inline-score across
-# users) and still leaves ~10s margin under Vercel's 60s ceiling.
-PER_SOURCE_BUDGET_SECONDS = 50
+# of overhead. The curated source reads 218 company boards (~25s), checks
+# them against every job the app has, then adds up to 500 new jobs. The
+# backend runs on Railway, with no request time limit, and the scheduler
+# waits 300s for discovery. (On the Vercel rollback backend, 60s cuts it
+# short.)
+PER_SOURCE_BUDGET_SECONDS = 150
 
 
 def _verify_cron(authorization: str | None) -> None:

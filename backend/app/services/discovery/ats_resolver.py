@@ -55,13 +55,23 @@ def is_ats_url(url: str | None) -> bool:
     return any(host == h or host.endswith("." + h) for h in ATS_HOSTS)
 
 
+# Words that don't tell companies apart. "Wayve Technologies" is on its
+# board as "wayve", so the first word alone is worth trying; "Parker
+# Hannifin" isn't "parker", a different company's board.
+_GENERIC_TAIL = {
+    "technologies", "technology", "tech", "labs", "lab", "ai", "group", "holdings", "international",
+    "global", "usa", "us", "pbc", "software", "systems", "io", "hq", "limited",
+}
+
+
 def _slug_candidates(company: str) -> list[str]:
     """Generate plausible ATS slugs from a free-text company name.
 
     Real-world variants we've seen:
       "Anthropic"           → ["anthropic"]
       "OpenAI, Inc."        → ["openai-inc", "openai"]
-      "Y Combinator"        → ["y-combinator", "ycombinator", "ycomb"]
+      "Y Combinator"        → ["y-combinator", "ycombinator"]
+      "Wayve Technologies"  → ["wayve-technologies", "wayvetechnologies", "wayve"]
       "Stripe"              → ["stripe"]
     We try the most likely first; the resolver stops on the first 200.
     """
@@ -79,8 +89,9 @@ def _slug_candidates(company: str) -> list[str]:
     out.append("-".join(words))
     # squashed slug ("ycombinator")
     out.append("".join(words))
-    # first word only ("y")
-    if len(words) > 1:
+    # first word only ("wayve"), when the other words are generic: otherwise
+    # it can be another company's board that happens to list the same title
+    if len(words) > 1 and all(w in _GENERIC_TAIL for w in words[1:]):
         out.append(words[0])
     # alphanumeric-only of full
     cleaned = re.sub(r"[^a-z0-9]", "", "-".join(words))

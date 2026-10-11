@@ -211,12 +211,15 @@ async def test_company_boards_keep_every_listed_job_open():
         gone = await _job(conn, source_id=curated, discovered=days_ago(60), last_seen=days_ago(20),
                           title="Recruiter", url=board + "3")
 
+    known: set[str] = set()
     outcome = await refresh_from_boards({
         normalize_url(board + "1"): "Staff Software Engineer, GTM AI Engineering ",
         normalize_url(board + "2"): "Data Engineer",
         normalize_url(board + "99"): "A job we don't have yet",
-    }, now=NOW)
+    }, now=NOW, known=known)
     assert outcome == {"listed": 3, "still_listed": 2, "renamed": 1, "reopened": 1, "scores_updated": 0}
+    # The listings the app already has, so only the new one is added.
+    assert known == {normalize_url(board + "1"), normalize_url(board + "2")}
 
     async with engine.connect() as conn:
         rows = {

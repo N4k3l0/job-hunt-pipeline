@@ -239,6 +239,39 @@ class BoardListings:
     # Every open job on each board that answered, cap or not: normalized
     # URL -> title. What says a job we already have is still open.
     listed: dict[str, str] = field(default_factory=dict)
+    # Each board's jobs as it listed them, uncapped, for pick_new_jobs.
+    boards: list[list[dict]] = field(default_factory=list)
+
+
+def pick_new_jobs(
+    boards: list[list[dict]],
+    known: set[str] | frozenset[str] = frozenset(),
+    *,
+    keywords: set[str] | None = None,
+    per_company: int = PER_COMPANY_CAP,
+    limit: int = 500,
+) -> list[dict]:
+    """Jobs to add: the ones not already known, matching `keywords` if
+    given, up to `per_company` from each board, taking turns between
+    boards (each one's first job, then each one's second...) up to `limit`.
+
+    Taking every board's newest 30 in list order filled the 500 from the
+    first 17 companies every day, mostly with jobs already known, so the
+    rest of the list never added a job."""
+    queues = []
+    for batch in boards:
+        fresh = [j for j in batch if normalize_url(j.get("job_url")) not in known]
+        if keywords:
+            fresh = [j for j in fresh if matches_keywords(f"{j.get('title','')} {j.get('raw_description','')}", keywords)]
+        queues.append(fresh[:per_company])
+    picked: list[dict] = []
+    for turn in range(per_company):
+        for queue in queues:
+            if turn < len(queue):
+                picked.append(queue[turn])
+                if limit and len(picked) >= limit:
+                    return picked
+    return picked
 
 
 async def fetch_jobs(
@@ -291,24 +324,11 @@ async def fetch_board_listings(
         for batch in batches for j in batch
         if (key := normalize_url(j.get("job_url")))
     }
-    # Cap per company after fetching, so the cap takes the ones the ATS
-    # returned first.
-    all_jobs: list[dict] = [j for batch in batches for j in batch[:PER_COMPANY_CAP]]
-
-    # Apply keyword filter against title + description. Skill-aware scoring
-    # later will sort the survivors by fit.
-    if keywords:
-        kept = []
-        for j in all_jobs:
-            text = f"{j.get('title','')} {j.get('raw_description','')}"
-            if matches_keywords(text, keywords):
-                kept.append(j)
-        all_jobs = kept
-
-    if limit and len(all_jobs) > limit:
-        all_jobs = all_jobs[:limit]
+    # Matching jobs first, then the cap, so a matching role past a big
+    # board's newest 30 (Anthropic lists 600) still counts.
+    all_jobs = pick_new_jobs(list(batches), keywords=keywords, limit=limit)
 
     logger.info("Curated: %d companies → %d jobs after keyword filter, %d listed in all",
                 len(companies), len(all_jobs), len(listed))
-    return BoardListings(jobs=all_jobs, listed=listed)
+    return BoardListings(jobs=all_jobs, listed=listed, boards=list(batches))
 
