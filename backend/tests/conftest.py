@@ -62,5 +62,6 @@ def _read_through_finds_nothing(monkeypatch):
     monkeypatch.setattr(prepare, "read_through", reads_fine)
     monkeypatch.setattr(writing, "read_through", reads_fine)
     monkeypatch.setattr(auto_apply_api, "read_through", reads_fine)
+    monkeypatch.setattr(auto_apply_api, "revise_plainly", keeps_lines)
     monkeypatch.setattr(prepare, "revise_plainly", keeps_lines)
     monkeypatch.setattr(writing, "revise_plainly", keeps_lines)

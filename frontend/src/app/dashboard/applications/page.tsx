@@ -132,7 +132,7 @@ const STATUS_LABELS: Record<string, string> = {
   interviewing: "Interviewing",
   offered: "Offered",
   rejected: "Rejected",
-  ghosted: "Ghosted",
+  ghosted: "No reply",
   archived: "Archived",
 };
 
@@ -164,6 +164,8 @@ const NEXT_STATUSES: Record<string, string[]> = {
   applied: ["interviewing", "rejected"],
   follow_up_due: ["interviewing", "ghosted"],
   interviewing: ["offered", "rejected"],
+  // No reply for 30 days moves it here by itself; a reply after all moves it back.
+  ghosted: ["applied", "interviewing", "rejected"],
 };
 
 function Dot({ status }: { status: string }) {

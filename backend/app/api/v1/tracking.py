@@ -21,7 +21,8 @@ VALID_TRANSITIONS = {
     "interviewing": ["offered", "rejected", "ghosted", "archived"],
     "offered": ["archived"],
     "rejected": ["archived"],
-    "ghosted": ["archived"],
+    # A reply after all: back to waiting, or straight to what happened.
+    "ghosted": ["applied", "interviewing", "rejected", "archived"],
 }
 
 

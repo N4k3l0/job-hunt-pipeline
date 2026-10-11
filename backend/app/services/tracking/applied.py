@@ -1,12 +1,16 @@
 """Recording that a user sent an application."""
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.tracking import ApplicationTracking
+
+# A reminder to follow up, a week after sending (the same as marking a job
+# applied by hand). Sending through the app used to set none.
+FOLLOW_UP_DAYS = 7
 
 
 async def record_applied(db: AsyncSession, user_id: UUID, job_id: UUID) -> ApplicationTracking:
@@ -30,4 +34,6 @@ async def record_applied(db: AsyncSession, user_id: UUID, job_id: UUID) -> Appli
         tracking.status = "applied"
         if not tracking.applied_at:
             tracking.applied_at = datetime.now(timezone.utc)
+    if tracking.status == "applied" and not tracking.follow_up_date:
+        tracking.follow_up_date = date.today() + timedelta(days=FOLLOW_UP_DAYS)
     return tracking

@@ -401,7 +401,7 @@ async def test_a_cover_letter_that_needs_work_blocks_approval(client, monkeypatc
     assert r.json()["detail"]["message"].startswith("Your cover letter needs plainer wording first: ")
 
 
-async def test_rewrite_suggests_a_plainer_answer(client, monkeypatch):
+async def test_rewrite_saves_a_plainer_answer(client, monkeypatch):
     from app.services.auto_apply import drafting
 
     app_id = (await client.post(f"/api/v1/auto-apply/jobs/{JOB_A}")).json()["id"]
@@ -418,14 +418,11 @@ async def test_rewrite_suggests_a_plainer_answer(client, monkeypatch):
     monkeypatch.setattr("app.llm.client.llm_client", FakeLLM())
     r = await client.post(f"/api/v1/auto-apply/{app_id}/rewrite", json={"key": "question_why"})
     assert r.status_code == 200, r.text
-    assert r.json() == {
-        "suggestion": "I want to work at Stripe because payments matter. I built payment tools for five years.",
-        "writing_problems": [],
-    }
+    why = by_key(r.json())["question_why"]
+    # One press: rewritten and saved, and it passes the check.
+    assert why["answer"]["value"] == "I want to work at Stripe because payments matter. I built payment tools for five years."
+    assert why["answer"]["source"] == "user" and why["writing_problems"] == []
     assert "Why Stripe?" in asked["prompt"] and dashed in asked["prompt"]
-    # Nothing is saved until the user chooses it.
-    app = (await client.get(f"/api/v1/auto-apply/{app_id}")).json()
-    assert by_key(app)["question_why"]["answer"]["value"] == dashed
 
 
 async def test_the_read_through_decides_whether_an_answer_is_ready(client, monkeypatch):
@@ -569,13 +566,10 @@ async def test_using_the_plainer_version_clears_the_check_without_reading_it_twi
     assert reads == [dashed]
 
     r = await client.post(f"/api/v1/auto-apply/{app_id}/rewrite", json={"key": "question_why"})
-    assert r.json() == {"suggestion": plainer, "writing_problems": []}
-
-    r = await client.put(f"/api/v1/auto-apply/{app_id}/answers", json={"answers": {"question_why": plainer}})
     why = by_key(r.json())["question_why"]
     assert why["answer"]["value"] == plainer
     assert why["writing_problems"] == []  # "Change this before it's sent" goes away
-    assert reads == [dashed]  # the suggestion was read when it was made, not again
+    assert reads == [dashed]  # the rewrite was read when it was made, not again on saving
 
 
 async def test_approving_works_for_a_job_without_a_country(client):
@@ -771,3 +765,35 @@ async def test_the_proudest_project_is_the_users_to_set_and_drafting_uses_it(cli
     assert "Proudest project (the candidate's own choice" in facts_text and "Job Hunt Pipeline" in facts_text
 
     assert (await client.put("/api/v1/auto-apply/settings", json={"proudest_project": ""})).json()["proudest_project"] is None
+
+
+async def test_one_press_fixes_the_rewrite_until_nothing_serious_is_left(client, monkeypatch):
+    from app.api.v1 import auto_apply as auto_apply_api
+
+    first = "I spearheaded payments at Acme, and I want to keep doing that kind of work at Stripe now."
+    fixed = "I led payments at Acme. I want to keep doing that kind of work at Stripe."
+    reads, revisions = [], []
+
+    class FakeLLM:
+        async def generate(self, task, system, prompt, max_tokens=0):
+            return first
+
+    async def reader(text, *, what, llm=None):
+        reads.append(text)
+        return ['"spearheaded": say led.'] if "spearheaded" in text else []
+
+    async def reviser(lines, problems, *, what, llm=None):
+        revisions.append(problems)
+        return [fixed]
+
+    monkeypatch.setattr("app.llm.client.llm_client", FakeLLM())
+    monkeypatch.setattr(auto_apply_api, "read_through", reader)
+    monkeypatch.setattr(auto_apply_api, "revise_plainly", reviser)
+
+    app_id = (await client.post(f"/api/v1/auto-apply/jobs/{JOB_A}")).json()["id"]
+    await client.put(f"/api/v1/auto-apply/{app_id}/answers", json={"answers": {"question_why": "My own wordy answer about Stripe and payments."}})
+    r = await client.post(f"/api/v1/auto-apply/{app_id}/rewrite", json={"key": "question_why"})
+    why = by_key(r.json())["question_why"]
+    assert why["answer"]["value"] == fixed and why["writing_problems"] == []
+    assert reads == [first, fixed]  # read, fixed, read again: clean
+    assert revisions[0][-1] == '"spearheaded": say led.'
