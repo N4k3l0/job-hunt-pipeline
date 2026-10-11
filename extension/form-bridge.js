@@ -53,20 +53,24 @@ async function reportSent() {
 
 // After the user presses Submit, watch for the form going away and a thank
 // you message, or a move to the confirmation page (seen on the next load).
+// Some forms email a code first and send on the second press, once it's
+// typed in, so every press watches for another 10 minutes.
+const WATCH_MS = 10 * 60 * 1000;
+
 function watchForSubmit() {
-  let watching = false;
+  let until = 0;
   const start = async () => {
+    const watching = Date.now() < until;
+    until = Date.now() + WATCH_MS;
     if (watching) return;
-    watching = true;
     await ask({ type: "submit-clicked" });
-    for (let i = 0; i < 120; i++) {
+    while (Date.now() < until) {
       await sleep(1000);
       if (looksSent()) {
         await reportSent();
         return;
       }
     }
-    watching = false;
   };
   document.addEventListener("submit", start, true);
   document.addEventListener(

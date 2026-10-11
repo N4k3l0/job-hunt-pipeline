@@ -28,6 +28,7 @@ import httpx
 from app.core.database import create_worker_session
 from app.core.logging import setup_logging
 from app.models.auto_apply import AutoApplication
+from app.services.auto_apply import email_codes
 from app.services.auto_apply.extension import fill_details, mark_sent
 
 logger = logging.getLogger("sender")
@@ -128,6 +129,24 @@ async def _looks_sent(page) -> bool:
             return new RegExp(pattern, 'i').test(document.body ? document.body.innerText : '');
         }""",
         SUCCESS_TEXT,
+    )
+
+
+# After Submit, some Greenhouse forms email a code "to confirm you're a
+# human" and wait for it (services/auto_apply/email_codes.py).
+EMAIL_CODE_TEXT = (
+    r"verification code (?:was|has been) sent|enter the \d+-character code|"
+    r"confirm you(?:'|\u2019)re a human|security code"
+)
+
+
+async def _asks_for_email_code(page) -> bool:
+    return await _ask_page(page,
+        """(pattern) => {
+            const scope = document.querySelector('#application-form, #application_form, form') || document.body;
+            return new RegExp(pattern, 'i').test(scope ? scope.innerText : '');
+        }""",
+        EMAIL_CODE_TEXT,
     )
 
 
@@ -340,7 +359,9 @@ async def send_application(application_id: uuid.UUID, *, dry_run: bool, claimed:
 
         what = "practice" if dry_run else "send"
         outcome["at"] = datetime.now(timezone.utc).isoformat()
-        if outcome["status"] == "form_rejected" and outcome.get("rejected"):
+        if outcome["status"] == email_codes.STATUS:
+            outcome["message"] = email_codes.message((payload.get("job") or {}).get("company"))
+        elif outcome["status"] == "form_rejected" and outcome.get("rejected"):
             outcome["message"] = _rejected_message(outcome["rejected"], practice=dry_run)
         elif outcome["status"] == "dry_run" and outcome.get("rehearsed"):
             outcome["message"] = REHEARSED_MESSAGE
@@ -439,6 +460,9 @@ async def _watch_after_submit(page) -> str:
         if await _human_check_showing(page):
             logger.info("The form is asking the applicant to prove they're human. Stopping.")
             return "human_check"
+        if await _asks_for_email_code(page):
+            logger.info("The form emailed the applicant a code to type in. Stopping: that's theirs to do.")
+            return "email_code"
         # The form checked the answers and turned some down: it wasn't sent.
         if await _form_errors(page):
             return "form_rejected"

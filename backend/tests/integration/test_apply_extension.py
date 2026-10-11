@@ -386,3 +386,41 @@ def test_a_long_list_of_turned_down_answers_is_cut_short():
         "Practice run stopped: the form didn't accept these answers: "
         "Question 1; Question 2; Question 3; Question 4; Question 5; Question 6; and more. Nothing was sent."
     )
+
+
+async def test_a_form_that_emails_a_code_is_sent_from_the_browser(client, monkeypatch):
+    from app.services.auto_apply.sender import run_requested
+
+    runs = _fake_browser(monkeypatch, "email_code")
+    app_id = await _approved(client)
+    body = (await client.get(f"/api/v1/auto-apply/{app_id}")).json()
+    assert body["sending"]["from_browser_only"] is False  # nobody knows yet
+
+    # The first real send meets the code step: it stops, and says why.
+    await client.post(f"/api/v1/auto-apply/{app_id}/send", json={})
+    await run_requested()
+    body = (await client.get(f"/api/v1/auto-apply/{app_id}")).json()
+    assert body["status"] == "queued" and body["sending"]["send"]["status"] == "email_code"
+    assert body["error"].startswith("Stripe's form emails you a code to prove a person is applying")
+    assert body["sending"]["from_browser_only"] is True
+    assert await _tracking(JOB) == []
+
+    # From then on the app doesn't try again; a practice run is still fine.
+    r = await client.post(f"/api/v1/auto-apply/{app_id}/send", json={})
+    assert r.status_code == 409 and "Send this one from your own browser" in r.json()["detail"]
+    assert (await client.post(f"/api/v1/auto-apply/{app_id}/send", json={"practice": True})).status_code == 200
+    listed = (await client.get("/api/v1/auto-apply")).json()
+    assert listed[0]["sending"]["from_browser_only"] is True
+    assert runs == [False]
+
+
+def test_forms_known_to_email_a_code():
+    from types import SimpleNamespace
+
+    from app.services.auto_apply.email_codes import asks_for_code, board_of
+
+    anthropic = SimpleNamespace(result=None, form_url="https://job-boards.greenhouse.io/anthropic/jobs/5390966008")
+    stripe = SimpleNamespace(result=None, form_url="https://job-boards.greenhouse.io/stripe/jobs/1")
+    assert asks_for_code(anthropic) and not asks_for_code(stripe)
+    assert asks_for_code(stripe, frozenset({("greenhouse", "stripe")}))
+    assert board_of("https://jobs.lever.co/Acme/11111111-2222-3333-4444-555555555555") == ("lever", "acme")
