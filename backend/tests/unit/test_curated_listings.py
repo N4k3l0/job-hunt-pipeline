@@ -52,3 +52,16 @@ def test_new_jobs_skip_known_ones_and_every_company_gets_a_turn():
     # Never more than the cap from one company.
     many = curated_service.pick_new_jobs(boards, limit=0)
     assert sum(j["company"] == "first" for j in many) == curated_service.PER_COMPANY_CAP
+
+
+def test_only_titles_matching_someones_roles_or_skills_are_added():
+    titles = curated_service.title_matcher(["AI Engineer", "Product Manager", "Python", "ai"])
+    board = [{"title": t, "job_url": f"https://jobs.example.com/acme/{i}"} for i, t in enumerate([
+        "Senior AI Engineer, Platform", "Account Executive", "Maintenance Technician",
+        "Group Product Manager", "Python Developer", "AI Solutions Architect",
+    ])]
+    picked = curated_service.pick_new_jobs([board], titles=titles)
+    assert [j["title"] for j in picked] == [
+        "Senior AI Engineer, Platform", "Group Product Manager", "Python Developer", "AI Solutions Architect",
+    ]
+    assert curated_service.title_matcher([]) is None
