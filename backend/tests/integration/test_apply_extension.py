@@ -424,3 +424,17 @@ def test_forms_known_to_email_a_code():
     assert asks_for_code(anthropic) and not asks_for_code(stripe)
     assert asks_for_code(stripe, frozenset({("greenhouse", "stripe")}))
     assert board_of("https://jobs.lever.co/Acme/11111111-2222-3333-4444-555555555555") == ("lever", "acme")
+
+
+async def test_sending_sets_a_follow_up_a_week_later(client):
+    from datetime import date, timedelta
+
+    from app.core.database import engine
+
+    app_id = await _approved(client)
+    r = await client.post(f"/api/v1/auto-apply/{app_id}/sent")
+    assert r.status_code == 200, r.text
+    async with engine.connect() as conn:
+        follow_up = (await conn.execute(text(
+            "SELECT follow_up_date FROM application_tracking WHERE job_id = :j"), {"j": JOB})).scalar()
+    assert follow_up == date.today() + timedelta(days=7)

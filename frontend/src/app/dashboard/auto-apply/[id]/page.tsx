@@ -21,7 +21,7 @@ import { api } from "@/lib/api-client";
 import { askExtension } from "@/lib/extension";
 import { AutoApplyStatusPill } from "@/components/auto-apply-status";
 import { OperationProgress } from "@/components/operation-progress";
-import type { AutoApplicationDetail, AutoApplyField, AutoApplyFill, AutoApplyValue } from "@/lib/types";
+import type { AutoApplicationDetail, AutoApplyField, AutoApplyDocuments, AutoApplyFill, AutoApplyValue } from "@/lib/types";
 
 // How long the page keeps checking whether the form was sent.
 const WATCH_MS = 20 * 60 * 1000;
@@ -43,6 +43,47 @@ function isEmpty(value: AutoApplyValue | undefined) {
 
 /** Which resume goes with the application, for the resume question. */
 type AttachedResume = { tailored: boolean; url: string | null };
+
+/** Open the resume or cover letter. Its link is signed and only lasts a few
+ *  minutes, so one taken when the page loaded may have run out ("exp claim
+ *  timestamp check failed"): a fresh one is fetched on each press. */
+async function openDocument(applicationId: string, kind: "resume" | "cover_letter") {
+  const tab = window.open("", "_blank");
+  try {
+    const documents = await api.get<AutoApplyDocuments>(`/api/v1/auto-apply/${applicationId}/documents`);
+    const url = documents[kind]?.url;
+    if (!url) throw new Error("It isn't attached any more.");
+    if (tab) {
+      tab.opener = null;
+      tab.location.href = url;
+    } else {
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
+  } catch (e) {
+    tab?.close();
+    throw e;
+  }
+}
+
+function OpenDocument({ applicationId, kind, className, children }: {
+  applicationId: string; kind: "resume" | "cover_letter"; className: string; children: React.ReactNode;
+}) {
+  const toast = useToast();
+  return (
+    <button
+      type="button"
+      className={className}
+      style={className.includes("ds-btn") ? undefined : { background: "none", border: 0, padding: 0, cursor: "pointer", font: "inherit" }}
+      onClick={() =>
+        openDocument(applicationId, kind).catch((e) =>
+          toast.error("Couldn't open it", { description: e instanceof Error ? e.message : undefined }),
+        )
+      }
+    >
+      {children}
+    </button>
+  );
+}
 
 function displayValue(field: AutoApplyField, value: AutoApplyValue | undefined, resume?: AttachedResume): string {
   if (isEmpty(value)) return "";
@@ -184,7 +225,7 @@ function FieldInput({
   );
 }
 
-function AnswerMeta({ field, resume }: { field: AutoApplyField; resume?: AttachedResume }) {
+function AnswerMeta({ field, resume, applicationId }: { field: AutoApplyField; resume?: AttachedResume; applicationId: string }) {
   const answer = field.answer;
   // The resume question's answer is "the resume": say which one is attached.
   if (field.type === "file" && field.kind === "resume" && resume) {
@@ -194,7 +235,7 @@ function AnswerMeta({ field, resume }: { field: AutoApplyField; resume?: Attache
         {resume.url && (
           <>
             {" · "}
-            <a href={resume.url} target="_blank" rel="noopener noreferrer" className="ds-accent-fg">Open it</a>
+            <OpenDocument applicationId={applicationId} kind="resume" className="ds-accent-fg">Open it</OpenDocument>
           </>
         )}
       </div>
@@ -237,20 +278,20 @@ function WritingCheck({
   field,
   value,
   applicationId,
-  onUse,
   saving,
+  onRewrite,
+  rewriting,
 }: {
   field: AutoApplyField;
   value: AutoApplyValue | undefined;
   applicationId: string;
   saving: boolean;
-  /** Saves the plainer version, which checks it again. */
-  onUse: (text: string) => void;
+  /** Rewrites the answer in plain English and saves it. */
+  onRewrite: () => void;
+  rewriting: boolean;
 }) {
-  const rewrite = useRewriteAnswer(applicationId);
   const keep = useKeepWording(applicationId);
   const toast = useToast();
-  const [suggestion, setSuggestion] = useState<{ text: string; problems: string[] } | null>(null);
   const problems = field.writing_problems ?? [];
   if (!problems.length || field.wording_ok) return null;
   // The problems are for the saved words. Once they're changed here, they
@@ -277,22 +318,12 @@ function WritingCheck({
       <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
         {problems.map((p) => <li key={p}>{p}</li>)}
       </ul>
-      <div className="flex flex-wrap" style={{ gap: 8, marginTop: 10 }}>
-        <button
-          type="button"
-          className="ds-btn sm"
-          disabled={rewrite.isPending}
-          onClick={() =>
-            rewrite.mutate(field.key, {
-              onSuccess: (r) => setSuggestion({ text: r.suggestion, problems: r.writing_problems }),
-              onError: (e) => toast.error("Couldn't rewrite it", { description: e.message }),
-            })
-          }
-        >
-          {rewrite.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
-          Rewrite in plain English
+      <div className="flex flex-wrap items-center" style={{ gap: 8, marginTop: 10 }}>
+        <button type="button" className="ds-btn sm" disabled={rewriting || saving} onClick={onRewrite}>
+          {rewriting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
+          {rewriting ? "Rewriting and checking\u2026" : "Rewrite in plain English"}
         </button>
-        {!hasDash && (
+        {!hasDash && !rewriting && (
           <button
             type="button"
             className="ds-btn ghost sm"
@@ -307,33 +338,12 @@ function WritingCheck({
             It&apos;s fine as it is
           </button>
         )}
+        {!rewriting && (
+          <span className="ds-dim" style={{ fontSize: 12 }}>
+            The app rewrites it, checks it, and saves it. Same facts, your answer.
+          </span>
+        )}
       </div>
-      {suggestion && (
-        <div className="ds-card" style={{ marginTop: 10, padding: 12 }}>
-          <div className="ds-dim" style={{ fontSize: 12, marginBottom: 6 }}>
-            A plainer version, same facts. Use it, or keep yours and change it by hand.
-          </div>
-          <p style={{ whiteSpace: "pre-line", margin: 0 }}>{suggestion.text}</p>
-          {suggestion.problems.length > 0 && (
-            <div className="text-amber-500" style={{ fontSize: 12, marginTop: 8 }}>
-              Still worth changing: {suggestion.problems.join(" ")}
-            </div>
-          )}
-          <div className="flex flex-wrap" style={{ gap: 8, marginTop: 10 }}>
-            <button
-              type="button"
-              className="ds-btn primary sm"
-              onClick={() => {
-                onUse(suggestion.text);
-                setSuggestion(null);
-              }}
-            >
-              <Check className="h-3.5 w-3.5" /> Use this
-            </button>
-            <button type="button" className="ds-btn ghost sm" onClick={() => setSuggestion(null)}>Keep mine</button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -342,7 +352,8 @@ function Question({
   field,
   value,
   onChange,
-  onUsePlainer,
+  onRewrite,
+  rewriting,
   onFirstGo,
   writing,
   saving,
@@ -354,7 +365,8 @@ function Question({
   field: AutoApplyField;
   value: AutoApplyValue | undefined;
   onChange: (value: AutoApplyValue) => void;
-  onUsePlainer: (text: string) => void;
+  onRewrite: () => void;
+  rewriting: boolean;
   onFirstGo: () => void;
   writing: boolean;
   saving: boolean;
@@ -421,8 +433,8 @@ function Question({
           </div>
         )}
       </div>
-      <AnswerMeta field={field} resume={resume} />
-      {editable && <WritingCheck field={field} value={value} applicationId={applicationId} onUse={onUsePlainer} saving={saving} />}
+      <AnswerMeta field={field} resume={resume} applicationId={applicationId} />
+      {editable && <WritingCheck field={field} value={value} applicationId={applicationId} saving={saving} onRewrite={onRewrite} rewriting={rewriting} />}
     </div>
   );
 }
@@ -641,9 +653,9 @@ function Documents({ id }: { id: string }) {
                 )}
               </div>
             </div>
-            <a href={file.url} target="_blank" rel="noopener noreferrer" className="ds-btn ghost">
+            <OpenDocument applicationId={id} kind={file.name} className="ds-btn ghost">
               <ExternalLink className="h-3.5 w-3.5" /> Open
-            </a>
+            </OpenDocument>
           </div>
         ))}
       </div>
@@ -678,6 +690,7 @@ export default function AutoApplicationPage({ params }: { params: Promise<{ id: 
   const [filling, setFilling] = useState(false);
   const [showDone, setShowDone] = useState(false);
   const firstGo = useFirstGo(id);
+  const rewrite = useRewriteAnswer(id);
   const asList = useMemo(() => (application ? [application] : undefined), [application]);
   useSendFinished(asList);
 
@@ -799,28 +812,23 @@ export default function AutoApplicationPage({ params }: { params: Promise<{ id: 
     });
   }
 
-  // Using the plainer version saves it right away, along with anything else
-  // changed here, so the writing check runs on it and clears.
-  function savePlainer(key: string, text: string) {
-    setValue(key, text);
-    const keys = new Set(edited).add(key);
-    const answers = Object.fromEntries(
-      [...keys]
-        .filter((k) => application!.fields.some((f) => f.key === k && f.type !== "file"))
-        .map((k) => [k, k === key ? text : values[k] ?? null]),
-    );
-    save.mutate(
-      { answers, approve: false },
-      {
-        onSuccess: (data) => {
-          const field = data.fields.find((f) => f.key === key);
-          const left = field?.wording_ok ? [] : field?.writing_problems ?? [];
-          if (left.length) toast.error("Saved, but it still needs a change", { description: left[0] });
-          else toast.success("Saved the plainer version", { description: "It passes the writing check." });
-        },
-        onError: (e: Error) => toast.error("Couldn't save it", { description: e.message }),
-      },
-    );
+  // One press rewrites the answer and saves it: the app reads it through
+  // and fixes it again until nothing serious is left. Anything typed
+  // elsewhere is saved first, since the page reloads its answers after.
+  async function rewriteAnswer(key: string) {
+    try {
+      const typed = [...edited].filter((k) => k !== key && application!.fields.some((f) => f.key === k && f.type !== "file"));
+      if (typed.length) {
+        await save.mutateAsync({ answers: Object.fromEntries(typed.map((k) => [k, values[k] ?? null])), approve: false });
+      }
+      const data = await rewrite.mutateAsync(key);
+      const field = data.fields.find((f) => f.key === key);
+      const left = field?.wording_ok ? [] : field?.writing_problems ?? [];
+      if (left.length) toast.error("Rewritten and saved. One thing is still worth changing", { description: left[0] });
+      else toast.success("Rewritten and saved", { description: "It passes the writing check. Change any words you like." });
+    } catch (e) {
+      toast.error("Couldn't rewrite it", { description: e instanceof Error ? e.message : undefined });
+    }
   }
 
   // Anything typed elsewhere is saved first: the page reloads its answers
@@ -844,7 +852,8 @@ export default function AutoApplicationPage({ params }: { params: Promise<{ id: 
       field={field}
       value={values[field.key]}
       onChange={(v) => setValue(field.key, v)}
-      onUsePlainer={(text) => savePlainer(field.key, text)}
+      onRewrite={() => rewriteAnswer(field.key)}
+      rewriting={rewrite.isPending && rewrite.variables === field.key}
       onFirstGo={() => writeFirstGo(field.key)}
       writing={firstGo.isPending && firstGo.variables === field.key}
       saving={save.isPending}

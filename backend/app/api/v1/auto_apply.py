@@ -34,7 +34,7 @@ from app.services.auto_apply.prepare import (
 )
 from app.services.job_freshness import closed_note
 from app.services.outreach.follow_up import NotSentYet, draft_follow_up
-from app.llm.style import has_dashes, read_through, saved_read, writing_problems
+from app.llm.style import has_dashes, read_through, revise_plainly, saved_read, writing_problems
 from app.services.auto_apply.drafting import rewrite_plainly
 from app.services.auto_apply.resume_pdf import tailored_for_job
 from app.services.auto_apply.writing import (
@@ -241,26 +241,45 @@ def _written_answer(application: AutoApplication, key: str) -> tuple[dict, dict]
     return item, entry
 
 
+# Read, fix, read again: at most this many reads per press.
+REWRITE_ROUNDS = 3
+
+
 @router.post("/{application_id}/rewrite")
 async def rewrite_answer(application_id: UUID, body: AnswerKey, user_id: CurrentUserId, db: DbSession):
-    """A plainer version of one answer, for the user to use or not. Nothing
-    is saved until they choose it."""
+    """Rewrite one answer in plain English and save it. The rewrite is read
+    through and fixed again until nothing serious is left (REWRITE_ROUNDS
+    reads at most), so one press does it. Showing a suggestion to accept
+    meant the reader found something new on every press. The user can
+    still change the words by hand."""
     application = await _load(db, user_id, application_id)
     item, entry = _written_answer(application, body.key)
-    suggestion = await rewrite_plainly(item["label"], entry["value"])
-    problems = writing_problems(suggestion)
-    try:
-        found = await read_through(suggestion, what=f"an answer to the question \"{item['label']}\"")
-    except Exception:  # noqa: BLE001 — it's read again when the user saves it
-        found = None
+    what = f"an answer to the question \"{item['label']}\""
+    text = await rewrite_plainly(item["label"], entry["value"])
+    found: list[str] | None = None
+    for round_ in range(REWRITE_ROUNDS):
+        try:
+            found = await read_through(text, what=what)
+        except Exception:  # noqa: BLE001 — saving reads it again
+            found = None
+            break
+        problems = writing_problems(text) + found
+        if not problems or round_ == REWRITE_ROUNDS - 1:
+            break
+        revised = await revise_plainly([text], problems, what=what)
+        if revised == [text]:
+            break
+        text, found = revised[0], None
     if found is not None:
-        problems += found
-        # Kept, so using the suggestion doesn't read the same words again.
+        # What it found is kept, so saving doesn't read the same words again.
         answers = dict(application.answers or {})
-        answers[body.key] = {**entry, "suggested_read": saved_read(suggestion, found)}
+        answers[body.key] = {**entry, "suggested_read": saved_read(text, found)}
         application.answers = answers
-        await db.commit()
-    return {"suggestion": suggestion, "writing_problems": problems}
+    try:
+        await update_answers(db, application, {body.key: text}, approve=False)
+    except AnswerError as e:
+        raise _answer_error(e) from e
+    return await _view(db, user_id, application_id, detail=True)
 
 
 @router.post("/{application_id}/first-go")

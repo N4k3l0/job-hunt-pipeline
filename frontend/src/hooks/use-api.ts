@@ -704,10 +704,16 @@ export function useFirstGo(id: string) {
 }
 
 /** A plainer version of one answer. Nothing is saved until the user uses it. */
+/** Rewrite one answer in plain English and save it (read through and fixed
+ *  until it's clean). */
 export function useRewriteAnswer(id: string) {
+  const qc = useQueryClient();
   return useMutation({
-    mutationFn: (key: string) =>
-      api.post<{ suggestion: string; writing_problems: string[] }>(`/api/v1/auto-apply/${id}/rewrite`, { key }),
+    mutationFn: (key: string) => api.post<AutoApplicationDetail>(`/api/v1/auto-apply/${id}/rewrite`, { key }),
+    onSuccess: (data) => {
+      qc.setQueryData(["auto-apply", id], data);
+      qc.invalidateQueries({ queryKey: ["auto-apply"], exact: true });
+    },
   });
 }
 

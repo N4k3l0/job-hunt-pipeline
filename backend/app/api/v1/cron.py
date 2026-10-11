@@ -341,6 +341,11 @@ async def cron_expire_stale(
                 )
         except asyncio.TimeoutError:
             outcome["link_check"] = "timeout"
+    if not dry_run:
+        from app.services.tracking.quiet import close_quiet_applications
+
+        async with create_worker_session()() as db:
+            outcome["applications"] = await close_quiet_applications(db)
     if not dry_run and trim_limit > 0:
         from app.services.maintenance.trim_jobs import trim_old_jobs
 
