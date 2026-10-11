@@ -165,8 +165,8 @@ export function JobAlertsCard() {
           {isAdmin && (
             <>
               {" "}
-              The same script sends the app&apos;s daily email from that Gmail. If you set it up before 12 October, press
-              Get a new script and paste it over the old one, so it can.
+              The same script sends the app&apos;s daily email from that Gmail. Scripts made before 11 October
+              don&apos;t: press Get a new script and paste it over the old one.
             </>
           )}
         </CardDescription>
