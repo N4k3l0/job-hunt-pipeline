@@ -129,6 +129,8 @@ export interface AutoPrepareSettings {
   choices: number[];
   min_score: number;
   cost_each_usd: number;
+  /** The project to talk about when a form asks for a favourite or proudest one. */
+  proudest_project: string | null;
 }
 
 /** What the app spent on AI one day, by task (admin only). */

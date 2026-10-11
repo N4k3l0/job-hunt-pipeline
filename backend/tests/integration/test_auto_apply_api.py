@@ -726,3 +726,48 @@ async def test_apply_for_me_while_the_ai_is_paused_waits_then_finishes(client):
     assert body["status"] == "needs_you" and body["error"] is None
     assert by_key(body)["question_why"]["answer"]["source"] == "drafted"
     assert body["prepared_by"] == "user"
+
+
+async def test_a_github_link_added_to_the_profile_goes_into_unsent_applications(client):
+    import json
+
+    from app.core.database import engine
+
+    app_id = (await client.post(f"/api/v1/auto-apply/jobs/{JOB_A}")).json()["id"]
+    github_field = {"key": "urls[GitHub]", "type": "url", "label": "GitHub URL", "required": False, "group": "application"}
+    async with engine.begin() as conn:
+        form = json.loads((await conn.execute(text(
+            "SELECT form::text FROM auto_applications WHERE id = :id"), {"id": app_id})).scalar())
+        await conn.execute(text("UPDATE auto_applications SET form = CAST(:form AS jsonb) WHERE id = :id"),
+                           {"form": json.dumps(form + [github_field]), "id": app_id})
+        # As the app makes profiles (the test's own row leaves it empty).
+        await conn.execute(text("UPDATE candidate_profiles SET salary_currency = 'USD' WHERE user_id = :u"), {"u": USER})
+    assert by_key((await client.get(f"/api/v1/auto-apply/{app_id}")).json())["urls[GitHub]"]["answer"] is None
+
+    r = await client.put("/api/v1/candidates/profile", json={"links": {"github": "https://github.com/ada"}})
+    assert r.status_code == 200, r.text
+    github = by_key((await client.get(f"/api/v1/auto-apply/{app_id}")).json())["urls[GitHub]"]
+    assert github["answer"]["value"] == "https://github.com/ada" and github["answer"]["source"] == "profile"
+
+
+async def test_the_proudest_project_is_the_users_to_set_and_drafting_uses_it(client):
+    from app.api.deps import DbSession, get_current_user
+    from app.core.database import async_session
+    from app.main import app
+    from app.models.user import User
+    from app.services.auto_apply.prepare import load_applicant
+
+    async def me(db: DbSession) -> User:
+        return await db.get(User, USER)
+
+    app.dependency_overrides[get_current_user] = me
+    r = await client.put("/api/v1/auto-apply/settings", json={"proudest_project": "  Job Hunt Pipeline  "})
+    assert r.status_code == 200 and r.json()["proudest_project"] == "Job Hunt Pipeline"
+    # Changing one setting leaves the other alone.
+    assert (await client.put("/api/v1/auto-apply/settings", json={"per_day": 2})).json()["proudest_project"] == "Job Hunt Pipeline"
+
+    async with async_session() as db:
+        _, facts_text, _, _ = await load_applicant(db, USER)
+    assert "Proudest project (the candidate's own choice" in facts_text and "Job Hunt Pipeline" in facts_text
+
+    assert (await client.put("/api/v1/auto-apply/settings", json={"proudest_project": ""})).json()["proudest_project"] is None

@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/toast";
-import { useProfile, useUpdateProfile } from "@/hooks/use-api";
+import { useAutoPrepareSettings, useProfile, useSaveProudestProject, useUpdateProfile } from "@/hooks/use-api";
 import { COUNTRY_OPTIONS } from "@/lib/countries";
 
 type WorkRight = "" | "work_visa" | "need_sponsorship";
@@ -35,6 +35,11 @@ export function ApplicationAnswersCard() {
   const [relocation, setRelocation] = useState<"" | "yes" | "no">("");
   const [languages, setLanguages] = useState("");
   const [workRights, setWorkRights] = useState<Record<string, WorkRight>>({});
+  const { data: settings } = useAutoPrepareSettings();
+  const saveProudest = useSaveProudestProject();
+  // What the user typed, or the saved project until they type.
+  const [proudestDraft, setProudestDraft] = useState<string | null>(null);
+  const proudest = proudestDraft ?? settings?.proudest_project ?? "";
 
   useEffect(() => {
     if (!profile) return;
@@ -65,6 +70,8 @@ export function ApplicationAnswersCard() {
         languages: languages.split(",").map((l) => l.trim()).filter(Boolean),
         visa_statuses: Object.fromEntries(Object.entries(workRights).filter(([, v]) => v)),
       });
+      if (proudest.trim() !== (settings?.proudest_project ?? "")) await saveProudest.mutateAsync(proudest.trim());
+      setProudestDraft(null);
       toast.success("Saved", { description: "Applications will fill these in from now on." });
     } catch (e) {
       toast.error("Couldn't save", { description: e instanceof Error ? e.message : undefined });
@@ -164,8 +171,18 @@ export function ApplicationAnswersCard() {
               )}
             </div>
 
-            <Button onClick={save} disabled={update.isPending}>
-              {update.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+            <div className="space-y-1.5">
+              <Label htmlFor="answers-proudest">The project you&apos;re proudest of</Label>
+              <Input id="answers-proudest" value={proudest} onChange={(e) => setProudestDraft(e.target.value)}
+                     placeholder="Job Hunt Pipeline" />
+              <p className="text-xs text-muted-foreground">
+                When a form asks about your favourite or proudest project, the app writes about this one, from what
+                your profile says about it.
+              </p>
+            </div>
+
+            <Button onClick={save} disabled={update.isPending || saveProudest.isPending}>
+              {(update.isPending || saveProudest.isPending) && <Loader2 className="h-4 w-4 animate-spin" />}
               Save answers
             </Button>
           </>

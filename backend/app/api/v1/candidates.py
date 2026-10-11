@@ -106,6 +106,12 @@ async def update_profile(data: ProfileUpdate, user_id: CurrentUserId, db: DbSess
     await db.commit()
     await db.refresh(profile)
 
+    # A link added to the profile goes into applications not yet sent.
+    if "links" in update_data:
+        from app.services.auto_apply.prepare import fill_profile_links
+        await fill_profile_links(db, user_id)
+        await db.refresh(profile)
+
     if roles_changed:
         from app.workers.scoring_tasks import _batch_score_async
         try:
