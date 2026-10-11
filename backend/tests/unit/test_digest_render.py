@@ -38,7 +38,7 @@ def test_email_links_to_the_app_and_escapes_job_text(monkeypatch):
     assert "10 questions to answer" in html and "See all in your inbox" in html
     assert "stop these emails" in html and "unsubscribe?u=1&amp;t=abc" in html
     assert ">82<" in html  # scores are rounded
-    assert "82  <script>alert(1)</script> Engineer — Acme & Co · Lagos" in text
+    assert "82  <script>alert(1)</script> Engineer, Acme & Co · Lagos" in text
     assert "Stop these emails: https://api.example/api/v1/notifications/unsubscribe?u=1&t=abc" in text
 
 

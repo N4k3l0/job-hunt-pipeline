@@ -162,6 +162,13 @@ export function JobAlertsCard() {
               alerts to.
             </>
           )}
+          {isAdmin && (
+            <>
+              {" "}
+              The same script sends the app&apos;s daily email from that Gmail. Scripts made before 11 October
+              don&apos;t: press Get a new script and paste it over the old one.
+            </>
+          )}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

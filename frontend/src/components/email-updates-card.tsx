@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
 import {
-  useDigestPreview, useNotificationSettings, useSendTestDigest, useUpdateNotificationSettings,
+  useDigestPreview, useNotificationSettings, useSendTestDigest, useSetDigestForEveryone, useUpdateNotificationSettings,
 } from "@/hooks/use-api";
 
 // Matches the backend's DIGEST_HOUR_UTC default.
@@ -23,6 +23,7 @@ export function EmailUpdatesCard() {
   const toast = useToast();
   const { data: settings, isLoading } = useNotificationSettings();
   const update = useUpdateNotificationSettings();
+  const forEveryone = useSetDigestForEveryone();
   const sendTest = useSendTestDigest();
   const [previewOpen, setPreviewOpen] = useState(false);
   const preview = useDigestPreview(previewOpen);
@@ -75,8 +76,42 @@ export function EmailUpdatesCard() {
 
             {!settings.email_configured && (
               <p className="text-xs text-muted-foreground">
-                Emails start once sending is set up for the app. Your setting is saved until then.
+                {settings.everyone === undefined
+                  ? "Emails start once sending is set up for the app. Your setting is saved until then."
+                  : "Set up LinkedIn job alerts below first: the same Gmail script sends this email."}
               </p>
+            )}
+            {settings.sends_from && (
+              <p className="text-xs text-muted-foreground">
+                It comes from {settings.sends_from}, sent by the Gmail script that reads your LinkedIn alerts.
+              </p>
+            )}
+            {settings.everyone !== undefined && (
+              <label className="flex cursor-pointer items-start gap-3">
+                <input
+                  type="checkbox"
+                  role="switch"
+                  checked={settings.everyone}
+                  disabled={forEveryone.isPending}
+                  onChange={(e) =>
+                    forEveryone.mutate(e.target.checked, {
+                      onSuccess: (data) =>
+                        toast.success(data.everyone ? "Every user gets it now" : "Only you get it now"),
+                      onError: (err) =>
+                        toast.error("Couldn't save", { description: err instanceof Error ? err.message : undefined }),
+                    })
+                  }
+                  className="mt-0.5 h-4 w-4 accent-[var(--ds-accent)]"
+                />
+                <span className="text-sm">
+                  Send it to every user
+                  <span className="block text-xs text-muted-foreground">
+                    {settings.everyone
+                      ? "Everyone who has it switched on gets it."
+                      : "Off while you try it: until you turn this on, only you get it."}
+                  </span>
+                </span>
+              </label>
             )}
 
             <div className="flex flex-wrap gap-2">
@@ -90,7 +125,12 @@ export function EmailUpdatesCard() {
                   disabled={sendTest.isPending}
                   onClick={() =>
                     sendTest.mutate(undefined, {
-                      onSuccess: ({ sent_to }) => toast.success(`Test email sent to ${sent_to}`),
+                      onSuccess: ({ sent_to, queued }) =>
+                        queued
+                          ? toast.success("Test email on its way", {
+                              description: `Your Gmail script sends it to ${sent_to} within about 10 minutes.`,
+                            })
+                          : toast.success(`Test email sent to ${sent_to}`),
                       onError: (err) =>
                         toast.error("Couldn't send the test email", {
                           description: err instanceof Error ? err.message : undefined,
@@ -99,7 +139,7 @@ export function EmailUpdatesCard() {
                   }
                 >
                   {sendTest.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                  Send me a test
+                  {settings.test_waiting ? "Test on its way" : "Send me a test"}
                 </Button>
               )}
             </div>
