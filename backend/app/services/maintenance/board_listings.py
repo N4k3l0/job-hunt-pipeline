@@ -38,8 +38,12 @@ def _clean(title: str | None) -> str:
     return " ".join((title or "").split())
 
 
-async def refresh_from_boards(listed: dict[str, str], now: datetime | None = None) -> dict:
-    """`listed` maps each listing's normalized URL to its title."""
+async def refresh_from_boards(
+    listed: dict[str, str], now: datetime | None = None, known: set[str] | None = None,
+) -> dict:
+    """`listed` maps each listing's normalized URL to its title. `known`,
+    if given, collects the listings the app already has, so only new ones
+    are added (curated_service.pick_new_jobs)."""
     outcome = {"listed": len(listed), "still_listed": 0, "renamed": 0, "reopened": 0, "scores_updated": 0}
     if not listed:
         return outcome
@@ -57,6 +61,8 @@ async def refresh_from_boards(listed: dict[str, str], now: datetime | None = Non
             if key not in listed:
                 continue
             seen.append(job_id)
+            if known is not None:
+                known.add(key)
             if status == "expired":
                 reopened.append(job_id)
             new_title = _clean(listed[key])
