@@ -57,6 +57,7 @@ async def get_pipeline(user_id: CurrentUserId, db: DbSession):
                 "company": t.job.company,
                 "location": t.job.location,
                 "closed_note": closed_note(t.job),
+                "closed": t.job.status == "expired",
             } if t.job else None,
         }
         for t in trackings

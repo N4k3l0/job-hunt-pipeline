@@ -96,7 +96,13 @@ async def test_expiry_rules():
         await _job(conn, source_id=other, discovered=days_ago(60), last_seen=days_ago(40), title="Old, unlisted")
         await _job(conn, source_id=other, discovered=days_ago(60), last_seen=days_ago(5), title="Old, still listed")
         await _job(conn, source_id=other, discovered=days_ago(20), last_seen=None, title="Recent")
+        # Ones people worked on close too after a month unlisted; the link
+        # checker settles them on company boards instead.
+        board_applied = await _job(conn, source_id=curated, discovered=days_ago(12), last_seen=days_ago(10),
+                                   title="Board: taken down, applied")
         applied = await _job(conn, source_id=other, discovered=days_ago(90), last_seen=None, title="Old, applied")
+        on_lever = await _job(conn, source_id=other, discovered=days_ago(90), last_seen=None, title="Old, applied, Lever",
+                              url="https://jobs.lever.co/acme/0b5e7f1c-6c2e-4b8a-9d61-2f1e0c3a7b44")
         tailored = await _job(conn, source_id=other, discovered=days_ago(90), last_seen=None, title="Old, tailored")
         preparing = await _job(conn, source_id=other, discovered=days_ago(90), last_seen=None, title="Old, Apply for me")
         await conn.execute(text(
@@ -107,9 +113,11 @@ async def test_expiry_rules():
             "INSERT INTO auto_applications (id, job_id, user_id, status) VALUES (gen_random_uuid(), :j, :u, 'needs_you')"
         ), {"j": preparing, "u": USER})
         shortlisted = await _job(conn, source_id=other, discovered=days_ago(90), last_seen=None, title="Old, shortlisted")
-        await conn.execute(text(
-            "INSERT INTO application_tracking (id, job_id, user_id, status) VALUES (gen_random_uuid(), :j, :u, 'applied')"
-        ), {"j": applied, "u": USER})
+        for job_id in (applied, board_applied, on_lever):
+            await conn.execute(text(
+                "INSERT INTO application_tracking (id, job_id, user_id, status) "
+                "VALUES (gen_random_uuid(), :j, :u, 'applied')"
+            ), {"j": job_id, "u": USER})
         await conn.execute(text(
             "INSERT INTO user_job_states (id, job_id, user_id, status) VALUES (gen_random_uuid(), :j, :u, 'shortlisted')"
         ), {"j": shortlisted, "u": USER})
@@ -117,20 +125,22 @@ async def test_expiry_rules():
     async with async_session() as db:
         preview = await expire_stale_jobs(db, dry_run=True, now=NOW)
     assert preview["gone_from_board"] == 1
-    assert preview["old_and_unseen"] == 1
+    assert preview["old_and_unseen"] == 5
     async with engine.connect() as conn:
         assert "expired" not in (await _statuses(conn)).values()  # dry run changed nothing
 
     async with async_session() as db:
         result = await expire_stale_jobs(db, now=NOW)
-    assert (result["gone_from_board"], result["old_and_unseen"]) == (1, 1)
+    assert (result["gone_from_board"], result["old_and_unseen"]) == (1, 5)
 
     async with engine.connect() as conn:
         statuses = await _statuses(conn)
-    assert statuses["Board: taken down"] == "expired"
-    assert statuses["Old, unlisted"] == "expired"
-    for title in ("Board: still listed", "Board: missed 3 days", "Old, still listed", "Recent",
+    for title in ("Board: taken down", "Old, unlisted",
                   "Old, applied", "Old, shortlisted", "Old, tailored", "Old, Apply for me"):
+        assert statuses[title] == "expired", title
+    # Lever is asked directly by the link checker, so only it closes that one.
+    for title in ("Board: still listed", "Board: missed 3 days", "Old, still listed", "Recent",
+                  "Board: taken down, applied", "Old, applied, Lever"):
         assert statuses[title] == "scored", title
 
 
@@ -162,7 +172,7 @@ async def test_link_checker_works_through_catalog(monkeypatch):
         for i in range(4):
             await _job(conn, source_id=source, discovered=days_ago(50 - i), last_seen=None,
                        title=f"Job {i}", url=f"https://jobs.example.com/{i}")
-        tracked = await _job(conn, source_id=source, discovered=days_ago(99), last_seen=None,
+        tracked = await _job(conn, source_id=source, discovered=days_ago(30), last_seen=None,
                              title="Tracked", url="https://jobs.example.com/tracked")
         await conn.execute(text(
             "INSERT INTO application_tracking (id, job_id, user_id, status) VALUES (gen_random_uuid(), :j, :u, 'applied')"
@@ -179,20 +189,85 @@ async def test_link_checker_works_through_catalog(monkeypatch):
     async with async_session() as db:
         first = await url_verifier.verify_batch(db, limit=2)
     async with async_session() as db:
-        second = await url_verifier.verify_batch(db, limit=2)
+        second = await url_verifier.verify_batch(db, limit=3)
 
-    # Oldest two first, then the next two: the checker moves on instead of
-    # re-probing the same jobs, and never probes the tracked job.
-    assert probed == [f"https://jobs.example.com/{i}" for i in (0, 1, 2, 3)]
-    assert (first["expired"], second["expired"]) == (1, 0)
+    # The job someone worked on that no site has listed for three weeks goes
+    # first, then the oldest checks: the checker moves on instead of
+    # re-probing the same jobs.
+    assert probed == ["https://jobs.example.com/tracked"] + [f"https://jobs.example.com/{i}" for i in (0, 1, 2, 3)]
+    assert (first["expired"], second["expired"]) == (0, 1)
     async with engine.connect() as conn:
         statuses = await _statuses(conn)
-        unchecked = (await conn.execute(text(
-            "SELECT count(*) FROM jobs WHERE last_checked_at IS NULL AND title LIKE 'Job %'"
-        ))).scalar()
+        seen = dict((await conn.execute(text("SELECT title, last_seen_at FROM jobs"))).all())
+        unchecked = (await conn.execute(text("SELECT count(*) FROM jobs WHERE last_checked_at IS NULL"))).scalar()
     assert statuses["Job 1"] == "expired"
     assert statuses["Tracked"] == "scored"
+    # A page that loads doesn't prove the job is open: it may say it closed.
+    assert seen["Tracked"] is None
     assert unchecked == 0
+
+
+async def test_hiring_systems_say_for_certain(monkeypatch):
+    """Greenhouse, Lever and Ashby are asked about the job itself: an open
+    one counts as listed and loses its note, a closed one leaves the app
+    and the unsent application on it stops."""
+    from sqlalchemy import select
+
+    from app.core.database import engine, async_session
+    from app.models.job import Job
+    from app.services.auto_apply.forms import FormUnavailable
+    from app.services.job_freshness import closed_note
+    from app.services.maintenance import url_verifier
+    from app.services.tracking.quiet import JOB_CLOSED, close_quiet_applications
+
+    board = "https://job-boards.greenhouse.io/acme/jobs/"
+    async with engine.begin() as conn:
+        await _reset(conn)
+        await conn.execute(text("TRUNCATE auto_applications CASCADE"))
+        source = await _source(conn, "arbeitnow")
+        still_open = await _job(conn, source_id=source, discovered=days_ago(30), last_seen=days_ago(25),
+                                title="Still open", url=board + "1")
+        closed = await _job(conn, source_id=source, discovered=days_ago(30), last_seen=days_ago(25),
+                            title="Closed", url=board + "2")
+        unsure = await _job(conn, source_id=source, discovered=days_ago(30), last_seen=days_ago(25),
+                            title="Unsure", url=board + "3")
+        for job_id in (still_open, closed, unsure):
+            await conn.execute(text(
+                "INSERT INTO auto_applications (id, user_id, job_id, status, answers) "
+                "VALUES (gen_random_uuid(), :u, :j, 'needs_you', '{}')"
+            ), {"u": USER, "j": job_id})
+
+    async def fake_fetch_form(client, target, posting=None):
+        if target.job_id == "2":
+            raise FormUnavailable("This posting is no longer listed", closed=True)
+        if target.job_id == "3":
+            raise FormUnavailable("The hiring system answered 503")
+        return []
+
+    async def no_probe(client, url, sem):
+        raise AssertionError("hiring system jobs aren't probed by their link")
+
+    monkeypatch.setattr(url_verifier, "fetch_form", fake_fetch_form)
+    monkeypatch.setattr(url_verifier, "_probe", no_probe)
+
+    async with async_session() as db:
+        result = await url_verifier.verify_batch(db, limit=10)
+    assert (result["open"], result["expired"], result["ambiguous"]) == (1, 1, 1)
+
+    async with async_session() as db:
+        assert (await close_quiet_applications(db))["job_closed"] == 1
+        notes = {job.title: closed_note(job) for job in (await db.execute(select(Job))).scalars()}
+    assert notes["Still open"] is None
+    assert notes["Closed"] == "This job has closed."
+    assert notes["Unsure"].startswith("This job may have closed.")
+
+    async with engine.connect() as conn:
+        applications = dict((await conn.execute(text(
+            "SELECT j.title, a.status || '/' || coalesce(a.error, '') FROM auto_applications a JOIN jobs j ON j.id = a.job_id"
+        ))).all())
+    assert applications == {
+        "Still open": "needs_you/", "Closed": f"cancelled/{JOB_CLOSED}", "Unsure": "needs_you/",
+    }
 
 
 async def test_company_boards_keep_every_listed_job_open():

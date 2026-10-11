@@ -137,6 +137,7 @@ async def get_review_queue(user_id: CurrentUserId, db: DbSession):
                 "company": a.job.company,
                 "location": a.job.location,
                 "closed_note": closed_note(a.job),
+                "closed": a.job.status == "expired",
                 "country": a.job.country,
                 "remote_type": a.job.remote_type,
                 "job_url": a.job.job_url,

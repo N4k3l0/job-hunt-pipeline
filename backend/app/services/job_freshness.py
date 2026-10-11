@@ -1,9 +1,12 @@
 """Tell users when a job they've worked on may have closed.
 
-Closed jobs normally leave inboxes by themselves (maintenance/job_expiry.py),
-but never ones the user has worked on: tailored a resume for, tracked,
-started Apply for me on, or saved. Those stay, so instead they carry a
-note once no job site has listed them for a while.
+Jobs a user has worked on (tailored a resume for, tracked, started Apply
+for me on, or saved) carry a note once no job site has listed them for a
+while. The link checker (maintenance/url_verifier.py) looks at those first:
+Greenhouse, Lever and Ashby say for certain whether a job is open, so it
+either closes (and leaves the app, maintenance/job_expiry.py) or counts as
+listed again and loses the note. Elsewhere a missing page closes it, and
+otherwise it closes once no site has listed it for a month.
 
 `last_seen_at` is when a job board last listed the job; a job the app has
 never seen again was last seen listed when it was found. Some sources list
@@ -16,7 +19,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select, union
+from sqlalchemy import and_, exists, or_, select, union
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.auto_apply import AutoApplication
@@ -33,12 +36,25 @@ def _day(moment: datetime) -> str:
 
 
 def closed_note(job: Job, now: datetime | None = None) -> str | None:
-    """The note for a job not listed anywhere for MAYBE_CLOSED_DAYS, or None."""
+    """The note for a closed job, or one not listed anywhere for
+    MAYBE_CLOSED_DAYS, or None."""
+    if job.status == "expired":
+        return "This job has closed."
     now = now or datetime.now(timezone.utc)
     last_listed = job.last_seen_at or job.discovered_at
     if last_listed is None or last_listed >= now - timedelta(days=MAYBE_CLOSED_DAYS):
         return None
     return f"This job may have closed. The app last saw it listed on {_day(last_listed)}."
+
+
+def anyone_worked_on(job_id):
+    """SQL: someone has worked on the job with this id."""
+    return or_(
+        exists().where(TailoredApplication.job_id == job_id),
+        exists().where(ApplicationTracking.job_id == job_id),
+        exists().where(AutoApplication.job_id == job_id),
+        exists().where(and_(UserJobState.job_id == job_id, UserJobState.status == "shortlisted")),
+    )
 
 
 async def worked_on(db: AsyncSession, user_id: uuid.UUID, job_ids: list[uuid.UUID]) -> set[uuid.UUID]:

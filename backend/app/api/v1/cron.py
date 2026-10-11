@@ -336,8 +336,10 @@ async def cron_expire_stale(
     if not dry_run and verify_limit > 0:
         try:
             async with create_worker_session()() as db:
+                # Hiring systems can take a few seconds each; the scheduler
+                # waits 180s for the whole call.
                 outcome["link_check"] = await asyncio.wait_for(
-                    verify_batch(db, limit=min(verify_limit, 100), timeout_s=4.0), timeout=35
+                    verify_batch(db, limit=min(verify_limit, 100), timeout_s=4.0), timeout=75
                 )
         except asyncio.TimeoutError:
             outcome["link_check"] = "timeout"

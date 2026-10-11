@@ -67,6 +67,7 @@ def serialize(
             "company": job.company,
             "location": job.location,
             "closed_note": closed_note(job),
+            "closed": job.status == "expired",
         } if job else None,
         "status": application.status,
         "ats": application.ats,

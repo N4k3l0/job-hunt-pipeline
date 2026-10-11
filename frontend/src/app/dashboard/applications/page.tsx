@@ -21,7 +21,6 @@ import type { ApplicationTracking, AutoApplication, TailoredApplication } from "
 const STALE_DAYS = 30;
 // Sent applications still waiting to hear back. A job taken down once the
 // company is interviewing you is normal, so later stages get no note.
-const WAITING_STATUSES = ["approved", "applied", "follow_up_due"];
 
 function daysSince(iso: string | null | undefined) {
   return iso ? (Date.now() - new Date(iso).getTime()) / 86_400_000 : 0;
@@ -201,12 +200,11 @@ export default function ApplicationsPage() {
   // application, so only the others are listed on their own.
   const jobsWithApplication = new Set(autos.map((a) => a.job_id));
   const resumes = (tailored ?? []).filter((t: TailoredApplication) => !jobsWithApplication.has(t.job_id));
-  const resumesToCheck = resumes.filter(
-    (t) => ["ready", "generating", "pending"].includes(t.approval_status) && daysSince(t.updated_at) <= STALE_DAYS,
-  );
-  const olderResumes = resumes.filter(
-    (t) => ["ready", "generating", "pending"].includes(t.approval_status) && daysSince(t.updated_at) > STALE_DAYS,
-  );
+  // A resume whose job has closed has nothing left to do, however new.
+  const current = (t: TailoredApplication) => daysSince(t.updated_at) <= STALE_DAYS && !t.job?.closed;
+  const unsentResumes = resumes.filter((t) => ["ready", "generating", "pending"].includes(t.approval_status));
+  const resumesToCheck = unsentResumes.filter(current);
+  const olderResumes = unsentResumes.filter((t) => !current(t));
   const inProgress = needsYou.length + resumesToCheck.length;
 
   const changeStatus = (item: ApplicationTracking, status: string) => {
@@ -239,16 +237,18 @@ export default function ApplicationsPage() {
   }
 
   const trackedCard = (item: ApplicationTracking, status: string) => {
-    const due = relativeDate(item.follow_up_date);
+    // No following up once it's closed, as in the daily email.
+    const due = ["rejected", "ghosted", "archived"].includes(status) ? null : relativeDate(item.follow_up_date);
     const next = NEXT_STATUSES[status] ?? [];
-    const waiting = WAITING_STATUSES.includes(status);
     return (
       <BoardCard
         key={item.id}
         href={`/dashboard/jobs/${item.job_id}`}
         company={item.job?.company}
         title={item.job?.title}
-        note={waiting ? item.job?.closed_note : null}
+        // Once it's sent, a closed listing changes nothing: the company can
+        // still reply, and it moves to No reply after 30 days if not.
+        note={status === "approved" ? item.job?.closed_note : null}
       >
         <span className="ds-pill" style={{ fontSize: 11 }}>
           <Dot status={status} />
@@ -408,7 +408,9 @@ export default function ApplicationsPage() {
               <Column title="Closed" hint="Heard no, stopped, or put away" count={closedCount}>
                 {closed.map((item) => trackedCard(item, item.status))}
                 {stopped.map(autoCard)}
-                {olderResumes.map((t) => resumeCard(t, "Resume written, never sent", false))}
+                {olderResumes.map((t) =>
+                  resumeCard(t, t.job?.closed ? "Resume written. The job closed before it was sent." : "Resume written, never sent", false),
+                )}
               </Column>
             )}
           </div>
