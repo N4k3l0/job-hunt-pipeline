@@ -12,7 +12,8 @@ Two kinds of work, on every scheduler run (`/cron/prepare-applications`):
 
 Each prepare takes up to a minute and costs about $0.15 of AI, so a run
 does a few and the next run carries on. Automatic preparing stops when
-the recorded credit is nearly gone (services/ai_credit.py).
+this month's AI budget is nearly used (services/ai_credit.py); ones
+waiting for the AI still finish, since a user asked for those.
 """
 
 from __future__ import annotations
@@ -171,7 +172,7 @@ async def run(
     matches, at most `limit` in all. Stops starting new ones once the time
     budget is spent; the next run carries on."""
     from app.llm.client import credits_paused
-    from app.services.ai_credit import RESERVE_USD, credit_left
+    from app.services.ai_credit import RESERVE_USD, budget_left
     from app.services.auto_apply.prepare import prepare_application
 
     preparer = preparer or prepare_application
@@ -216,8 +217,7 @@ async def run(
     budget = limit - outcome["finished"] - outcome["failed"]
 
     async with session_factory() as db:
-        left = await credit_left(db)
-        if left is not None and left < RESERVE_USD:
+        if await budget_left(db, now) < RESERVE_USD:
             outcome["low_credit"] = True
             return outcome
         users = [u for u in (await db.execute(select(User))).scalars().all() if per_day(u) > 0]

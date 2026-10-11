@@ -973,11 +973,23 @@ export function useAiCredit() {
   });
 }
 
-/** The admin topped up: record the new balance and turn AI back on now. */
-export function useRecordAiCredit() {
+/** How much Job Hunt's own AI work may cost a month (admin only). */
+export function useSetAiBudget() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (balance_usd: number) => api.post<AiCreditStatus>("/api/v1/auth/admin/ai-credit", { balance_usd }),
+    mutationFn: (monthly_usd: number) => api.put<AiCreditStatus>("/api/v1/auth/admin/ai-budget", { monthly_usd }),
+    onSuccess: (data) => {
+      qc.setQueryData(["admin", "ai-credit"], data);
+      qc.invalidateQueries({ queryKey: ["admin", "ai-status"] });
+    },
+  });
+}
+
+/** The admin topped up: turn AI back on now instead of within half an hour. */
+export function useTurnAiOn() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<AiCreditStatus>("/api/v1/auth/admin/ai-on", {}),
     onSuccess: (data) => {
       qc.setQueryData(["admin", "ai-credit"], data);
       qc.invalidateQueries({ queryKey: ["admin", "ai-status"] });

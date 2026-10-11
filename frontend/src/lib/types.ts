@@ -140,12 +140,17 @@ export interface AiCreditDay {
 
 export interface AiCreditStatus {
   paused: boolean;
+  /** Near this month's budget, or over it. */
   low: boolean;
+  over: boolean;
   warning: string | null;
-  balance: { amount: number; recorded_at: string } | null;
-  left: number | null;
+  /** What Job Hunt's own AI work may cost a month. */
+  budget: number;
+  spent_this_month: number;
+  left: number;
   per_day: number | null;
-  days_left: number | null;
+  /** This month's total at the current rate. */
+  heading_for: number;
   days: AiCreditDay[];
 }
 

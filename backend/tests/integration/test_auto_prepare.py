@@ -172,7 +172,11 @@ async def test_automatic_preparing_stops_when_the_credit_is_nearly_gone(seeded):
 
     await seeded(per_day=2)
     async with engine.begin() as conn:
-        await conn.execute(text("INSERT INTO ai_credit_balances (id, balance_usd) VALUES (gen_random_uuid(), 0.30)"))
+        # $14.70 of the $15 budget used this month: under the $0.50 kept back.
+        await conn.execute(text(
+            "INSERT INTO ai_usage_hours (hour, task, model, calls, input_tokens, output_tokens, web_searches, cost_usd) "
+            "VALUES (date_trunc('hour', now()), 'extraction', 'claude-haiku-4-5', 1, 0, 0, 0, 14.70)"
+        ))
     calls = []
     outcome = await run(limit=3, preparer=fake_preparer(calls), session_factory=async_session)
     assert outcome["low_credit"] is True and calls == []

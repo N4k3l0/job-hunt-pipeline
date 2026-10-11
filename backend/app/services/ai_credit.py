@@ -1,11 +1,14 @@
-"""What the app spends on Claude, and how long the credit will last.
+"""What the app spends on Claude, against its monthly budget.
 
 Every call is added up per hour, task and model (`record_usage`, called by
 llm/client.py for every call, including the ones that build their own
-requests). Anthropic's API doesn't say what's left on the account, so the
-admin records the balance shown on Anthropic's billing page after topping
-up, and the app counts down from there. The counts are estimates from list
-prices: Anthropic's billing page is the real figure.
+requests). The Anthropic account can be shared with other products, so its
+balance says nothing about Job Hunt: instead Job Hunt has a monthly budget
+(`monthly_budget`, $15 to start, changed on the admin page) and counts its
+own spending against it. Admins are warned as it gets close. At the budget,
+background AI work (reading new jobs, preparing applications by itself)
+waits for the next month; what a user asks for still runs. The counts are
+estimates from list prices: Anthropic's console has the real figures.
 """
 
 from __future__ import annotations
@@ -17,7 +20,7 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from app.models.ai_usage import AiCreditBalance, AiUsageHour
+from app.models.ai_usage import AiUsageHour
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +34,12 @@ PRICES_PER_MILLION = {
 UNKNOWN_MODEL_PRICE = PRICES_PER_MILLION["claude-opus-5"]  # count high rather than low
 WEB_SEARCH_USD = Decimal("0.01")
 
-# Warn once what's left is below this, or would last under WARN_DAYS.
-LOW_BALANCE_USD = Decimal("1.00")
-WARN_DAYS = 2
-# Automatic preparing stops below this, so what's left goes to what people ask for.
+# The admin's change to the budget, kept with their settings.
+BUDGET_KEY = "ai_monthly_budget_usd"
+# Warn once this much of the budget is used, or the month is heading over it.
+WARN_SHARE = Decimal("0.8")
+# Automatic preparing stops this close to the budget, so what's left goes
+# to what people ask for.
 RESERVE_USD = Decimal("0.50")
 
 # What each task is, in words the admin reads.
@@ -115,38 +120,49 @@ def _money(value: Decimal | float | None) -> float | None:
     return None if value is None else round(float(value), 2)
 
 
-async def latest_balance(db) -> AiCreditBalance | None:
-    return (await db.execute(
-        select(AiCreditBalance).order_by(AiCreditBalance.recorded_at.desc()).limit(1)
-    )).scalar_one_or_none()
+def _month_start(now: datetime) -> datetime:
+    return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
 
-async def record_balance(db, amount: Decimal, user_id=None) -> AiCreditBalance:
-    balance = AiCreditBalance(balance_usd=amount, recorded_by=user_id)
-    db.add(balance)
+async def monthly_budget(db) -> Decimal:
+    """The admin's budget, or the starting one from settings."""
+    from app.core.config import get_settings
+    from app.models.user import User
+
+    stored = (await db.execute(
+        select(User.preferences[BUDGET_KEY].astext).where(
+            User.role == "admin", User.preferences[BUDGET_KEY].astext.is_not(None),
+        ).limit(1)
+    )).scalar()
+    try:
+        return Decimal(stored) if stored is not None else Decimal(str(get_settings().ai_monthly_budget_usd))
+    except ArithmeticError:
+        return Decimal(str(get_settings().ai_monthly_budget_usd))
+
+
+async def set_monthly_budget(db, admin, amount: Decimal) -> None:
+    from app.models.user import User
+
+    # Loaded here, so the change is saved whatever session `admin` came from.
+    user = await db.get(User, admin.id)
+    user.preferences = {**(user.preferences or {}), BUDGET_KEY: str(amount)}
     await db.commit()
-    return balance
 
 
-async def spent_since(db, since: datetime) -> Decimal:
-    # Whole hours: the hour the balance was read in counts in full, so the
-    # estimate errs towards less left, never more.
-    start = since.replace(minute=0, second=0, microsecond=0)
+async def spent_this_month(db, now: datetime | None = None) -> Decimal:
+    now = now or datetime.now(timezone.utc)
     return (await db.execute(
-        select(func.coalesce(func.sum(AiUsageHour.cost_usd), 0)).where(AiUsageHour.hour >= start)
+        select(func.coalesce(func.sum(AiUsageHour.cost_usd), 0)).where(AiUsageHour.hour >= _month_start(now))
     )).scalar() or Decimal(0)
 
 
-async def credit_left(db) -> Decimal | None:
-    """The estimated balance, or None when no balance has been recorded."""
-    balance = await latest_balance(db)
-    if balance is None:
-        return None
-    return balance.balance_usd - await spent_since(db, balance.recorded_at)
+async def budget_left(db, now: datetime | None = None) -> Decimal:
+    """What's left of this month's budget; below zero once it's gone over."""
+    return await monthly_budget(db) - await spent_this_month(db, now)
 
 
 async def credit_status(db, *, now: datetime | None = None, days: int = 7) -> dict:
-    """Spending by day and task, and what's left if a balance was recorded."""
+    """Spending by day and task, and this month against the budget."""
     from app.llm.client import CREDITS_MESSAGE, credits_paused
 
     now = now or datetime.now(timezone.utc)
@@ -177,39 +193,40 @@ async def credit_status(db, *, now: datetime | None = None, days: int = 7) -> di
     whole_days = [e["total"] for e in listed[-4:-1] if e["total"] > 0]
     per_day = sum(whole_days) / len(whole_days) if whole_days else listed[-1]["total"] or None
 
-    balance = await latest_balance(db)
-    left = days_left = None
-    if balance is not None:
-        left = balance.balance_usd - await spent_since(db, balance.recorded_at)
-        if per_day:
-            days_left = max(Decimal(0), left) / per_day
+    budget = await monthly_budget(db)
+    spent = await spent_this_month(db, now)
+    next_month = (_month_start(now) + timedelta(days=32)).replace(day=1)
+    days_to_go = Decimal((next_month - now).total_seconds()) / Decimal(86400)
+    heading_for = spent + (per_day or 0) * days_to_go
+    over = spent >= budget
+    low = not over and (spent >= budget * WARN_SHARE or heading_for > budget)
 
     paused = credits_paused()
-    low = left is not None and (left < LOW_BALANCE_USD or (days_left is not None and days_left < WARN_DAYS))
     warning = None
     if paused:
         warning = CREDITS_MESSAGE
+    elif over:
+        warning = (
+            f"Job Hunt has used its ${budget:.2f} AI budget for this month (${spent:.2f}). Reading new jobs and "
+            "preparing applications by itself wait for the 1st; what people ask for still works. You can raise "
+            "the budget on the admin page."
+        )
     elif low:
         warning = (
-            f"About ${max(Decimal(0), left):.2f} of AI credit is left"
-            + (f", about {_days(days_left)} at the current rate" if days_left is not None else "")
-            + ". Top up on Anthropic's billing page, then record the new balance here."
+            f"Job Hunt has used ${spent:.2f} of its ${budget:.2f} AI budget this month"
+            + (f", and at about ${per_day:.2f} a day it's heading for ${heading_for:.2f}" if per_day else "")
+            + ". At the budget, reading new jobs and preparing applications by itself wait for the 1st."
         )
 
     return {
         "paused": paused,
-        "low": low,
+        "low": low or over,
+        "over": over,
         "warning": warning,
-        "balance": {"amount": _money(balance.balance_usd), "recorded_at": balance.recorded_at.isoformat()} if balance else None,
-        "left": _money(left),
+        "budget": _money(budget),
+        "spent_this_month": _money(spent),
+        "left": _money(budget - spent),
         "per_day": _money(per_day),
-        "days_left": round(float(days_left), 1) if days_left is not None else None,
+        "heading_for": _money(heading_for),
         "days": [{**e, "total": _money(e["total"])} for e in listed],
     }
-
-
-def _days(days: Decimal) -> str:
-    if days < 1:
-        return "less than a day"
-    whole = int(days)
-    return "1 day" if whole == 1 else f"{whole} days"

@@ -340,27 +340,34 @@ async def admin_ai_status(admin: AdminUser, db: DbSession):
 
 @router.get("/admin/ai-credit")
 async def admin_ai_credit(admin: AdminUser, db: DbSession):
-    """What the app has spent on AI each day this week, by task, and what's
-    left of the balance the admin last recorded."""
+    """What Job Hunt spent on AI each day this week, by task, and this month
+    against its budget."""
     from app.services.ai_credit import credit_status
 
     return await credit_status(db)
 
 
-class CreditBalance(BaseModel):
-    balance_usd: float = Field(ge=0, le=100_000)
+class AiBudget(BaseModel):
+    monthly_usd: float = Field(gt=0, le=10_000)
 
 
-@router.post("/admin/ai-credit")
-async def admin_record_credit(body: CreditBalance, admin: AdminUser, db: DbSession):
-    """The admin topped up: record the balance Anthropic's billing page
-    shows, and turn AI back on now instead of within half an hour."""
+@router.put("/admin/ai-budget")
+async def admin_set_ai_budget(body: AiBudget, admin: AdminUser, db: DbSession):
+    """How much Job Hunt's own AI work may cost a month."""
     from decimal import Decimal
 
-    from app.llm.client import end_credits_pause
-    from app.services.ai_credit import credit_status, record_balance
+    from app.services.ai_credit import credit_status, set_monthly_budget
 
-    await record_balance(db, Decimal(str(round(body.balance_usd, 2))), admin.id)
+    await set_monthly_budget(db, admin, Decimal(str(round(body.monthly_usd, 2))))
+    return await credit_status(db)
+
+
+@router.post("/admin/ai-on")
+async def admin_turn_ai_on(admin: AdminUser, db: DbSession):
+    """The admin topped up: turn AI back on now instead of within half an hour."""
+    from app.llm.client import end_credits_pause
+    from app.services.ai_credit import credit_status
+
     end_credits_pause()
     return await credit_status(db)
 
