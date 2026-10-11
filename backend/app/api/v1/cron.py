@@ -316,10 +316,14 @@ async def cron_expire_stale(
     authorization: str | None = Header(None),
     dry_run: bool = False,
     verify_limit: int = 40,
+    trim_limit: int = 2000,
 ):
     """Expire closed jobs: ones gone from full company boards, ones that
     are old and no longer listed anywhere, and (unless dry_run) a batch of
-    links that now return 404/410. `dry_run=true` only reports counts."""
+    links that now return 404/410. Then empty the stored text of up to
+    `trim_limit` jobs nobody will look at again (services/maintenance/
+    trim_jobs.py), to keep the database inside its free plan.
+    `dry_run=true` only reports counts."""
     _verify_cron(authorization)
 
     from app.core.database import create_worker_session
@@ -337,6 +341,11 @@ async def cron_expire_stale(
                 )
         except asyncio.TimeoutError:
             outcome["link_check"] = "timeout"
+    if not dry_run and trim_limit > 0:
+        from app.services.maintenance.trim_jobs import trim_old_jobs
+
+        async with create_worker_session()() as db:
+            outcome["text_trimmed"] = (await trim_old_jobs(db, limit=min(trim_limit, 5000)))["trimmed"]
     return outcome
 
 
