@@ -28,3 +28,9 @@ def test_not_listed_for_three_weeks_is_flagged_with_the_date():
 def test_never_seen_again_counts_from_when_it_was_found():
     assert closed_note(_job(143), NOW) == "This job may have closed. The app last saw it listed on 5 May."
     assert closed_note(_job(10), NOW) is None
+
+
+def test_a_closed_job_says_so():
+    job = _job(10, seen_days_ago=1)
+    job.status = "expired"
+    assert closed_note(job, NOW) == "This job has closed."

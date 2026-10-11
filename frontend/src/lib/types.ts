@@ -27,8 +27,10 @@ export interface Job {
   /** Last time a job board listed this job (it was still open then). */
   last_seen_at?: string | null;
   /** On a job the user has worked on that no job site has listed for a
-   *  while: "This job may have closed. ..." */
+   *  while: "This job may have closed. ..." (or "This job has closed."). */
   closed_note?: string | null;
+  /** Applications page only: the job has closed. */
+  closed?: boolean;
   /** Last time the job's link was checked. */
   last_checked_at?: string | null;
   expires_at: string | null;
@@ -108,7 +110,10 @@ export interface AutoApplyField {
 export interface AutoApplication {
   id: string;
   job_id: string;
-  job: { id: string; title: string; company: string; location: string | null; closed_note?: string | null } | null;
+  job: {
+    id: string; title: string; company: string; location: string | null;
+    closed_note?: string | null; closed?: boolean;
+  } | null;
   status: AutoApplicationStatus;
   ats: "greenhouse" | "lever" | "ashby" | null;
   form_url: string | null;
