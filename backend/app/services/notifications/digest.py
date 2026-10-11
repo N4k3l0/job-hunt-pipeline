@@ -37,6 +37,17 @@ logger = logging.getLogger(__name__)
 
 INBOX_MIN_SCORE = 50
 TOP_MATCHES = 5
+# A job with its description, not just a title: only then is its score
+# worth leading with (a LinkedIn alert gives a title, company and place).
+# pg_column_size reads the stored size without loading the text.
+HAS_DESCRIPTION = func.coalesce(func.pg_column_size(Job.raw_description), 0) > 300
+# Follow-ups overdue by more than this are left out: the moment has passed.
+FOLLOW_UP_WINDOW = timedelta(days=14)
+# Who gets the daily email: admins, until an admin turns it on for everyone
+# (kept in the admin's settings), so it can be tried first.
+EVERYONE_KEY = "digest_everyone"
+# A user asked for a test email; the Gmail script sends it on its next run.
+TEST_KEY = "digest_test_requested_at"
 # The first email, or one after a long gap, looks back this far at most.
 MAX_LOOKBACK = timedelta(days=3)
 # Older tailored drafts aren't brought up again every day.
@@ -109,7 +120,8 @@ async def build_digest(db, user: User, *, since: datetime) -> Digest:
         ApplicationTracking.status.in_(APPLIED_TRACKING_STATUSES),
     )
     query = (
-        select(Job.id, Job.title_en, Job.title, Job.company, Job.location, JobScore.overall_fit, *job_group_key(Job))
+        select(Job.id, Job.title_en, Job.title, Job.company, Job.location, JobScore.overall_fit, *job_group_key(Job),
+               HAS_DESCRIPTION.label("has_description"))
         .join(JobScore, and_(JobScore.job_id == Job.id, JobScore.user_id == user_id))
         .outerjoin(JobSource, JobSource.id == Job.source_id)
         .outerjoin(JobEntity, JobEntity.job_id == Job.id)
@@ -121,7 +133,7 @@ async def build_digest(db, user: User, *, since: datetime) -> Digest:
             Job.discovered_at >= since,
             ~applied,
         )
-        .order_by(JobScore.overall_fit.desc(), Job.discovered_at.desc())
+        .order_by(HAS_DESCRIPTION.desc(), JobScore.overall_fit.desc(), Job.discovered_at.desc())
     )
     query = apply_user_filters(query, **(await user_filter_kwargs(db, user_id)))
     seen: set[tuple] = set()
@@ -164,6 +176,7 @@ async def build_digest(db, user: User, *, since: datetime) -> Digest:
         .where(
             ApplicationTracking.user_id == user_id,
             ApplicationTracking.follow_up_date <= date.today(),
+            ApplicationTracking.follow_up_date >= date.today() - FOLLOW_UP_WINDOW,
             ApplicationTracking.status.notin_(["rejected", "ghosted", "archived"]),
         )
         .order_by(ApplicationTracking.follow_up_date)
@@ -225,7 +238,7 @@ def render_digest(digest: Digest, *, unsubscribe: str | None) -> tuple[str, str,
                 f'<a href="{escape(link)}" style="color:#111;font-size:15px;font-weight:600;text-decoration:none;">{escape(job.title)}</a>'
                 f'<div style="color:#666;font-size:13px;margin-top:2px;">{escape(meta)}</div></td></tr>'
             )
-            text_parts.append(f"{round(job.score)}  {job.title} — {meta}\n    {link}")
+            text_parts.append(f"{round(job.score)}  {job.title}, {meta}\n    {link}")
         html_parts.append('<table role="presentation" style="width:100%;border-collapse:collapse;">' + "".join(rows) + "</table>")
         html_parts.append(button("See all in your inbox" if more > 0 else "Open your inbox", f"{app}/dashboard/jobs"))
         text_parts.extend(["", f"Inbox: {app}/dashboard/jobs", ""])
@@ -242,7 +255,7 @@ def render_digest(digest: Digest, *, unsubscribe: str | None) -> tuple[str, str,
             items.append(
                 f'<li style="margin:6px 0;"><a href="{escape(link)}" style="color:{ACCENT};">'
                 f'{escape(application.title)} at {escape(application.company)}</a>'
-                f' <span style="color:#666;">— {escape(detail)}</span></li>'
+                f'<span style="color:#666;">: {escape(detail)}</span></li>'
             )
             text_parts.append(f"- Apply for me: {application.title} at {application.company} ({detail}) {link}")
         if digest.tailored_ready:
@@ -278,6 +291,36 @@ def render_digest(digest: Digest, *, unsubscribe: str | None) -> tuple[str, str,
     return subject, html, text
 
 
+async def everyone_gets_it(db) -> bool:
+    """Whether an admin has turned the daily email on for every user."""
+    return bool((await db.execute(
+        select(func.count()).select_from(User).where(User.role == "admin", User.preferences[EVERYONE_KEY].astext == "true")
+    )).scalar())
+
+
+async def recipients_due(db, now: datetime) -> list[User]:
+    """Users who want today's email and haven't had it, once the send hour
+    has passed: admins only until the email is on for everyone."""
+    today_send_time = now.replace(hour=get_settings().digest_hour_utc, minute=0, second=0, microsecond=0)
+    if now < today_send_time:
+        return []
+    query = select(User).where(
+        User.email_digest.is_(True),
+        or_(User.last_digest_sent_at.is_(None), User.last_digest_sent_at < today_send_time),
+    )
+    if not await everyone_gets_it(db):
+        query = query.where(User.role == "admin")
+    return list((await db.execute(query)).scalars().all())
+
+
+async def todays_email(db, user: User, now: datetime | None = None) -> tuple[bool, str, str, str]:
+    """(nothing new, subject, html, text) for the user's email today."""
+    now = now or datetime.now(timezone.utc)
+    digest = await build_digest(db, user, since=digest_window_start(user, now))
+    subject, html, text = render_digest(digest, unsubscribe=unsubscribe_url(user.id))
+    return digest.is_empty, subject, html, text
+
+
 def digest_window_start(user: User, now: datetime) -> datetime:
     floor = now - MAX_LOOKBACK
     return max(user.last_digest_sent_at, floor) if user.last_digest_sent_at else now - timedelta(days=1)
@@ -292,20 +335,15 @@ async def send_due_digests(now: datetime | None = None) -> dict:
     now = now or datetime.now(timezone.utc)
     outcome = {"sent": 0, "nothing_new": 0, "failed": 0, "errors": []}
     if not email_configured():
-        outcome["status"] = "email not set up"
+        # Without an email service, the admin's Gmail script collects and
+        # sends them (services/notifications/outbox.py).
+        outcome["status"] = "no email service: the Gmail script sends them"
         return outcome
-    today_send_time = now.replace(hour=get_settings().digest_hour_utc, minute=0, second=0, microsecond=0)
-    if now < today_send_time:
-        outcome["status"] = "not yet"
-        return outcome
-
     async with create_worker_session()() as db:
-        users = (await db.execute(
-            select(User).where(
-                User.email_digest.is_(True),
-                or_(User.last_digest_sent_at.is_(None), User.last_digest_sent_at < today_send_time),
-            )
-        )).scalars().all()
+        users = await recipients_due(db, now)
+        if not users:
+            outcome["status"] = "nobody due"
+            return outcome
         for user in users:
             try:
                 digest = await build_digest(db, user, since=digest_window_start(user, now))

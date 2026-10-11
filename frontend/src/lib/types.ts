@@ -291,7 +291,13 @@ export interface NotificationSettings {
   email: string;
   /** Whether the app can send email yet (set up by the admin). */
   email_configured: boolean;
+  /** The Gmail the admin's script sends it from, when that's how it goes. */
+  sends_from: string | null;
   last_sent_at: string | null;
+  /** A test email is waiting for the script's next run. */
+  test_waiting: boolean;
+  /** Admins only: whether every user gets it, not just admins. */
+  everyone?: boolean;
 }
 
 // ── LinkedIn job alert sync ──────────────────────────────────────────────

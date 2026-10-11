@@ -8,6 +8,8 @@ same inbox with their personal address (services/job_alerts/forwarding.py).
 POST   /api/v1/job-alerts/linkedin    alert emails, authorized by the user's alert key
 GET    /api/v1/job-alerts/status      whether sync is set up, and what it has sent
 GET    /api/v1/job-alerts/forwarding  the user's personal forwarding address and Gmail's code
+POST   /api/v1/job-alerts/outbox      emails for an admin's script to send (the daily email)
+POST   /api/v1/job-alerts/outbox/sent which of them it sent
 POST   /api/v1/job-alerts/key         a new key (shown once; replaces the old one)
 DELETE /api/v1/job-alerts/key         stop accepting the key
 """
@@ -116,6 +118,34 @@ async def receive_linkedin_alerts(
     # New jobs need scores, and ones the app already had may not be scored for everyone yet.
     await rescore_jobs_for_all_users(job_ids)
     return {**totals, "users": len(by_user), "confirmations": confirmations, "not_for_anyone": unknown}
+
+
+class SentEmails(BaseModel):
+    ids: list[str] = Field(max_length=50)
+
+
+@router.post("/outbox")
+async def emails_to_send(db: DbSession, user_id: Annotated[UUID, Depends(alert_key_user_id)]):
+    """Emails for the script to send from its Gmail: today's daily emails
+    and test emails (services/notifications/outbox.py). Only an admin's
+    script sends for the app; anyone else's gets none."""
+    from app.services.notifications.outbox import due_emails
+
+    owner = await db.get(User, user_id)
+    if owner is None or owner.role != "admin":
+        await db.commit()
+        return {"emails": []}
+    return {"emails": await due_emails(db)}
+
+
+@router.post("/outbox/sent")
+async def emails_sent(body: SentEmails, db: DbSession, user_id: Annotated[UUID, Depends(alert_key_user_id)]):
+    from app.services.notifications.outbox import mark_sent
+
+    owner = await db.get(User, user_id)
+    if owner is None or owner.role != "admin":
+        raise HTTPException(status_code=403, detail="Only an admin's script sends the app's emails")
+    return {"marked": await mark_sent(db, body.ids)}
 
 
 @router.get("/status")

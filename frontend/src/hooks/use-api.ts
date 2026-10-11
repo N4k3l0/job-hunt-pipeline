@@ -804,6 +804,16 @@ export function useUpdateNotificationSettings() {
   });
 }
 
+/** Admins: send the daily email to every user, not just admins. */
+export function useSetDigestForEveryone() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (everyone: boolean) =>
+      api.put<NotificationSettings>("/api/v1/notifications/settings", { everyone }),
+    onSuccess: (data) => qc.setQueryData(["notifications", "settings"], data),
+  });
+}
+
 /** Today's email for the current user, rendered but not sent. */
 export function useDigestPreview(enabled: boolean) {
   return useQuery({
@@ -815,8 +825,10 @@ export function useDigestPreview(enabled: boolean) {
 }
 
 export function useSendTestDigest() {
+  const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => api.post<{ sent_to: string }>("/api/v1/notifications/digest/test"),
+    mutationFn: () => api.post<{ sent_to: string; queued?: boolean }>("/api/v1/notifications/digest/test"),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications", "settings"] }),
   });
 }
 

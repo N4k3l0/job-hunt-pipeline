@@ -7,6 +7,8 @@
  * forward their alerts to (backend services/job_alerts/forwarding.py): the
  * script sends the addresses each email was delivered to, and Gmail's
  * forwarding confirmation emails, so the backend can tell whose they are.
+ * It also sends the app's daily emails from that Gmail
+ * (services/notifications/outbox.py): only an admin's script gets any.
  *
  * The backend reads the jobs out of each email (services/job_alerts), so
  * changes to LinkedIn's layout are fixed there, not in every user's copy
@@ -16,6 +18,7 @@
  */
 export function buildLinkedInAlertScript(apiBase: string, key: string): string {
   const url = `${apiBase.replace(/\/$/, "")}/api/v1/job-alerts/linkedin`;
+  const outbox = `${apiBase.replace(/\/$/, "")}/api/v1/job-alerts/outbox`;
   return `/**
  * Job Hunt: jobs from LinkedIn job alerts, on the dashboard.
  *
@@ -24,13 +27,15 @@ export function buildLinkedInAlertScript(apiBase: string, key: string): string {
  * the dashboard. It also sends Gmail's forwarding confirmation emails, so
  * people who forward their alerts here can see their code in Job Hunt. No
  * other email is read. Links are sent without LinkedIn's tracking and
- * sign-in codes.
+ * sign-in codes. If you run Job Hunt, it also sends Job Hunt's daily
+ * emails from this Gmail, as "Job Hunt".
  *
  * To start: pick "setUp" in the menu next to Run above, then press Run.
  * To stop: delete this project, or remove the key on your Job Hunt profile.
  */
 const JOB_HUNT_URL = ${JSON.stringify(url)};
 const JOB_HUNT_KEY = ${JSON.stringify(key)};
+const JOB_HUNT_OUTBOX = ${JSON.stringify(outbox)};
 const ALERT_SENDER = "jobalerts-noreply@linkedin.com";
 const FORWARDING_SENDER = "forwarding-noreply@google.com";
 
@@ -59,7 +64,6 @@ function syncLinkedInAlerts() {
   collect("from:" + FORWARDING_SENDER + " newer_than:3d", FORWARDING_SENDER, "confirmation");
   if (!pending.length) {
     console.log("No new LinkedIn job alert emails.");
-    return;
   }
   const inbox = Session.getEffectiveUser().getEmail();
   for (let i = 0; i < pending.length; i += 10) {
@@ -96,6 +100,38 @@ function syncLinkedInAlerts() {
     batch.forEach(function (item) { sent.push(item.message.getId()); });
     properties.setProperty("sentMessageIds", JSON.stringify(sent.slice(-300)));
     console.log("Sent " + batch.length + " emails: " + response.getContentText());
+  }
+  sendJobHuntEmails();
+}
+
+// Job Hunt's daily emails, sent from this Gmail. Job Hunt only gives them
+// to an admin's script; anyone else's gets none.
+function sendJobHuntEmails() {
+  const headers = { Authorization: "Bearer " + JOB_HUNT_KEY };
+  const response = UrlFetchApp.fetch(JOB_HUNT_OUTBOX, { method: "post", headers: headers, muteHttpExceptions: true });
+  if (response.getResponseCode() !== 200) {
+    console.error("Job Hunt's outbox answered " + response.getResponseCode());
+    return;
+  }
+  const emails = JSON.parse(response.getContentText()).emails || [];
+  const done = [];
+  emails.forEach(function (email) {
+    try {
+      GmailApp.sendEmail(email.to, email.subject, email.text, { htmlBody: email.html, name: "Job Hunt" });
+      done.push(email.id);
+    } catch (e) {
+      console.error("Couldn't send an email to " + email.to + ": " + e);
+    }
+  });
+  if (done.length) {
+    UrlFetchApp.fetch(JOB_HUNT_OUTBOX + "/sent", {
+      method: "post",
+      contentType: "application/json",
+      headers: headers,
+      payload: JSON.stringify({ ids: done }),
+      muteHttpExceptions: true,
+    });
+    console.log("Sent " + done.length + " Job Hunt emails.");
   }
 }
 
