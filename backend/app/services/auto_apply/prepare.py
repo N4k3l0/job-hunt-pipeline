@@ -42,6 +42,12 @@ DRAFTABLE_KINDS = {"question", "years_experience", "salary"}
 MAX_TEXT_ANSWER = 10_000
 
 
+# The project the user wants to talk about when a form asks for a favourite
+# or proudest one (Preferences → Application answers), kept with their settings.
+PROUDEST_KEY = "proudest_project"
+LINK_KINDS = ("linkedin", "github", "portfolio")
+
+
 class AnswerError(ValueError):
     """The user's answers can't be accepted; `fields` names the problems."""
 
@@ -102,11 +108,19 @@ async def load_applicant(db: AsyncSession, user_id: uuid.UUID) -> tuple[rules.Ap
         s.question_key: {**(s.answer or {}), "fresh": s.updated_at is not None and s.updated_at >= cutoff}
         for s in (await db.execute(select(SavedAnswer).where(SavedAnswer.user_id == user_id))).scalars()
     }
-    return facts, facts_text(facts, profile, history), resume, saved
+    proudest = ((user.preferences if user else None) or {}).get(PROUDEST_KEY)
+    return facts, facts_text(facts, profile, history, proudest=proudest), resume, saved
 
 
-def facts_text(facts: rules.ApplicantFacts, profile: CandidateProfile | None, history) -> str:
+def facts_text(
+    facts: rules.ApplicantFacts, profile: CandidateProfile | None, history, *, proudest: str | None = None,
+) -> str:
     lines = [f"Name: {facts.full_name}"]
+    if proudest:
+        lines.append(
+            "Proudest project (the candidate's own choice: a question about their favourite or proudest "
+            f"project is about this one, described from the work history below): {proudest}"
+        )
     if facts.location:
         lines.append(f"Current location: {facts.location}")
     if facts.home_country:
@@ -139,6 +153,37 @@ def facts_text(facts: rules.ApplicantFacts, profile: CandidateProfile | None, hi
             parts = [p for p in (e.degree, e.field) if p]
             lines.append(f"- {' in '.join(parts) or 'Studied'} at {e.institution}" + (f" ({e.graduation_date})" if e.graduation_date else ""))
     return "\n".join(lines)
+
+
+async def fill_profile_links(db: AsyncSession, user_id: uuid.UUID) -> int:
+    """Links on the profile (LinkedIn, GitHub, portfolio) go into the user's
+    applications that haven't been sent, wherever the form asks for one and
+    it's empty. Returns how many answers were filled."""
+    profile = (await db.execute(
+        select(CandidateProfile).where(CandidateProfile.user_id == user_id)
+    )).scalar_one_or_none()
+    links = (profile.links if profile else None) or {}
+    if not any(links.get(kind) for kind in LINK_KINDS):
+        return 0
+    applications = (await db.execute(
+        select(AutoApplication).options(selectinload(AutoApplication.job)).where(
+            AutoApplication.user_id == user_id, AutoApplication.status.in_(("needs_you", "queued")),
+        )
+    )).scalars().all()
+    filled = 0
+    for application in applications:
+        form = application.form or []
+        kinds = rules.kinds(form, rules.JobFacts(company=(application.job.company if application.job else "") or ""))
+        answers = dict(application.answers or {})
+        for item in form:
+            kind = kinds[item["key"]]
+            if kind in LINK_KINDS and links.get(kind) and rules.is_empty((answers.get(item["key"]) or {}).get("value")):
+                answers[item["key"]] = rules.answer(links[kind], "profile")
+                filled += 1
+        if answers != (application.answers or {}):
+            application.answers = answers
+    await db.commit()
+    return filled
 
 
 def _job_country(job: Job) -> str | None:

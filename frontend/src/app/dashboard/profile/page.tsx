@@ -174,6 +174,7 @@ export default function ProfilePage() {
   const [summary, setSummary] = useState("");
   const [linkedin, setLinkedin] = useState("");
   const [portfolio, setPortfolio] = useState("");
+  const [github, setGithub] = useState("");
   const [phone, setPhone] = useState("");
   const [currentLocation, setCurrentLocation] = useState("");
   const [targetRoles, setTargetRoles] = useState<string[]>([]);
@@ -202,6 +203,7 @@ export default function ProfilePage() {
       setSummary(profile.master_summary || "");
       setLinkedin(profile.links?.linkedin || "");
       setPortfolio(profile.links?.portfolio || "");
+      setGithub(profile.links?.github || "");
       setPhone(profile.phone || "");
       setCurrentLocation(profile.current_location || "");
       setTargetRoles(profile.target_roles || []);
@@ -245,8 +247,8 @@ export default function ProfilePage() {
     const data = {
       headline,
       master_summary: summary,
-      // Keep links this form doesn't show (GitHub, website from the resume).
-      links: { ...(profile?.links || {}), linkedin, portfolio },
+      // Keep links this form doesn't show (a website from the resume).
+      links: { ...(profile?.links || {}), linkedin, portfolio, github },
       phone,
       current_location: currentLocation,
     };
@@ -465,6 +467,15 @@ export default function ProfilePage() {
                     value={portfolio}
                     onChange={(e) => setPortfolio(e.target.value)}
                     placeholder="https://..."
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="github">GitHub URL</Label>
+                  <Input
+                    id="github"
+                    value={github}
+                    onChange={(e) => setGithub(e.target.value)}
+                    placeholder="https://github.com/..."
                   />
                 </div>
               </div>

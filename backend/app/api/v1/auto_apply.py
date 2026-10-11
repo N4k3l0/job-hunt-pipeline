@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -125,17 +125,22 @@ def _answer_error(e: AnswerError) -> HTTPException:
 
 
 class AutoPrepareSettings(BaseModel):
-    per_day: int
+    """Either or both: how many applications the app prepares a day, and the
+    project to talk about when a form asks for a favourite or proudest one."""
+    per_day: int | None = None
+    proudest_project: str | None = Field(default=None, max_length=500)
 
 
 def _auto_prepare_settings(user) -> dict:
     from app.services.auto_apply import auto_prepare
+    from app.services.auto_apply.prepare import PROUDEST_KEY
 
     return {
         "per_day": auto_prepare.per_day(user),
         "choices": list(auto_prepare.PER_DAY_CHOICES),
         "min_score": auto_prepare.MIN_SCORE,
         "cost_each_usd": auto_prepare.COST_EACH_USD,
+        "proudest_project": (user.preferences or {}).get(PROUDEST_KEY),
     }
 
 
@@ -150,10 +155,20 @@ async def get_auto_prepare_settings(user: CurrentUser):
 async def update_auto_prepare_settings(body: AutoPrepareSettings, user: CurrentUser, db: DbSession):
     from app.services.auto_apply import auto_prepare
 
-    if body.per_day not in auto_prepare.PER_DAY_CHOICES:
-        raise HTTPException(status_code=422, detail="Choose one of the numbers offered.")
+    from app.services.auto_apply.prepare import PROUDEST_KEY
+
+    preferences = dict(user.preferences or {})
+    if body.per_day is not None:
+        if body.per_day not in auto_prepare.PER_DAY_CHOICES:
+            raise HTTPException(status_code=422, detail="Choose one of the numbers offered.")
+        preferences[auto_prepare.PREFERENCE_KEY] = body.per_day
+    if body.proudest_project is not None:
+        if body.proudest_project.strip():
+            preferences[PROUDEST_KEY] = body.proudest_project.strip()
+        else:
+            preferences.pop(PROUDEST_KEY, None)
     # A new dict, so the change to the JSON column is saved.
-    user.preferences = {**(user.preferences or {}), auto_prepare.PREFERENCE_KEY: body.per_day}
+    user.preferences = preferences
     await db.commit()
     return _auto_prepare_settings(user)
 

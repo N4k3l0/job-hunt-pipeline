@@ -1013,6 +1013,17 @@ export function useUpdateAutoPrepareSettings() {
   });
 }
 
+/** The project the app writes about when a form asks for a favourite or
+ *  proudest one. Empty clears it. */
+export function useSaveProudestProject() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (proudest_project: string) =>
+      api.put<AutoPrepareSettings>("/api/v1/auto-apply/settings", { proudest_project }),
+    onSuccess: (data) => qc.setQueryData(["auto-apply", "settings"], data),
+  });
+}
+
 export function useInviteRequests() {
   return useQuery({
     queryKey: ["admin", "invite-requests"],
