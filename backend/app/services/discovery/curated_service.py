@@ -243,17 +243,29 @@ class BoardListings:
     boards: list[list[dict]] = field(default_factory=list)
 
 
+def title_matcher(phrases) -> re.Pattern | None:
+    """Whole-word match for any of these phrases in a job title: a user's
+    roles ("AI Engineer") or skills ("Python"), never part of a word ("ai"
+    isn't in "maintenance")."""
+    cleaned = sorted({p.strip().lower() for p in phrases or [] if p and len(p.strip()) >= 2}, key=len, reverse=True)
+    if not cleaned:
+        return None
+    return re.compile(r"(?<![a-z0-9])(?:" + "|".join(re.escape(p) for p in cleaned) + r")(?![a-z0-9])", re.IGNORECASE)
+
+
 def pick_new_jobs(
     boards: list[list[dict]],
     known: set[str] | frozenset[str] = frozenset(),
     *,
     keywords: set[str] | None = None,
+    titles: re.Pattern | None = None,
     per_company: int = PER_COMPANY_CAP,
     limit: int = 500,
 ) -> list[dict]:
     """Jobs to add: the ones not already known, matching `keywords` if
-    given, up to `per_company` from each board, taking turns between
-    boards (each one's first job, then each one's second...) up to `limit`.
+    given (title or description) and `titles` if given (title only), up
+    to `per_company` from each board, taking turns between boards (each
+    one's first job, then each one's second...) up to `limit`.
 
     Taking every board's newest 30 in list order filled the 500 from the
     first 17 companies every day, mostly with jobs already known, so the
@@ -263,6 +275,8 @@ def pick_new_jobs(
         fresh = [j for j in batch if normalize_url(j.get("job_url")) not in known]
         if keywords:
             fresh = [j for j in fresh if matches_keywords(f"{j.get('title','')} {j.get('raw_description','')}", keywords)]
+        if titles is not None:
+            fresh = [j for j in fresh if titles.search(j.get("title") or "")]
         queues.append(fresh[:per_company])
     picked: list[dict] = []
     for turn in range(per_company):

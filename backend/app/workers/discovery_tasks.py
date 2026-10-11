@@ -578,15 +578,14 @@ async def _run_curated_async():
     (boards.greenhouse.io / jobs.lever.co / jobs.ashbyhq.com), so
     swipe-to-apply works end-to-end without redirect resolution.
 
-    We deliberately skip the keyword filter here. The 117 curated
-    companies are already pre-filtered for quality, and dropping their
-    listings because the title doesn't contain a current user's tech
-    skills was silently starving PM users of supply — Asana/Calendly/etc.
-    post tons of PM roles whose titles never say 'python' or 'ml'. The
-    per-user inbox filter (apply_user_filters) is the right place to
-    decide what each user sees; ingest should keep the catalog wide.
+    New jobs are kept when their title matches any user's target roles,
+    search keywords or skills (whole words), so a PM user's "Product
+    Manager" roles come in as well as an engineer's. Until 2026-10-11 no
+    filter ran here, but the 30-per-company, 500-in-all cap meant only ~17
+    companies ever added jobs; with every company taking turns, adding all
+    of their 16k listings would fill the free database in weeks.
     """
-    from app.services.discovery.curated_service import fetch_board_listings, pick_new_jobs
+    from app.services.discovery.curated_service import fetch_board_listings, pick_new_jobs, title_matcher
     from app.services.maintenance.board_listings import refresh_from_boards
 
     try:
@@ -595,8 +594,11 @@ async def _run_curated_async():
         # and renamed ones take their new title before new jobs are added.
         known: set[str] = set()
         logger.info("Curated boards: %s", await refresh_from_boards(boards.listed, known=known))
-        # Only jobs the app doesn't have yet, every company taking turns.
-        jobs = pick_new_jobs(boards.boards, known)
+        # Only jobs the app doesn't have yet whose title matches some user's
+        # roles or skills (most of the 16k listings are sales, finance and
+        # the like, and the free database has room for ~500 MB), every
+        # company taking turns.
+        jobs = pick_new_jobs(boards.boards, known, titles=title_matcher(await _collect_all_keywords()))
         logger.info("Curated: %d new jobs to add from %d companies", len(jobs),
                     len({j.get("company") for j in jobs}))
         if jobs:
