@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     enrich_min_score: float = 40
     # At most this many jobs read per day (UTC). 200 is about $0.90.
     enrich_daily_limit: int = 200
+    # What Job Hunt's own AI work may cost in a calendar month (UTC), counted
+    # from its own calls (services/ai_credit.py). The admin can change it on
+    # the admin page; this is the starting figure.
+    ai_monthly_budget_usd: float = 15.0
 
     @property
     def async_database_url(self) -> str:

@@ -1,7 +1,5 @@
-"""What the app spends on Claude, so the admin can see it and be warned
-before the credit runs out. Anthropic's API doesn't say what's left on the
-account, so the admin records the balance after topping up and the app
-counts down from there (services/ai_credit.py)."""
+"""What the app spends on Claude, so the admin can see it against Job
+Hunt's monthly budget and be warned as it gets close (services/ai_credit.py)."""
 
 import uuid
 from datetime import datetime
@@ -30,7 +28,10 @@ class AiUsageHour(Base):
 
 
 class AiCreditBalance(Base):
-    """The account balance the admin read on Anthropic's billing page."""
+    """The account balance the admin read on Anthropic's billing page. No
+    longer written: the account can be shared with other products, so Job
+    Hunt counts against a monthly budget instead. Kept until a migration
+    drops the table."""
 
     __tablename__ = "ai_credit_balances"
 

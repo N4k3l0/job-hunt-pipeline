@@ -6,7 +6,7 @@ import { AlertCircle, Loader2, Wallet } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
-import { useAiCredit, useAiStatus, useCurrentUser, useRecordAiCredit } from "@/hooks/use-api";
+import { useAiCredit, useAiStatus, useCurrentUser, useSetAiBudget, useTurnAiOn } from "@/hooks/use-api";
 
 const money = (value: number | null | undefined) => (value == null ? "" : `$${value.toFixed(2)}`);
 
@@ -43,26 +43,35 @@ export function AiCreditBanner() {
   );
 }
 
-/** Admin: what the app spent on AI each day, what's left, and "I've topped up". */
+/** Admin: what Job Hunt spent on AI each day, this month against its
+ *  budget, changing the budget, and turning AI back on after a top-up. */
 export function AiCreditCard() {
   const { data, isLoading } = useAiCredit();
-  const record = useRecordAiCredit();
+  const setBudget = useSetAiBudget();
+  const turnOn = useTurnAiOn();
   const toast = useToast();
-  const [balance, setBalance] = useState("");
+  const [budget, setBudgetText] = useState("");
 
   function save(e: React.FormEvent) {
     e.preventDefault();
-    const amount = Number(balance);
-    if (!balance || Number.isNaN(amount) || amount < 0) {
-      toast.error("Type the balance as a number, like 10 or 12.50");
+    const amount = Number(budget);
+    if (!budget || Number.isNaN(amount) || amount <= 0) {
+      toast.error("Type the budget as a number, like 15 or 20");
       return;
     }
-    record.mutate(amount, {
+    setBudget.mutate(amount, {
       onSuccess: () => {
-        setBalance("");
-        toast.success("Saved. AI is back on", { description: "The app counts down from this balance from now on." });
+        setBudgetText("");
+        toast.success(`Budget set to ${money(amount)} a month`);
       },
       onError: (err) => toast.error("Couldn't save it", { description: err.message }),
+    });
+  }
+
+  function aiOn() {
+    turnOn.mutate(undefined, {
+      onSuccess: () => toast.success("AI is back on"),
+      onError: (err) => toast.error("Couldn't turn it on", { description: err.message }),
     });
   }
 
@@ -72,11 +81,11 @@ export function AiCreditCard() {
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Wallet className="h-5 w-5" />
-          AI credit
+          AI spending
         </CardTitle>
         <CardDescription>
-          What the app spent on Claude this week. These are the app&apos;s own estimates from list prices.
-          Anthropic&apos;s console has the exact figure.
+          What Job Hunt spent on Claude, counted from its own calls at list prices. Other products sharing your
+          Anthropic account aren&apos;t counted. Anthropic&apos;s console has the exact figures.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -86,20 +95,12 @@ export function AiCreditCard() {
           <>
             {data.warning && <Warning text={data.warning} />}
             <p className="text-sm">
-              {data.balance ? (
-                <>
-                  About <strong>{money(Math.max(0, data.left ?? 0))}</strong> left of the{" "}
-                  {money(data.balance.amount)} you recorded on {dayLabel(data.balance.recorded_at.slice(0, 10))}.
-                  {data.per_day != null && data.days_left != null && (
-                    <> At about {money(data.per_day)} a day, that&apos;s about {data.days_left < 1 ? "less than a day" : `${Math.floor(data.days_left)} ${Math.floor(data.days_left) === 1 ? "day" : "days"}`}.</>
-                  )}
-                </>
-              ) : (
-                <>
-                  After you top up, type the balance from Anthropic&apos;s console below. The app then counts down
-                  from it and warns you before it runs out.
-                </>
-              )}
+              This month: <strong>{money(data.spent_this_month)}</strong> of the {money(data.budget)} budget.
+              {data.per_day != null && (
+                <> At about {money(data.per_day)} a day, the month is heading for about {money(data.heading_for)}.</>
+              )}{" "}
+              At the budget, reading new jobs and preparing applications by itself wait for the 1st. What you ask for
+              still works.
             </p>
 
             <div className="divide-y divide-[var(--ds-line)] text-sm">
@@ -116,24 +117,34 @@ export function AiCreditCard() {
 
             <form onSubmit={save} className="flex flex-wrap items-end gap-2">
               <label className="flex flex-col gap-1 text-sm">
-                <span className="text-muted-foreground">Balance on Anthropic&apos;s console ($)</span>
+                <span className="text-muted-foreground">Monthly budget for Job Hunt ($)</span>
                 <input
                   type="number"
                   inputMode="decimal"
-                  min={0}
-                  step="0.01"
-                  value={balance}
-                  onChange={(e) => setBalance(e.target.value)}
-                  placeholder="10.00"
+                  min={1}
+                  step="1"
+                  value={budget}
+                  onChange={(e) => setBudgetText(e.target.value)}
+                  placeholder={String(data.budget)}
                   className="h-9 w-36 rounded-md border bg-transparent px-3 text-sm"
                   style={{ borderColor: "var(--ds-line-strong)" }}
                 />
               </label>
-              <Button type="submit" disabled={record.isPending}>
-                {record.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                I&apos;ve topped up
+              <Button type="submit" variant="outline" disabled={setBudget.isPending}>
+                {setBudget.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Save budget
               </Button>
             </form>
+
+            {data.paused && (
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="text-muted-foreground">Topped up your Anthropic account?</span>
+                <Button size="sm" onClick={aiOn} disabled={turnOn.isPending}>
+                  {turnOn.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Turn AI back on now
+                </Button>
+              </div>
+            )}
           </>
         )}
       </CardContent>

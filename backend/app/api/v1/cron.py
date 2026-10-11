@@ -271,7 +271,14 @@ async def cron_enrich(
     from app.services.enrichment.job_enricher import enrich_pending_jobs, unread_jobs_filter
     from app.workers.scoring_tasks import rescore_jobs_for_all_users
 
+    from app.services.ai_credit import budget_left
+
     cfg = get_settings()
+    # Background reading waits for next month once the budget is used.
+    async with create_worker_session()() as db:
+        if await budget_left(db) <= 0:
+            return {"selected": 0, "enriched": 0, "budget_reached": True,
+                    "message": "This month's AI budget is used; reading new jobs waits for the 1st."}
     limit = max(1, min(limit, 60))
     result = await enrich_pending_jobs(
         limit=limit, max_age_days=max_age_days, time_budget_seconds=35,
@@ -416,8 +423,13 @@ async def cron_review_top_matches(
     (Claude Sonnet 5)."""
     _verify_cron(authorization)
 
+    from app.core.database import create_worker_session
+    from app.services.ai_credit import budget_left
     from app.services.scoring.top_match_review import review_top_matches
 
+    async with create_worker_session()() as db:
+        if await budget_left(db) <= 0:
+            return {"queued": 0, "reviewed": 0, "budget_reached": True, "errors": []}
     outcome = await review_top_matches(
         per_user_daily=max(0, min(per_user_daily, 10)),
         min_score=min_score,

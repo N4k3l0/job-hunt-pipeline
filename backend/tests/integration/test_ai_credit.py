@@ -75,34 +75,47 @@ async def test_counting_never_breaks_the_call():
                             session_factory=broken)
 
 
-async def test_spending_by_day_and_what_is_left(admin_client):
+async def test_spending_this_month_against_the_budget(admin_client):
     from app.core.database import engine
 
     now = datetime.now(timezone.utc)
     async with engine.begin() as conn:
         for days_ago in (1, 2, 3):
-            await _spend(conn, now - timedelta(days=days_ago), "extraction", "0.90", calls=200)
+            await _spend(conn, now - timedelta(days=days_ago), "extraction", "0.40", calls=90)
             await _spend(conn, now - timedelta(days=days_ago), "review", "0.10", calls=10)
+        # Last month's spending doesn't count against this month.
+        await _spend(conn, now.replace(day=1) - timedelta(days=3), "tailoring", "9.00")
 
-    # No balance yet: spending shows, but nothing to count down from.
     body = (await admin_client.get("/api/v1/auth/admin/ai-credit")).json()
-    assert body["balance"] is None and body["left"] is None and body["low"] is False
-    assert body["per_day"] == 1.0
+    assert body["budget"] == 15.0 and body["per_day"] == 0.5
+    month_so_far = sum(0.5 for d in (1, 2, 3) if (now - timedelta(days=d)).month == now.month)
+    assert body["spent_this_month"] == month_so_far and body["left"] == 15.0 - month_so_far
     yesterday = body["days"][-2]
-    assert yesterday["total"] == 1.0
+    assert yesterday["total"] == 0.5
     assert [t["name"] for t in yesterday["tasks"]] == ["Reading new jobs", "Checking the writing"]
 
-    # After topping up to $10: about ten days left, no warning.
-    body = (await admin_client.post("/api/v1/auth/admin/ai-credit", json={"balance_usd": 10})).json()
-    assert body["balance"]["amount"] == 10.0 and body["left"] == 10.0
-    assert body["days_left"] == 10.0 and body["low"] is False and body["warning"] is None
-
-    # Spend $8.50 more: under two days left, so the admin is warned.
-    async with engine.begin() as conn:
-        await _spend(conn, now, "tailoring", "8.50", calls=40)
+    # A smaller budget the month is heading over: the admin is warned.
+    body = (await admin_client.put("/api/v1/auth/admin/ai-budget", json={"monthly_usd": 2})).json()
+    assert body["budget"] == 2.0
     status = (await admin_client.get("/api/v1/auth/admin/ai-status")).json()
-    assert status["low"] is True and status["paused"] is False
-    assert status["message"].startswith("About $1.50 of AI credit is left, about 1 day at the current rate.")
+    assert status["low"] is True and "of its $2.00 AI budget this month" in status["message"]
+
+    # Over it: background reading waits for the 1st.
+    async with engine.begin() as conn:
+        await _spend(conn, now, "tailoring", "2.50")
+    body = (await admin_client.get("/api/v1/auth/admin/ai-credit")).json()
+    assert body["over"] is True and body["warning"].startswith("Job Hunt has used its $2.00 AI budget")
+    assert (await admin_client.put("/api/v1/auth/admin/ai-budget", json={"monthly_usd": 0})).status_code == 422
+
+
+async def test_reading_new_jobs_waits_once_the_budget_is_used(admin_client, monkeypatch):
+    from app.core.database import engine
+
+    monkeypatch.setenv("CRON_SECRET", "test-cron-secret")
+    async with engine.begin() as conn:
+        await _spend(conn, datetime.now(timezone.utc), "extraction", "16.00")
+    r = await admin_client.get("/api/v1/cron/enrich", headers={"Authorization": "Bearer test-cron-secret"})
+    assert r.status_code == 200 and r.json()["budget_reached"] is True
 
 
 async def test_topping_up_turns_ai_back_on_at_once(admin_client):
@@ -113,12 +126,9 @@ async def test_topping_up_turns_ai_back_on_at_once(admin_client):
     status = (await admin_client.get("/api/v1/auth/admin/ai-status")).json()
     assert status["paused"] is True and "credits have run out" in status["message"]
 
-    r = await admin_client.post("/api/v1/auth/admin/ai-credit", json={"balance_usd": 5})
-    assert r.status_code == 200
+    r = await admin_client.post("/api/v1/auth/admin/ai-on")
+    assert r.status_code == 200 and r.json()["paused"] is False
     assert not llm_module.credits_paused()
-    assert r.json()["paused"] is False
-
-    assert (await admin_client.post("/api/v1/auth/admin/ai-credit", json={"balance_usd": -1})).status_code == 422
 
 
 async def test_only_the_admin_sees_spending():
@@ -126,4 +136,5 @@ async def test_only_the_admin_sees_spending():
 
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         assert (await client.get("/api/v1/auth/admin/ai-credit")).status_code in (401, 403)
-        assert (await client.post("/api/v1/auth/admin/ai-credit", json={"balance_usd": 5})).status_code in (401, 403)
+        assert (await client.put("/api/v1/auth/admin/ai-budget", json={"monthly_usd": 5})).status_code in (401, 403)
+        assert (await client.post("/api/v1/auth/admin/ai-on")).status_code in (401, 403)
