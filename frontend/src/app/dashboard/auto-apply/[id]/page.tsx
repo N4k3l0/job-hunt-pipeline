@@ -906,7 +906,61 @@ export default function AutoApplicationPage({ params }: { params: Promise<{ id: 
               {groups.needsYou.length === 1 ? "it" : "them"} below and approve. Then the app can send it for you.
             </p>
           )}
-          {(application.status === "queued" || application.status === "submitting") && (
+          {application.status === "queued" && application.sending?.from_browser_only && (
+            <div className="space-y-3">
+              <p>
+                <CheckCircle2 className="inline h-4 w-4 ds-accent-fg" style={{ marginRight: 6, verticalAlign: -3 }} />
+                Everything&apos;s approved. {job?.company ?? "This company"}&apos;s form emails you a code to prove a
+                person is applying, so this one goes from your own browser. It takes a minute:
+              </p>
+              <ol className="list-decimal space-y-1.5 pl-5" style={{ fontSize: 13 }}>
+                <li>
+                  {extensionInstalled === true ? (
+                    <>The Job Hunt extension is ready in this browser.</>
+                  ) : (
+                    <>
+                      Add the Job Hunt extension to Chrome (<Link href="/dashboard/extension" className="underline">how</Link>
+                      ). You only do this once.
+                    </>
+                  )}
+                </li>
+                <li>Press <strong>Fill in with the extension</strong>. The form opens with all your answers and your resume.</li>
+                <li>Look it over and press <strong>Submit application</strong> on the form.</li>
+                <li>
+                  {job?.company ?? "The company"} emails you a code. Type it into the form and press Submit again. This
+                  page marks it sent by itself.
+                </li>
+              </ol>
+              <div className="flex flex-wrap items-center" style={{ gap: 8, paddingTop: 4 }}>
+                {extensionInstalled === true ? (
+                  <button type="button" className="ds-btn primary" onClick={fillInForm} disabled={filling}>
+                    {filling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
+                    Fill in with the extension
+                  </button>
+                ) : (
+                  <Link href="/dashboard/extension" className="ds-btn primary">
+                    <Wand2 className="h-4 w-4" /> Add the extension
+                  </Link>
+                )}
+                {application.form_url && (
+                  <a href={application.form_url} target="_blank" rel="noopener noreferrer" className="ds-btn ghost sm">
+                    <ExternalLink className="h-3.5 w-3.5" /> Fill it in by hand
+                  </a>
+                )}
+                <button type="button" className="ds-btn ghost sm" onClick={markApplied} disabled={markSent.isPending}>
+                  {markSent.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                  I sent it myself
+                </button>
+              </div>
+              {watching && (
+                <p className="ds-dim flex items-center" style={{ fontSize: 13, gap: 6 }}>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Waiting for you to send it on the form. This page updates once it&apos;s sent.
+                </p>
+              )}
+            </div>
+          )}
+          {(application.status === "queued" || application.status === "submitting") && !application.sending?.from_browser_only && (
             <div className="space-y-3">
               <p>
                 <CheckCircle2 className="inline h-4 w-4 ds-accent-fg" style={{ marginRight: 6, verticalAlign: -3 }} />

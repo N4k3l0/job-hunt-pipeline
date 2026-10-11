@@ -96,6 +96,9 @@ function autoDetail(a: AutoApplication) {
   if (a.status === "needs_you") return `${a.open_count} ${a.open_count === 1 ? "question needs" : "questions need"} you`;
   // A job the app waits to prepare says why, in plain words.
   if (a.status === "preparing") return a.error ?? "Reading the form and filling in your answers";
+  if (a.status === "queued" && a.sending?.from_browser_only) {
+    return "Their form emails you a code, so send this one from your browser.";
+  }
   if (a.status === "queued") {
     // The last try didn't go through: say so where it can't be missed.
     if (a.error) return <span className="text-amber-500">{a.error}</span>;
@@ -306,8 +309,16 @@ export default function ApplicationsPage() {
       {(a.status === "queued" || a.sending?.waiting) && (
         <>
           <span style={{ flex: 1 }} />
-          <SendForMe application={a} compact />
-          {!a.sending?.waiting && <FillInFormButton applicationId={a.id} onlyIfInstalled quiet />}
+          {a.sending?.from_browser_only && a.status === "queued" ? (
+            <Link href={`/dashboard/auto-apply/${a.id}`} className="ds-btn primary sm">
+              Send from your browser
+            </Link>
+          ) : (
+            <>
+              <SendForMe application={a} compact />
+              {!a.sending?.waiting && <FillInFormButton applicationId={a.id} onlyIfInstalled quiet />}
+            </>
+          )}
         </>
       )}
     </BoardCard>

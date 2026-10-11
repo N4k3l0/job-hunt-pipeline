@@ -164,6 +164,9 @@ export interface AutoApplySending {
   waiting: { practice: boolean; since: string | null; running: boolean } | null;
   practice: AutoApplySendOutcome | null;
   send: AutoApplySendOutcome | null;
+  /** The company's form emails a code to prove a person is applying, so
+   *  it's sent from the user's own browser, never by the app. */
+  from_browser_only?: boolean;
 }
 
 export interface AutoApplicationDetail extends AutoApplication {

@@ -18,6 +18,7 @@ from app.api.deps import CurrentUser, CurrentUserId, DbSession
 from app.models.auto_apply import AutoApplication
 from app.models.job import Job
 from app.services.auto_apply import answers as rules
+from app.services.auto_apply import email_codes
 from app.services.auto_apply.extension import (
     application_files,
     fill_details,
@@ -53,7 +54,9 @@ def _open_count(application: AutoApplication) -> int:
     return sum(1 for f in application.form or [] if rules.needs_attention(f, answers.get(f["key"])))
 
 
-def serialize(application: AutoApplication, *, detail: bool) -> dict:
+def serialize(
+    application: AutoApplication, *, detail: bool, code_boards: frozenset = email_codes.KNOWN_BOARDS,
+) -> dict:
     job = application.job
     body = {
         "id": str(application.id),
@@ -75,6 +78,9 @@ def serialize(application: AutoApplication, *, detail: bool) -> dict:
         "updated_at": application.updated_at.isoformat() if application.updated_at else None,
     }
     body["sending"] = sending_state(application)
+    # The form emails a code to prove a person is applying: it's sent from
+    # the user's own browser, never by the app.
+    body["sending"]["from_browser_only"] = email_codes.asks_for_code(application, code_boards)
     body["prepared_by"] = (application.result or {}).get("prepared_by") or "user"
     if detail:
         answers = application.answers or {}
@@ -105,6 +111,13 @@ async def _load(db, user_id, application_id: UUID) -> AutoApplication:
     if application is None:
         raise HTTPException(status_code=404, detail="Application not found")
     return application
+
+
+async def _view(db, user_id, application_id: UUID, *, detail: bool) -> dict:
+    return serialize(
+        await _load(db, user_id, application_id), detail=detail,
+        code_boards=await email_codes.boards_asking_for_codes(db),
+    )
 
 
 def _answer_error(e: AnswerError) -> HTTPException:
@@ -156,7 +169,8 @@ async def list_applications(user_id: CurrentUserId, db: DbSession, job_id: UUID 
     if job_id is not None:
         query = query.where(AutoApplication.job_id == job_id)
     applications = (await db.execute(query)).scalars().all()
-    return [serialize(a, detail=False) for a in applications]
+    code_boards = await email_codes.boards_asking_for_codes(db)
+    return [serialize(a, detail=False, code_boards=code_boards) for a in applications]
 
 
 @router.post("/jobs/{job_id}")
@@ -171,7 +185,7 @@ async def prepare_for_job(
     if await db.get(Job, job_id) is None:
         raise HTTPException(status_code=404, detail="Job not found")
     application = await prepare_application(db, user_id, job_id, tailor=tailor)
-    return serialize(await _load(db, user_id, application.id), detail=True)
+    return await _view(db, user_id, application.id, detail=True)
 
 
 @router.get("/{application_id}/documents")
@@ -185,7 +199,7 @@ async def documents(application_id: UUID, user_id: CurrentUserId, db: DbSession)
 
 @router.get("/{application_id}")
 async def get_application(application_id: UUID, user_id: CurrentUserId, db: DbSession):
-    return serialize(await _load(db, user_id, application_id), detail=True)
+    return await _view(db, user_id, application_id, detail=True)
 
 
 @router.put("/{application_id}/answers")
@@ -197,7 +211,7 @@ async def save_answers(application_id: UUID, body: AnswersUpdate, user_id: Curre
         await update_answers(db, application, body.answers, approve=body.approve)
     except AnswerError as e:
         raise _answer_error(e) from e
-    return serialize(await _load(db, user_id, application_id), detail=True)
+    return await _view(db, user_id, application_id, detail=True)
 
 
 class AnswerKey(BaseModel):
@@ -243,7 +257,7 @@ async def first_go(application_id: UUID, body: AnswerKey, user_id: CurrentUserId
         await write_first_go(db, application, body.key)
     except AnswerError as e:
         raise _answer_error(e) from e
-    return serialize(await _load(db, user_id, application_id), detail=True)
+    return await _view(db, user_id, application_id, detail=True)
 
 
 @router.post("/{application_id}/keep-wording")
@@ -258,7 +272,7 @@ async def keep_wording(application_id: UUID, body: AnswerKey, user_id: CurrentUs
     answers[body.key] = rules.accept_wording(entry)
     application.answers = answers
     await db.commit()
-    return serialize(await _load(db, user_id, application_id), detail=True)
+    return await _view(db, user_id, application_id, detail=True)
 
 
 class DocumentName(BaseModel):
@@ -326,6 +340,9 @@ async def send_for_me(application_id: UUID, body: SendRequest, user_id: CurrentU
     result = application.result or {}
     if "request" in result or "running" in result:
         raise HTTPException(status_code=409, detail="It's already waiting to go.")
+    # A practice run is fine: it never presses Submit for real.
+    if not body.practice and email_codes.asks_for_code(application, await email_codes.boards_asking_for_codes(db)):
+        raise HTTPException(status_code=409, detail=email_codes.message(application.job.company if application.job else None))
     # Everything it sends has to read plainly, now as when it was approved.
     answers = application.answers or {}
     flagged = [f["label"] for f in application.form or [] if rules.needs_attention(f, answers.get(f["key"]))]
@@ -337,7 +354,7 @@ async def send_for_me(application_id: UUID, body: SendRequest, user_id: CurrentU
     application.result = {**result, "request": {"practice": body.practice, "at": datetime.now(timezone.utc).isoformat()}}
     application.error = None
     await db.commit()
-    return serialize(await _load(db, user_id, application_id), detail=True)
+    return await _view(db, user_id, application_id, detail=True)
 
 
 @router.get("/{application_id}/send-screenshot")
@@ -370,7 +387,7 @@ async def sent(application_id: UUID, user_id: CurrentUserId, db: DbSession):
         await mark_sent(db, application)
     except AnswerError as e:
         raise _answer_error(e) from e
-    return serialize(await _load(db, user_id, application_id), detail=False)
+    return await _view(db, user_id, application_id, detail=False)
 
 
 class ExtensionReport(BaseModel):
@@ -411,4 +428,4 @@ async def cancel(application_id: UUID, user_id: CurrentUserId, db: DbSession):
         await cancel_application(db, application)
     except AnswerError as e:
         raise _answer_error(e) from e
-    return serialize(await _load(db, user_id, application_id), detail=False)
+    return await _view(db, user_id, application_id, detail=False)
