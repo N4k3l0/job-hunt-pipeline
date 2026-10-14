@@ -24,12 +24,24 @@ STYLE_RULES = """## How to write it (strict)
 - Say the concrete thing: what was built, for whom, what happened."""
 
 _DASHES = "—–‒−"
+# A hyphen with spaces around it, used as a dash ("a short chat? - Ada").
+# Not a range of numbers ("2019 - 2021"), and not a list marker at the
+# start of a line.
+_SPACED_HYPHEN = re.compile(r"(?<=(\S)) +- +(?=(\S))")
 _BETWEEN_DIGITS = re.compile(rf"(?<=\d)\s*[{_DASHES}]\s*(?=\d)")
 _SPACED = re.compile(rf"\s*[{_DASHES}]\s*")
 _QUOTES = {"‘": "'", "’": "'", "“": '"', "”": '"', "…": "..."}
 
 
 _SENTENCE = re.compile(r"[^.!?\n]+[.!?]*")
+
+
+def _hyphen_as_dash(match: re.Match) -> bool:
+    return not (match.group(1).isdigit() and match.group(2).isdigit())
+
+
+def _hyphens_to_dashes(text: str) -> str:
+    return _SPACED_HYPHEN.sub(lambda m: " — " if _hyphen_as_dash(m) else m.group(0), text)
 
 
 def _undash_sentence(match: re.Match) -> str:
@@ -43,7 +55,8 @@ def _undash_sentence(match: re.Match) -> str:
     if not after or after[:1] in ",.;:!?":
         return before.rstrip() + after
     if not before.strip():
-        return after
+        # Nothing before the dash (a sign-off after "?"): keep the space.
+        return sentence[:len(sentence) - len(sentence.lstrip())] + after
     return f"{before.rstrip()}. {after[:1].upper()}{after[1:]}"
 
 
@@ -54,7 +67,7 @@ def plain_english(text: str | None) -> str:
     and a single dash ends the sentence."""
     if not text:
         return text or ""
-    cleaned = _BETWEEN_DIGITS.sub("-", text)
+    cleaned = _BETWEEN_DIGITS.sub("-", _hyphens_to_dashes(text))
     cleaned = _SENTENCE.sub(_undash_sentence, cleaned)
     for bad, good in _QUOTES.items():
         cleaned = cleaned.replace(bad, good)
@@ -94,7 +107,11 @@ _SENTENCES = re.compile(r"(?<=[.!?])\s+")
 
 
 def has_dashes(text: str | None) -> bool:
-    return bool(text) and any(d in text for d in _DASHES)
+    return bool(text) and (any(d in text for d in _DASHES) or has_hyphen_dash(text))
+
+
+def has_hyphen_dash(text: str | None) -> bool:
+    return bool(text) and any(_hyphen_as_dash(m) for m in _SPACED_HYPHEN.finditer(text))
 
 
 def writing_problems(text: str | None) -> list[str]:
@@ -104,7 +121,10 @@ def writing_problems(text: str | None) -> list[str]:
         return []
     problems = []
     if has_dashes(text):
-        problems.append("It has a long dash. Use a comma or a full stop instead.")
+        if any(d in text for d in _DASHES):
+            problems.append("It has a long dash. Use a comma or a full stop instead.")
+        else:
+            problems.append("It uses a hyphen as a dash. Use a comma or a full stop instead.")
     lowered = text.lower()
     seen = set()
     for word in _WORD.findall(lowered):
@@ -132,7 +152,8 @@ def fingerprint(text: str) -> str:
 # ─── Fixing and reading through, with a model ───────────────────────────────
 
 DASH_FIX_SYSTEM = (
-    "Rewrite only the sentences in this text that contain a long dash (\u2014 or \u2013) so they have none, "
+    "Rewrite only the sentences in this text that contain a long dash (\u2014 or \u2013), or a hyphen with "
+    "spaces around it used as a dash, so they have none, "
     "the way a person would write them: a full stop, a colon, brackets, or different words. Leave every "
     "other sentence exactly as it is, line breaks included. Return the whole text and nothing else."
 )

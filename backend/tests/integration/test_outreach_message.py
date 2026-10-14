@@ -107,6 +107,7 @@ async def test_after_applying_the_app_finds_someone_and_writes_a_note(client):
     assert "Product Manager at Stripe" in prompt and "Dana Lee, Head of Product" in prompt
     assert "Never say or hint that an app" in prompt
     assert 'Start with "Hi"' in prompt and "Don't move a skill" in prompt
+    assert "proudest project, that's the example" in prompt and "No dash or hyphen before the name" in prompt
 
     # Opening the page again costs nothing: the note and the person are kept.
     again = (await client.post(f"/api/v1/outreach/{JOB}/prepare")).json()

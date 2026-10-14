@@ -41,3 +41,19 @@ def test_every_prompt_that_writes_for_the_user_carries_the_rules():
     for prompt in (COVER_LETTER_PROMPT, OUTREACH_PROMPT, ANSWER_PROMPT, SYSTEM_PROMPT, DRAFT_ANSWERS):
         assert STYLE_RULES in prompt
         assert "{style}" not in prompt
+
+
+def test_a_hyphen_used_as_a_dash_counts_as_one():
+    from app.llm.style import has_dashes, writing_problems
+
+    # The first real note signed off "Open to a short chat? - Olalekan".
+    assert has_dashes("Open to a short chat? - Olalekan")
+    assert plain_english("Open to a short chat? - Olalekan") == "Open to a short chat? Olalekan"
+    assert plain_english("I built it - it ranks jobs.") == "I built it. It ranks jobs."
+    assert writing_problems("I built it - it ranks jobs.") == [
+        "It uses a hyphen as a dash. Use a comma or a full stop instead."
+    ]
+    # Not a range of numbers, a list, or a word with hyphens in it.
+    for fine in ("From 2019 - 2021 at Acme.", "Skills:\n- Python\n- FastAPI", "An end-to-end, well-known system."):
+        assert not has_dashes(fine), fine
+        assert plain_english(fine) == fine
