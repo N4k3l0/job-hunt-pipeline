@@ -19,6 +19,8 @@ router = APIRouter()
 class PrepareBody(BaseModel):
     # Look for someone else and write the note again (another lookup).
     look_again: bool = False
+    # Write the note again to the same person (no lookup).
+    rewrite: bool = False
 
 
 class NoteUpdate(BaseModel):
@@ -44,7 +46,9 @@ async def prepare(job_id: UUID, user_id: CurrentUserId, db: DbSession, body: Pre
     """Find the person to write to and write the note (about a minute)."""
     await _job(db, job_id)
     try:
-        await prepare_note(db, user_id, job_id, look_again=bool(body and body.look_again))
+        await prepare_note(
+            db, user_id, job_id, look_again=bool(body and body.look_again), rewrite=bool(body and body.rewrite),
+        )
     except NotSentYet as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
     return await view(db, user_id, job_id)

@@ -106,10 +106,17 @@ async def test_after_applying_the_app_finds_someone_and_writes_a_note(client):
     prompt = client.llm.prompts[0]
     assert "Product Manager at Stripe" in prompt and "Dana Lee, Head of Product" in prompt
     assert "Never say or hint that an app" in prompt
+    assert 'Start with "Hi"' in prompt and "Don't move a skill" in prompt
 
     # Opening the page again costs nothing: the note and the person are kept.
     again = (await client.post(f"/api/v1/outreach/{JOB}/prepare")).json()
     assert again["message"] == view["message"] and client.lookups == ["Stripe"]
+
+    # Writing it again keeps the person: no new search.
+    client.llm.note = "Hi Dana, I've just applied for the Product Manager role. Would you be open to a short chat? Ada"
+    again = (await client.post(f"/api/v1/outreach/{JOB}/prepare", json={"rewrite": True})).json()
+    assert again["message"] == client.llm.note and client.lookups == ["Stripe"]
+    assert again["contact"]["name"] == "Dana Lee"
 
     # The user's edits are kept, without long dashes.
     r = await client.put(f"/api/v1/outreach/{JOB}", json={"message": "Hi Dana — I applied today. Ada"})
