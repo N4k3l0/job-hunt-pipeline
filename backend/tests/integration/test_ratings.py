@@ -135,7 +135,7 @@ async def test_queue_ratings_and_results(client):
 async def test_results_can_compare_other_versions(client):
     """Before choosing the next scoring, the page can measure several
     versions on the user's ratings at once. Unknown versions are ignored."""
-    r = await client.get("/api/v1/ratings/results", params={"compare": "2,3,4,5,99"})
+    r = await client.get("/api/v1/ratings/results", params={"compare": "2,3,4,5,7,99"})
     assert r.status_code == 200, r.text
     compared = r.json().get("compared") or {}
     # The live and proposed versions are always measured too.

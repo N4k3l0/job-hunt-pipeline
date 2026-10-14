@@ -39,7 +39,7 @@ def _score(job, version, profile=PROFILE):
 
 
 def test_version_6_is_live():
-    assert SCORE_VERSION == 6 and PROPOSED_SCORE_VERSION == 7
+    assert SCORE_VERSION == 6 and PROPOSED_SCORE_VERSION == 6
     assert set(KNOWN_VERSIONS) == {2, 3, 4, 5, 6, 7, 8}
     job = _job("Senior AI Engineer", ["Python", "RAG"], seniority="senior")
     assert compute_job_score(*job, PROFILE) == _score(job, 6)
