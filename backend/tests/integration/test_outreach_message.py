@@ -49,7 +49,8 @@ async def client(monkeypatch):
             "TRUNCATE outreach_logs, job_contacts, application_tracking, candidate_profiles, jobs, users CASCADE"
         ))
         await conn.execute(text(
-            "INSERT INTO users (id, email, name, role) VALUES (:id, 'ada@test.dev', 'Ada Obi', 'user')"
+            "INSERT INTO users (id, email, name, role, preferences) "
+            "VALUES (:id, 'ada@test.dev', 'Ada Obi', 'user', '{\"proudest_project\": \"Job Hunt Pipeline\"}')"
         ), {"id": USER})
         await conn.execute(text(
             "INSERT INTO candidate_profiles (id, user_id, home_country, links) VALUES (gen_random_uuid(), :u, 'NG', '{}'::jsonb)"
@@ -57,8 +58,10 @@ async def client(monkeypatch):
         for job_id, url in ((JOB, "https://job-boards.greenhouse.io/stripe/jobs/301"),
                             (LINKEDIN_JOB, "https://www.linkedin.com/jobs/view/4012345678")):
             await conn.execute(text(
-                "INSERT INTO jobs (id, company, title, status, job_url) VALUES (:id, 'Stripe', 'Product Manager', 'scored', :url)"
-            ), {"id": job_id, "url": url})
+                "INSERT INTO jobs (id, company, title, status, job_url, raw_description) "
+                "VALUES (:id, 'Stripe', 'Product Manager', 'scored', :url, :d)"
+            ), {"id": job_id, "url": url, "d": "![logo](https://x.test/l.png) **The Role** You will work with "
+                "[merchants](https://stripe.com) to take payments products to production."})
 
     lookups: list[str] = []
 
@@ -105,9 +108,14 @@ async def test_after_applying_the_app_finds_someone_and_writes_a_note(client):
     assert view["chars"] == len(view["message"]) and view["max_chars"] == 300
     prompt = client.llm.prompts[0]
     assert "Product Manager at Stripe" in prompt and "Dana Lee, Head of Product" in prompt
-    assert "Never say or hint that an app" in prompt
-    assert 'Start with "Hi"' in prompt and "Don't move a skill" in prompt
-    assert "proudest project, that's the example" in prompt and "No dash or hyphen before the name" in prompt
+    # What the note is for, and what the role does, from the posting as plain text.
+    assert "get this person to open it" in prompt
+    assert "You will work with merchants to take payments products to production." in prompt
+    assert "logo" not in prompt and "stripe.com" not in prompt
+    # The work has to match the role: the proudest project isn't offered.
+    assert "Proudest project" not in prompt and "Job Hunt Pipeline" not in prompt
+    assert "Never talk about job searching" in prompt and "Never say or hint that an app" in prompt
+    assert 'Start with "Hi"' in prompt and "Don't move a skill" in prompt and "No dash or hyphen" in prompt
 
     # Opening the page again costs nothing: the note and the person are kept.
     again = (await client.post(f"/api/v1/outreach/{JOB}/prepare")).json()
@@ -154,6 +162,24 @@ async def test_the_note_is_checked_and_kept_short(client, monkeypatch):
     assert any("LinkedIn only allows 300" in p for p in asked[0])
     assert any("leverage" in p for p in asked[0])
     assert view["chars"] <= 300 and view["problems"] == []
+
+
+async def test_a_note_about_job_searching_is_sent_back(client, monkeypatch):
+    from app.services.outreach import message
+
+    client.llm.note = "Hi Dana, I just applied. I built a job search pipeline that pulls 1,700+ postings a week. Ada"
+    asked: list[list[str]] = []
+
+    async def fixes(lines, problems, *, what, llm=None):
+        asked.append(problems)
+        assert "get them to open the application" in what
+        return ["Hi Dana, I just applied for the Product Manager role. I led payments at Acme. Would you take a look? Ada"]
+
+    monkeypatch.setattr(message, "revise_plainly", fixes)
+    await client.post(f"/api/v1/jobs/{JOB}/mark-applied")
+    view = (await client.post(f"/api/v1/outreach/{JOB}/prepare")).json()
+    assert any("talks about job searching" in p for p in asked[0])
+    assert "job search" not in view["message"] and view["problems"] == []
 
 
 async def test_when_no_one_is_found_the_note_is_still_written(client, monkeypatch):
