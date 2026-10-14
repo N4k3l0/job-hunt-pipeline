@@ -254,6 +254,15 @@ async def test_the_applications_page_lists_both_kinds_of_job(seeded):
     assert body["elsewhere"][0]["url"] == "https://delta.wd1.myworkdayjobs.com/jobs/5"
     assert body["max_batch"] == 25 and body["cost_each_usd"] == 0.15
 
+    # Each list has its own limit: a long list of other sites doesn't
+    # crowd out the ones the app fills in.
+    from app.core.database import async_session
+    from app.services.auto_apply.batch import picks
+
+    async with async_session() as db:
+        few = await picks(db, ME, fill_limit=2, elsewhere_limit=0)
+    assert [item["job_id"] for item in few["fill"]] == [str(job_id(1)), str(job_id(2))] and few["elsewhere"] == []
+
 
 async def test_a_batch_is_prepared_a_few_at_a_time(seeded):
     from sqlalchemy import select

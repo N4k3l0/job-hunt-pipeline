@@ -36,18 +36,23 @@ logger = logging.getLogger(__name__)
 
 MAX_BATCH = 25
 CONCURRENCY = 3
-PICKS_LIMIT = 60
+# How many of each list the page gets: the user may want 20 to 50 a day.
+FILL_LIMIT = 60
+ELSEWHERE_LIMIT = 40
 
 
 def _key(job: Job) -> tuple[str, str]:
     return ((job.company or "").strip().lower(), (job.title_en or job.title or "").strip().lower())
 
 
-async def picks(db: AsyncSession, user_id: uuid.UUID, *, limit: int = PICKS_LIMIT, now: datetime | None = None) -> dict:
+async def picks(
+    db: AsyncSession, user_id: uuid.UUID, *, fill_limit: int = FILL_LIMIT, elsewhere_limit: int = ELSEWHERE_LIMIT,
+    now: datetime | None = None,
+) -> dict:
     """The user's best matches not started yet, split by whether the app
-    fills in the form."""
+    fills in the form, each list up to its own limit."""
     now = now or datetime.now(timezone.utc)
-    rows = await best_matches(db, user_id, limit=limit * 3, now=now, fillable_only=False)
+    rows = await best_matches(db, user_id, limit=(fill_limit + elsewhere_limit) * 4, now=now, fillable_only=False)
     started = await recent_companies(db, user_id, now)
     fill, elsewhere, seen = [], [], set()
     for job, score, url in rows:
@@ -65,8 +70,12 @@ async def picks(db: AsyncSession, user_id: uuid.UUID, *, limit: int = PICKS_LIMI
             # Two applications to one company in a month can look like a spray.
             "applied_recently": (job.company or "").strip().lower() in started,
         }
-        (fill if target is not None and target.board else elsewhere).append(item)
-        if len(fill) + len(elsewhere) >= limit:
+        if target is not None and target.board:
+            if len(fill) < fill_limit:
+                fill.append(item)
+        elif len(elsewhere) < elsewhere_limit:
+            elsewhere.append(item)
+        if len(fill) >= fill_limit and len(elsewhere) >= elsewhere_limit:
             break
     return {"fill": fill, "elsewhere": elsewhere, "cost_each_usd": COST_EACH_USD, "max_batch": MAX_BATCH}
 
