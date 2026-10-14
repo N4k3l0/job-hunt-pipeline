@@ -151,6 +151,18 @@ export function ApplyPicks() {
           </div>
           {shownFill.map((pick) => (
             <PickRow key={pick.job_id} pick={pick}>
+              <button
+                type="button"
+                className="ds-btn ghost sm"
+                onClick={() => {
+                  if (chosen.has(pick.job_id)) flip(pick.job_id);
+                  act(pick, "dismiss");
+                }}
+                disabled={elsewhere.isPending}
+                title="Take it off the list and out of your inbox"
+              >
+                Not for me
+              </button>
               <input
                 type="checkbox"
                 checked={chosen.has(pick.job_id)}
