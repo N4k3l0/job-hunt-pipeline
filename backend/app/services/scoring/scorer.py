@@ -19,10 +19,10 @@ logger = logging.getLogger(__name__)
 # a change is measured against the user's own ratings before it replaces
 # the stored scores.
 SCORE_VERSION = 5
-PROPOSED_SCORE_VERSION = 5
+PROPOSED_SCORE_VERSION = 6
 # Every version the scorer can compute. The Rate matches comparison can
 # score a user's ratings with any of them (?compare=3,4).
-KNOWN_VERSIONS = (2, 3, 4, 5)
+KNOWN_VERSIONS = (2, 3, 4, 5, 6)
 
 # Weights of the rule-based components; they sum to 1.
 WEIGHTS = {"title": 0.30, "skills": 0.35, "seniority": 0.20, "domain": 0.05, "remote": 0.10}
@@ -51,6 +51,14 @@ IRRELEVANT_MAX_SCORE = 45.0
 # Version 5 is version 4 with titles compared by their specific words: two
 # titles sharing only "Engineer" no longer get half the title points.
 SKILLS_MIN_LISTED = 3
+# Version 6 is version 5 that reads the description when the job lists too
+# few skills: how many of the candidate's skills it mentions (skill_match on
+# the description alone) is the skills part, once the description is long
+# enough to say. On 2026-10-14 factory "Automation Engineer" jobs scored 84
+# to 86 for an AI engineer on their title alone, because the job reader
+# hadn't listed their skills yet; their descriptions mention none of the
+# candidate's skills. A job with no description still goes by what's known.
+DESCRIPTION_MIN_CHARS = 300
 
 # Axis maxima the dashboard displays each component against.
 AXIS_MAX = {"title": 20, "skills": 25, "seniority": 15, "domain": 10}
@@ -73,7 +81,8 @@ def compute_job_score(
             salary_min, salary_max, skills, work_history
         version: 2 gives unknown components a middle score; 3 gives them
             nothing; 4 counts only what both sides know; 5 is 4 with
-            titles compared by their specific words.
+            titles compared by their specific words; 6 is 5 with skills
+            read from the description when the job lists too few.
 
     Returns:
         Dict with the JobScore columns: per-axis scores, overall_fit (0-100),
@@ -175,11 +184,14 @@ def compute_job_score(
         )
         listed = {normalize_skill(s) for s in job_entities.get("skills") or [] if s and normalize_skill(s)}
         remote_preference = profile.get("remote_preference") or "any"
+        has_skills = bool(expand_skills(candidate_skills))
+        skills_known = len(listed) >= SKILLS_MIN_LISTED and has_skills
+        if not skills_known and version >= 6 and has_skills and len(description.strip()) >= DESCRIPTION_MIN_CHARS:
+            skills_value, skills_matched, skills_missing = skill_match(None, description, candidate_skills)
+            skills_known = True
         components = {
             "title": title_value if has_roles else None,
-            "skills": (
-                skills_value if len(listed) >= SKILLS_MIN_LISTED and expand_skills(candidate_skills) else None
-            ),
+            "skills": skills_value if skills_known else None,
             "seniority": (
                 seniority_value
                 if seniority_detail["job_level"] is not None and seniority_detail["candidate_level"] is not None
