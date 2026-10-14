@@ -17,8 +17,8 @@ function dayLabel(day: string) {
 
 function Warning({ text }: { text: string }) {
   return (
-    <div role="status" className="flex items-start gap-2 rounded-lg border border-amber-400/40 bg-amber-400/10 px-4 py-3 text-sm">
-      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+    <div role="status" className="flex items-start gap-2 rounded-lg border border-amber-400/40 bg-warn/10 px-4 py-3 text-sm">
+      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
       <span>{text}</span>
     </div>
   );
@@ -32,9 +32,9 @@ export function AiCreditBanner() {
   return (
     <div
       role="status"
-      className="mb-4 flex flex-wrap items-start gap-2 rounded-lg border border-amber-400/40 bg-amber-400/10 px-4 py-3 text-sm"
+      className="mb-4 flex flex-wrap items-start gap-2 rounded-lg border border-amber-400/40 bg-warn/10 px-4 py-3 text-sm"
     >
-      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
       <span className="min-w-0 flex-1">{data.message}</span>
       <Link href="/dashboard/admin#ai-credit" className="font-medium underline underline-offset-2">
         See spending

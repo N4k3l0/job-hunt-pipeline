@@ -244,7 +244,7 @@ export default function ImportPage() {
                 ]}
               />
               {importUrl.isSuccess && (
-                <div className="flex items-center gap-2 text-sm text-emerald-400">
+                <div className="flex items-center gap-2 text-sm text-ok">
                   <CheckCircle2 className="h-4 w-4" />
                   Job imported and added to your inbox.
                 </div>
@@ -306,7 +306,7 @@ export default function ImportPage() {
                 ]}
               />
               {importText.isSuccess && (
-                <div className="flex items-center gap-2 text-sm text-emerald-400">
+                <div className="flex items-center gap-2 text-sm text-ok">
                   <CheckCircle2 className="h-4 w-4" />
                   Job imported and added to your inbox.
                 </div>
@@ -392,7 +392,7 @@ function BookmarkletCard() {
                           >
               {copied ? (
                 <>
-                  <Check className="h-3.5 w-3.5 text-emerald-400" />
+                  <Check className="h-3.5 w-3.5 text-ok" />
                   Copied. Now paste it in step 3
                 </>
               ) : (
@@ -462,7 +462,7 @@ function BookmarkletCard() {
         {/* Step 4: use it */}
         <div className="space-y-2">
           <p className="text-sm font-medium flex items-center gap-2">
-            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-400 text-xs font-bold">4</span>
+            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500/15 text-ok text-xs font-bold">4</span>
             Use it
           </p>
           <p className="text-sm text-muted-foreground pl-7 leading-relaxed">
@@ -617,7 +617,7 @@ function EmailBulkImportPanel() {
               {results.map((r, i) => (
                 <li key={i} className="flex items-start gap-2 leading-relaxed">
                   {r.status === "ok" ? (
-                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                    <CheckCircle2 className="h-3.5 w-3.5 text-ok shrink-0 mt-0.5" />
                   ) : (
                     <span className="h-3.5 w-3.5 rounded-full bg-destructive/30 shrink-0 mt-0.5" />
                   )}

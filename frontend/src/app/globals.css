@@ -6,6 +6,12 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
+  /* Status colors per theme (design-system-v2.css): text-warn, text-ok,
+     text-err. Readable on both themes, unlike Tailwind's amber-400 and
+     emerald-400, which were picked for the dark theme. */
+  --color-warn: var(--warn);
+  --color-ok: var(--ok);
+  --color-err: var(--err);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-sans);

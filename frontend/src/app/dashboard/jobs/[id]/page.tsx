@@ -645,7 +645,7 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
               className="ds-btn"
               onClick={handleUnmarkApplied}
               disabled={marking}
-              style={{ color: "var(--ds-accent)", borderColor: "var(--ds-accent-edge)" }}
+              style={{ color: "var(--ds-ok)", borderColor: "var(--ds-line-strong)" }}
               title="Click to roll back if you didn't actually submit."
             >
               {marking ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
@@ -699,12 +699,12 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
         <div className="ds-card" style={{
           display: "flex", alignItems: "center", gap: 10,
           padding: "10px 14px",
-          background: "var(--ds-accent-soft)",
-          borderColor: "var(--ds-accent-edge)",
-          color: "var(--ds-accent)",
+          background: "var(--ds-bg-elev-2)",
+          borderColor: "var(--ds-line-strong)",
+          color: "var(--ds-fg)",
           fontSize: 13,
         }}>
-          <CheckCircle2 className="h-4 w-4" />
+          <CheckCircle2 className="h-4 w-4 ds-ok-fg" />
           Your resume for this job is being written. It shows under Applications when it&apos;s ready.
         </div>
       )}
@@ -748,7 +748,7 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
                   <ul style={{ listStyle: "none", padding: 0, margin: "10px 0 0", display: "flex", flexDirection: "column", gap: 8 }}>
                     {score.deep_score.strengths.map((s: string, i: number) => (
                       <li key={i} style={{ display: "flex", gap: 10, fontSize: 13, lineHeight: 1.55, color: "var(--ds-fg)" }}>
-                        <CheckCircle2 className="h-3.5 w-3.5" style={{ color: "var(--ds-accent)", flexShrink: 0, marginTop: 2 }} />
+                        <CheckCircle2 className="h-3.5 w-3.5" style={{ color: "var(--ds-ok)", flexShrink: 0, marginTop: 2 }} />
                         <span>{s}</span>
                       </li>
                     ))}
@@ -782,9 +782,10 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
                   Compares your full resume against this posting and tells you exactly where you match and where you stretch.
                 </p>
               </div>
+              {/* Secondary: "Apply for me" above is the one solid button. */}
               <button
                 type="button"
-                className="ds-btn primary"
+                className="ds-btn"
                 onClick={() =>
                   deepScore.mutate(id, {
                     onSuccess: () => toast.success("Fit analysis updated"),
@@ -965,7 +966,7 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
                 {entities?.sponsorship_available !== null && entities?.sponsorship_available !== undefined && (
                   <div className="flex justify-between">
                     <span className="ds-muted">Sponsorship</span>
-                    <span className={entities.sponsorship_available ? "ds-accent-fg" : ""}>
+                    <span className={entities.sponsorship_available ? "ds-ok-fg" : ""}>
                       {entities.sponsorship_available ? "Yes" : "No"}
                     </span>
                   </div>

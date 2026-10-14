@@ -174,7 +174,7 @@ export default function AdminPage() {
       <Card style={{ background: "linear-gradient(135deg, rgba(251,191,36,0.02) 0%, transparent 60%)" }}>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <UserPlus className="h-5 w-5 text-amber-400" />
+            <UserPlus className="h-5 w-5 text-warn" />
             Invite User
           </CardTitle>
           <CardDescription>
@@ -209,7 +209,7 @@ export default function AdminPage() {
           {inviteResult && (
             <div className="mt-3 space-y-3">
               <div className={`flex items-start gap-2 text-sm ${
-                inviteResult.ok ? "text-emerald-400" : "text-red-400"
+                inviteResult.ok ? "text-ok" : "text-err"
               }`}>
                 {inviteResult.ok ? (
                   <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />
@@ -224,7 +224,7 @@ export default function AdminPage() {
                   variant="outline"
                   onClick={() => handleResendMagicLink(conflictedEmail)}
                   disabled={inviteLoading}
-                  className="border-amber-500/30 text-amber-400 hover:bg-amber-500/5"
+                  className="border-amber-500/30 text-warn hover:bg-amber-500/5"
                 >
                   {inviteLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Mail className="h-3.5 w-3.5" />}
                   Send fresh magic link to {conflictedEmail}
@@ -232,11 +232,11 @@ export default function AdminPage() {
               )}
               {inviteResult.ok && inviteResult.magicLink && (
                 <div className="rounded-lg border border-amber-500/20 bg-amber-500/[0.04] p-3 space-y-2">
-                  <p className="text-sm text-amber-200 font-medium">
+                  <p className="text-sm text-warn font-medium">
                     Magic link (single-use, expires in ~1 hour)
                   </p>
                   <div className="flex items-center gap-2">
-                    <code className="flex-1 truncate rounded bg-black/40 px-2 py-1.5 text-xs text-amber-200 font-mono">
+                    <code className="flex-1 truncate rounded bg-[var(--bg-elev-2)] px-2 py-1.5 text-xs text-foreground font-mono">
                       {inviteResult.magicLink}
                     </code>
                     <Button
@@ -274,7 +274,7 @@ export default function AdminPage() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5 text-amber-400" />
+            <Sparkles className="h-5 w-5 text-warn" />
             Maintenance &amp; diagnostics
           </CardTitle>
           <CardDescription>
@@ -347,7 +347,7 @@ export default function AdminPage() {
                   <Badge
                     variant={user.role === "admin" ? "default" : "secondary"}
                     className={user.role === "admin"
-                      ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                      ? "bg-amber-500/10 text-warn border-amber-500/20"
                       : ""
                     }
                   >
@@ -969,7 +969,7 @@ function RunDiscoveryPanel() {
           )}
         </Button>
         {runDiscovery.isSuccess && runDiscovery.data && (
-          <span className="flex items-center gap-1.5 text-sm text-emerald-400">
+          <span className="flex items-center gap-1.5 text-sm text-ok">
             <CheckCircle2 className="h-4 w-4" /> Done
           </span>
         )}
@@ -987,7 +987,7 @@ function RunDiscoveryPanel() {
               {Object.entries(runDiscovery.data.results).map(([name, status]) => (
                 <li key={name} className="flex justify-between gap-3">
                   <span>{name}</span>
-                  <span className={status.startsWith("ok") ? "text-emerald-400" : "text-amber-400"}>
+                  <span className={status.startsWith("ok") ? "text-ok" : "text-warn"}>
                     {status}
                   </span>
                 </li>
@@ -1000,7 +1000,7 @@ function RunDiscoveryPanel() {
               {Object.entries(runDiscovery.data.scoring).map(([uid, status]) => (
                 <li key={uid} className="flex justify-between gap-3">
                   <span className="truncate">{uid.slice(0, 8)}…</span>
-                  <span className={status.startsWith("ok") ? "text-emerald-400" : "text-amber-400"}>
+                  <span className={status.startsWith("ok") ? "text-ok" : "text-warn"}>
                     {status}
                   </span>
                 </li>
@@ -1143,10 +1143,10 @@ function StaleJobsCard() {
                           >
                             <span className={
                               outcome === "404" || outcome === "410"
-                                ? "text-red-400"
+                                ? "text-err"
                                 : outcome.startsWith("2") || outcome.startsWith("3")
-                                  ? "text-emerald-400"
-                                  : "text-amber-400"
+                                  ? "text-ok"
+                                  : "text-warn"
                             }>
                               {outcome}
                             </span>
@@ -1218,7 +1218,7 @@ function StaleJobsCard() {
               {cleanup.isPending ? "Cleaning…" : `Expire ${preview.data?.would_expire ?? 0} jobs`}
             </Button>
             {cleanup.isSuccess && cleanup.data && (
-              <span className="flex items-center gap-1.5 text-sm text-emerald-400">
+              <span className="flex items-center gap-1.5 text-sm text-ok">
                 <CheckCircle2 className="h-4 w-4" /> Expired {cleanup.data.expired} jobs
               </span>
             )}
@@ -1351,14 +1351,14 @@ function CountryFilterDebugCard() {
             )}
 
             {data.sql_disagreements && data.sql_disagreements.length === 0 && leaks.length > 0 && (
-              <div className="rounded-md border border-emerald-500/30 bg-emerald-500/[0.06] p-3 text-emerald-300 text-xs">
+              <div className="rounded-md border border-emerald-500/30 bg-emerald-500/[0.06] p-3 text-ok text-xs">
                 ✓ SQL filter agrees with Python — all {leaks.length} flagged row(s) are dropped at the DB. If you still see them in the inbox, force-refresh (cmd+shift+R) to bust the TanStack Query cache.
               </div>
             )}
 
             {leaks.length > 0 && (
               <div className="space-y-2">
-                <div className="text-amber-300 font-semibold">
+                <div className="text-warn font-semibold">
                   {leaks.length} row(s) the filter would DROP — leak details:
                 </div>
                 {leaks.map(r => <DebugRow key={r.job_id} row={r} />)}
@@ -1406,27 +1406,27 @@ function DebugRow({ row }: { row: CountryFilterDebugRow }) {
       </div>
       <div className="mt-1">
         <span className="text-muted-foreground">blocked_hits:</span>{" "}
-        <span className={row.blocked_hits.length > 0 ? "text-amber-300" : ""}>
+        <span className={row.blocked_hits.length > 0 ? "text-warn" : ""}>
           {JSON.stringify(row.blocked_hits)}
         </span>
         {"  "}
         <span className="text-muted-foreground">preferred_hits:</span>{" "}
-        <span className={row.preferred_hits.length > 0 ? "text-emerald-300" : ""}>
+        <span className={row.preferred_hits.length > 0 ? "text-ok" : ""}>
           {JSON.stringify(row.preferred_hits)}
         </span>
       </div>
       <div className="mt-1">
-        first_pass_keep=<span className={row.first_pass_keep ? "text-emerald-300" : "text-destructive"}>
+        first_pass_keep=<span className={row.first_pass_keep ? "text-ok" : "text-destructive"}>
           {String(row.first_pass_keep)}
         </span>{"  "}
-        second_pass_keep=<span className={row.second_pass_keep ? "text-emerald-300" : "text-destructive"}>
+        second_pass_keep=<span className={row.second_pass_keep ? "text-ok" : "text-destructive"}>
           {String(row.second_pass_keep)}
         </span>{"  "}
-        should_be_visible=<span className={row.should_be_visible ? "text-emerald-300" : "text-amber-300"}>
+        should_be_visible=<span className={row.should_be_visible ? "text-ok" : "text-warn"}>
           {String(row.should_be_visible)}
         </span>
         {row.sql_keeps !== undefined && (
-          <>{"  "}sql_keeps=<span className={row.sql_keeps === row.should_be_visible ? "text-emerald-300" : "text-destructive font-bold"}>
+          <>{"  "}sql_keeps=<span className={row.sql_keeps === row.should_be_visible ? "text-ok" : "text-destructive font-bold"}>
             {String(row.sql_keeps)}
           </span></>
         )}
@@ -1442,8 +1442,8 @@ function Stat({ label, value, tone }: {
   tone: "default" | "ok" | "warn" | "muted";
 }) {
   const color =
-    tone === "ok" ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/[0.03]"
-    : tone === "warn" ? "text-amber-400 border-amber-500/30 bg-amber-500/[0.03]"
+    tone === "ok" ? "text-ok border-emerald-500/30 bg-emerald-500/[0.03]"
+    : tone === "warn" ? "text-warn border-amber-500/30 bg-amber-500/[0.03]"
     : tone === "muted" ? "text-muted-foreground border-white/[0.06] bg-white/[0.015]"
     : "text-foreground border-white/[0.08] bg-white/[0.02]";
   return (

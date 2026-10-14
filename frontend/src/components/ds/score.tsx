@@ -3,10 +3,12 @@
 /**
  * Score component — 3 variants (ring, edge, mono).
  *
- * Color rule (from the design brief): teal for ≥80, neutral grays for
- * the rest. No traffic-light system. A score of 92 is genuinely
- * exceptional and should feel that way visually; 60-79 is "fine but
- * not a top match"; below 60 is unobtrusive.
+ * Color rule: ink for 80 and up, neutral grays for the rest, never the
+ * action color (Job Hunt Color Review, 2026-10-14: the action blue is kept
+ * for what to press, so the button stands out). No traffic-light system.
+ * A score of 92 is genuinely exceptional and should feel that way; 60-79
+ * is "fine but not a top match"; below 60 is unobtrusive. `scoreWord`
+ * says it in words too, since color alone can't.
  *
  * Ported from the Claude Design handoff (score.jsx). The CSS classes
  * live in design-tokens.css.
@@ -15,6 +17,17 @@
 import { cn } from "@/lib/utils";
 
 export type ScoreVariant = "ring" | "edge" | "mono";
+
+/** The score in a word, the way LinkedIn and Huntr show match quality:
+ *  Strong at 80 and up, Good from 70 (the Applications list's cut-off),
+ *  Fair from 50 (the inbox's). */
+export function scoreWord(score: number | null | undefined): string {
+  if (score == null) return "";
+  if (score >= 80) return "Strong";
+  if (score >= 70) return "Good";
+  if (score >= 50) return "Fair";
+  return "";
+}
 
 function scoreClass(score: number | null | undefined): string {
   if (score == null) return "ds-s-low";
@@ -67,7 +80,7 @@ export function ScoreRing({ score, size = 44, stroke = 2 }: ScoreRingProps) {
           cy={size / 2}
           r={r}
           fill="none"
-          stroke={top ? "var(--ds-accent)" : "var(--ds-fg-muted)"}
+          stroke={top ? "var(--ds-fg)" : "var(--ds-fg-muted)"}
           strokeWidth={stroke}
           strokeDasharray={C}
           strokeDashoffset={offset}
@@ -88,7 +101,7 @@ export function ScoreEdge({ score }: { score: number | null }) {
         className="ds-bar"
         style={{
           background: top
-            ? "linear-gradient(to bottom, var(--ds-accent) 0%, var(--ds-accent) 60%, var(--ds-line) 60%, var(--ds-line) 100%)"
+            ? "linear-gradient(to bottom, var(--ds-fg) 0%, var(--ds-fg) 60%, var(--ds-line) 60%, var(--ds-line) 100%)"
             : score == null
               ? "var(--ds-line)"
               : `linear-gradient(to bottom, var(--ds-fg-muted) 0%, var(--ds-fg-muted) ${100 - score}%, var(--ds-line) ${100 - score}%, var(--ds-line) 100%)`,
@@ -154,7 +167,7 @@ export function ScoreAxis({
         <div style={{
           width: `${pct}%`,
           height: "100%",
-          background: top ? "var(--ds-accent)" : "var(--ds-fg-muted)",
+          background: top ? "var(--ds-fg)" : "var(--ds-fg-muted)",
           borderRadius: 2,
           transition: "width 360ms cubic-bezier(0.32,0.72,0.32,1)",
         }} />
@@ -191,7 +204,7 @@ export function ScoreHero({ score, variant }: { score: number; variant: ScoreVar
           style={{
             width: 4,
             borderRadius: 2,
-            background: "linear-gradient(to bottom, var(--ds-accent), var(--ds-accent-edge))",
+            background: "linear-gradient(to bottom, var(--ds-fg), var(--ds-line-strong))",
           }}
         />
         <div style={{ display: "flex", flexDirection: "column", justifyContent: "center" }}>

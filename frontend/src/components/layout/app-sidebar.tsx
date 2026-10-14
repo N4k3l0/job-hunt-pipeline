@@ -124,7 +124,7 @@ export function AppSidebar() {
               className="ds-mono"
               style={{
                 fontSize: 11,
-                color: isActive ? "var(--accent)" : "var(--fg-dim)",
+                color: isActive ? "var(--fg)" : "var(--fg-dim)",
                 fontVariantNumeric: "tabular-nums",
               }}
             >

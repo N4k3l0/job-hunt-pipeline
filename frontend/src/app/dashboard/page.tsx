@@ -645,7 +645,7 @@ function DashStyle() {
         position: absolute;
         left: 0; top: 8px; bottom: 8px;
         width: 1px;
-        background: var(--accent);
+        background: var(--fg);
         transform: scaleY(0);
         transform-origin: top;
         transition: transform 150ms cubic-bezier(0.32,0.72,0.32,1);
@@ -663,7 +663,7 @@ function DashStyle() {
       .dash-radar-tag {
         font-size: 10px;
         letter-spacing: 0.12em;
-        color: var(--accent);
+        color: var(--fg-muted);
         text-transform: uppercase;
       }
       .dash-radar-meta {
@@ -701,7 +701,7 @@ function DashStyle() {
         border-radius: 50%;
         align-self: center;
       }
-      .dash-activity-dot-accent { background: var(--accent); }
+      .dash-activity-dot-accent { background: var(--fg); }
       .dash-activity-dot-muted { background: var(--fg-muted); }
       .dash-activity-dot-dim { background: var(--fg-dim); }
       .dash-activity-text { font-size: 13.5px; line-height: 1.45; }
@@ -718,9 +718,10 @@ function DashStyle() {
       }
       .dash-waiting-pill {
         font-size: 11px;
-        color: var(--accent);
-        background: var(--accent-soft);
-        border: 1px solid var(--accent-edge);
+        color: var(--fg);
+        font-weight: 600;
+        background: var(--bg-elev-2);
+        border: 1px solid var(--line-strong);
         padding: 2px 8px;
         border-radius: 4px;
       }
@@ -744,8 +745,8 @@ function DashStyle() {
         flex-shrink: 0;
       }
       .dash-waiting-dot-urgent {
-        background: var(--accent);
-        box-shadow: 0 0 0 3px rgba(30,216,183,0.15);
+        background: var(--warn);
+        box-shadow: 0 0 0 3px var(--warn-soft);
       }
       .dash-waiting-body { min-width: 0; }
       .dash-waiting-label {
@@ -775,8 +776,8 @@ function DashStyle() {
       .dash-sweep-dot {
         width: 8px; height: 8px;
         border-radius: 50%;
-        background: var(--accent);
-        box-shadow: 0 0 8px var(--accent);
+        background: var(--ok);
+        box-shadow: 0 0 8px var(--ok);
       }
       .dash-sweep-rows { display: flex; flex-direction: column; gap: 10px; }
       .dash-sweep-row { display: flex; justify-content: space-between; font-size: 13px; gap: 10px; }

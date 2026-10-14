@@ -22,7 +22,7 @@ export function autoDetail(a: AutoApplication) {
   }
   if (a.status === "queued") {
     // The last try didn't go through: say so where it can't be missed.
-    if (a.error) return <span className="text-amber-500">{a.error}</span>;
+    if (a.error) return <span className="text-warn">{a.error}</span>;
     return "Everything's approved. Send it when you're ready.";
   }
   return a.error ?? "";
@@ -50,7 +50,7 @@ function Row({ open, onToggle, company, title, detail, actions, children, rowRef
     <div
       ref={rowRef}
       className="ds-card"
-      style={{ padding: 0, overflow: "hidden", scrollMarginTop: 80, borderColor: open ? "var(--ds-accent-edge)" : undefined }}
+      style={{ padding: 0, overflow: "hidden", scrollMarginTop: 80, borderColor: open ? "var(--ds-line-strong)" : undefined }}
     >
       <div className="flex flex-wrap items-center" style={{ gap: 10, padding: "10px 14px" }}>
         <button

@@ -55,7 +55,7 @@ export function EmptyState({
           aria-hidden
         >
           <div className="absolute inset-0 rounded-2xl bg-gradient-to-b from-amber-500/[0.06] to-transparent" />
-          <Icon className="relative h-6 w-6 text-amber-400/90" />
+          <Icon className="relative h-6 w-6 text-warn/90" />
         </div>
       )}
       <h3 className="font-display text-lg font-semibold tracking-tight animate-empty-fadeup [animation-delay:70ms]">

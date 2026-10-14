@@ -133,7 +133,7 @@ export function OperationProgress({
         <div>
           {title && (
             <p className="text-sm font-semibold flex items-center gap-2">
-              <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-400 op-pulse" />
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-warn op-pulse" />
               {title}
             </p>
           )}
@@ -162,13 +162,13 @@ export function OperationProgress({
               <span
                 className={cn(
                   "inline-flex h-4 w-4 items-center justify-center rounded-full border text-[9px]",
-                  done && "border-emerald-500/40 bg-emerald-500/15 text-emerald-400",
+                  done && "border-emerald-500/40 bg-emerald-500/15 text-ok",
                   isActive && "border-amber-500/40 bg-amber-500/15",
                   !done && !isActive && "border-white/[0.08] bg-white/[0.04]",
                 )}
               >
                 {done ? "✓" : isActive ? (
-                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-400 op-pulse-dot" />
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-warn op-pulse-dot" />
                 ) : null}
               </span>
               <span>{s.label}</span>

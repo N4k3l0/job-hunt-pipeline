@@ -92,6 +92,11 @@ Keep a single head: `alembic heads` should print one revision.
 - TanStack Query for server state management
 - shadcn/ui components — do not install other UI libraries
 - API client in `lib/api-client.ts` handles auth token injection
+- **Colors** (chosen 2026-10-14 from research, see the Job Hunt Color Review artifact): set once per theme in `src/app/design-system-v2.css` (`--ds-*` in `design-tokens.css` alias them). Rules:
+  - The accent is the action blue (light `#1F5FD1`, dark `#8AB4FF`), for the main action and links only. One solid (`ds-btn primary`) button per screen; everything else outlined or ghost. Scores, filters, tabs, labels, selected states and pills don't use it: scores are ink for 80+ (`ds-s-top`), selected chips are ink on `--bg-elev-2`, `.ds-pill.accent` is strong ink. `scoreWord` (Strong 80+, Good 70+, Fair 50+) puts scores in words.
+  - Status colors are a different hue from the action color and come with words or an icon: `--warn`, `--ok`, `--err` per theme, as Tailwind `text-warn`, `text-ok`, `text-err` (globals.css `@theme`) or `ds-warn-fg` / `ds-ok-fg`. Never Tailwind's amber-400 or emerald-400: they were picked for the dark theme and read at 1.5 to 2 to 1 on cream.
+  - Every text color passes 4.5 to 1 on its background in both themes; `--fg-faint` is for decoration, never words. Check a new color before adding it.
+  - The daily email's links use the same blue (`ACCENT` in `services/notifications/digest.py`).
 
 ### LLM Usage
 - **Haiku 4.5** (`claude-haiku-4-5`) for: reading every incoming job (`services/enrichment/job_enricher.py`)

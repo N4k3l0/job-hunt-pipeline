@@ -24,17 +24,18 @@
 
 :root,
 [data-theme="dark"] {
-  /* Override shadcn's amber primary/ring/chart tokens with the v2 teal so
-     every shadcn Button + focus-ring stops looking yellow. These names
-     come from the existing :root block in globals.css; v2 wins by being
-     imported last + appearing inside a more specific selector. */
-  --primary: #1ed8b7;
-  --primary-foreground: #04140f;
-  --ring: #1ed8b7;
-  --chart-1: #1ed8b7;
-  --sidebar-primary: #1ed8b7;
-  --sidebar-primary-foreground: #04140f;
-  --sidebar-ring: #1ed8b7;
+  /* Override shadcn's amber primary/ring/chart tokens with the action blue
+     so every shadcn Button + focus-ring matches. These names come from the
+     existing :root block in globals.css; v2 wins by being imported last +
+     appearing inside a more specific selector. */
+  --primary: #8ab4ff;
+  --primary-foreground: #06101f;
+  --ring: #8ab4ff;
+  --chart-1: #8ab4ff;
+  --sidebar-primary: #8ab4ff;
+  --sidebar-primary-foreground: #06101f;
+  --sidebar-ring: #8ab4ff;
+  --destructive: #f87171;
 
   /* Sidebar surface/text/border tokens — shadcn's Sidebar primitive
      references these by name and they were dark-only in globals.css.
@@ -64,36 +65,47 @@
   /* Text */
   --fg: #e8eaf0;
   --fg-muted: #a0a6b3;
-  --fg-dim: #6a7180;
+  --fg-dim: #7d8494;
   --fg-faint: #4a5161;
 
-  /* Accent — single teal. Hue is a Tweak. */
-  --accent: #1ed8b7;
-  --accent-hover: #2ce6c5;
-  --accent-soft: rgba(30, 216, 183, 0.10);
-  --accent-edge: rgba(30, 216, 183, 0.30);
-  --accent-glow: rgba(30, 216, 183, 0.18);
-  --accent-on: #04140f;
+  /* Accent: blue, for the main action and links only (Job Hunt Color
+     Review, 2026-10-14). Scores, filters, labels and states stay neutral,
+     so the one thing to press stands out. Softer than the light theme's,
+     as dark themes need. */
+  --accent: #8ab4ff;
+  --accent-hover: #a6c5ff;
+  --accent-soft: rgba(138, 180, 255, 0.12);
+  --accent-edge: rgba(138, 180, 255, 0.34);
+  --accent-glow: rgba(138, 180, 255, 0.18);
+  --accent-on: #06101f;
+
+  /* Status colors, a different hue from the action color, always with
+     words or an icon. */
+  --warn: #fbbf24;
+  --warn-soft: rgba(251, 191, 36, 0.10);
+  --ok: #34d399;
+  --err: #f87171;
 
   /* Warm scale — for non-score warm muted tones */
   --warm-1: #1c1d22;
   --warm-2: #2a2c34;
 
   /* Top-match editorial gradient (theme-aware) */
-  --editorial-bg-grad: radial-gradient(120% 100% at 0% 0%, rgba(30, 216, 183, 0.06), transparent 50%);
-  --top-row-grad: linear-gradient(90deg, rgba(30,216,183,0.04), transparent 60%);
+  --editorial-bg-grad: radial-gradient(120% 100% at 0% 0%, rgba(232, 234, 240, 0.04), transparent 50%);
+  --top-row-grad: linear-gradient(90deg, rgba(232,234,240,0.03), transparent 60%);
   --filterbar-fade: linear-gradient(var(--bg) 80%, rgba(10,14,20,0));
 }
 
 [data-theme="light"] {
-  /* Same anti-amber override for light theme — uses the darker teal. */
-  --primary: #0c9e80;
+  /* Same override for the light theme, with its own action blue. */
+  --primary: #1f5fd1;
   --primary-foreground: #ffffff;
-  --ring: #0c9e80;
-  --chart-1: #0c9e80;
-  --sidebar-primary: #0c9e80;
+  --ring: #1f5fd1;
+  --chart-1: #1f5fd1;
+  --sidebar-primary: #1f5fd1;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-ring: #0c9e80;
+  --sidebar-ring: #1f5fd1;
+  --destructive: #b91c1c;
 
   /* Cream sidebar — slightly tinted off-white so the inner bg-elev-1
      (pure #ffffff) lifts cleanly off the chrome surface. Foreground is
@@ -117,22 +129,31 @@
 
   --fg: #1a1714;
   --fg-muted: #5f5a52;
-  --fg-dim: #8b857a;
+  /* Every text color passes 4.5 to 1 on cream and white; fg-faint is
+     for decoration only, never words. */
+  --fg-dim: #6e695f;
   --fg-faint: #b1ab9e;
 
-  /* Slightly darker teal for AA contrast on cream */
-  --accent: #0c9e80;
-  --accent-hover: #0aa78a;
-  --accent-soft: rgba(12, 158, 128, 0.10);
-  --accent-edge: rgba(12, 158, 128, 0.32);
-  --accent-glow: rgba(12, 158, 128, 0.18);
+  /* Action blue: white text on it is 5.8 to 1, and as link text 5.3 to 1
+     on cream. */
+  --accent: #1f5fd1;
+  --accent-hover: #1a52b8;
+  --accent-soft: rgba(31, 95, 209, 0.10);
+  --accent-edge: rgba(31, 95, 209, 0.32);
+  --accent-glow: rgba(31, 95, 209, 0.18);
   --accent-on: #ffffff;
+
+  /* Status colors, readable on cream (4.9 to 5.9 to 1). */
+  --warn: #a8530a;
+  --warn-soft: rgba(168, 83, 10, 0.08);
+  --ok: #1f7a3d;
+  --err: #b91c1c;
 
   --warm-1: #efece4;
   --warm-2: #e2ddd1;
 
-  --editorial-bg-grad: radial-gradient(120% 100% at 0% 0%, rgba(12, 158, 128, 0.07), transparent 50%);
-  --top-row-grad: linear-gradient(90deg, rgba(12,158,128,0.05), transparent 60%);
+  --editorial-bg-grad: radial-gradient(120% 100% at 0% 0%, rgba(26, 23, 20, 0.035), transparent 50%);
+  --top-row-grad: linear-gradient(90deg, rgba(26,23,20,0.025), transparent 60%);
   --filterbar-fade: linear-gradient(var(--bg) 80%, rgba(247,245,240,0));
 }
 
