@@ -97,6 +97,7 @@ Keep a single head: `alembic heads` should print one revision.
   - Status colors are a different hue from the action color and come with words or an icon: `--warn`, `--ok`, `--err` per theme, as Tailwind `text-warn`, `text-ok`, `text-err` (globals.css `@theme`) or `ds-warn-fg` / `ds-ok-fg`. Never Tailwind's amber-400 or emerald-400: they were picked for the dark theme and read at 1.5 to 2 to 1 on cream.
   - Every text color passes 4.5 to 1 on its background in both themes; `--fg-faint` is for decoration, never words. Check a new color before adding it.
   - The daily email's links use the same blue (`ACCENT` in `services/notifications/digest.py`).
+  - Buttons (`.ds-btn` in `design-tokens.css`) answer the user: hover, pressed (moves 1px; the main button darkens), the focus ring, disabled (flat grey, no hover, not-allowed cursor: "Prepare" with nothing ticked used to look ready), busy (a disabled button with a spinner keeps its colors), and at least 44px tall on touch screens. Text on the main button is `--accent-on`, never a fixed color. shadcn's `Button` has its own states.
 
 ### LLM Usage
 - **Haiku 4.5** (`claude-haiku-4-5`) for: reading every incoming job (`services/enrichment/job_enricher.py`)
