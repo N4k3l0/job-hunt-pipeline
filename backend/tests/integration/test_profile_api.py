@@ -66,3 +66,29 @@ async def test_preferences_round_trip(client):
 async def test_home_country_must_be_a_real_code(client):
     r = await client.post("/api/v1/candidates/profile", json={"home_country": "WW"})
     assert r.status_code == 422
+
+
+async def test_the_user_chooses_their_level(client):
+    """The user said: "mid, not beginner, not senior". Scoring uses the
+    level they choose instead of working one out from their history."""
+    from app.core.database import async_session
+    from app.workers.scoring_tasks import load_scoring_profile
+
+    await client.post("/api/v1/candidates/profile", json={"home_country": "NG"})
+    assert (await client.get("/api/v1/candidates/profile")).json()["level"] is None
+
+    r = await client.put("/api/v1/candidates/profile", json={"level": "Mid"})
+    assert r.status_code == 200, r.text
+    assert r.json()["level"] == "mid"
+    assert (await client.get("/api/v1/candidates/profile")).json()["level"] == "mid"
+    async with async_session() as db:
+        assert (await load_scoring_profile(db, str(USER)))["level"] == "mid"
+
+    # Saving other preferences leaves it alone; empty clears it.
+    r = await client.put("/api/v1/candidates/profile", json={"salary_min": 50000})
+    assert r.json()["level"] == "mid"
+    r = await client.put("/api/v1/candidates/profile", json={"level": ""})
+    assert r.json()["level"] is None
+
+    r = await client.put("/api/v1/candidates/profile", json={"level": "beginner"})
+    assert r.status_code == 422

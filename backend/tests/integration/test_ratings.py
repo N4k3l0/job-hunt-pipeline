@@ -139,6 +139,6 @@ async def test_results_can_compare_other_versions(client):
     assert r.status_code == 200, r.text
     compared = r.json().get("compared") or {}
     # The live and proposed versions are always measured too.
-    assert set(compared) == {"2", "3", "4", "5", "6"}
+    assert set(compared) == {"2", "3", "4", "5", "6", "7"}
     for metrics in compared.values():
         assert "ranking_accuracy" in metrics

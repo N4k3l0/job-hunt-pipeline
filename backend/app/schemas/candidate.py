@@ -93,7 +93,21 @@ class ProfileCreate(ProfileBase):
 
 
 class ProfileUpdate(ProfileBase):
-    pass
+    # The user's level (entry, mid, senior, lead). Kept with their settings
+    # (users.preferences), not on the profile row; empty clears it.
+    level: str | None = None
+
+    @field_validator("level")
+    @classmethod
+    def _validate_level(cls, v: str | None) -> str | None:
+        from app.services.scoring.matching import CAREER_LEVELS
+
+        if v is None or not v.strip():
+            return None
+        v = v.strip().lower()
+        if v not in CAREER_LEVELS:
+            raise ValueError(f"level must be one of {', '.join(CAREER_LEVELS)}")
+        return v
 
 
 class ProfileResponse(ProfileBase):
@@ -101,6 +115,7 @@ class ProfileResponse(ProfileBase):
     user_id: UUID
     created_at: datetime
     updated_at: datetime
+    level: str | None = None
 
     model_config = {"from_attributes": True}
 
