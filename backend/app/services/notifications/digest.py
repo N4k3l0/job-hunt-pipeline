@@ -53,7 +53,9 @@ MAX_LOOKBACK = timedelta(days=3)
 # Older tailored drafts aren't brought up again every day.
 TAILORED_RECENT = timedelta(days=14)
 
-ACCENT = "#1f9d7a"
+# Links in the email: the app's action blue, 5.8 to 1 on white (the old
+# teal was 3.4, below the 4.5 minimum).
+ACCENT = "#1f5fd1"
 
 
 @dataclass

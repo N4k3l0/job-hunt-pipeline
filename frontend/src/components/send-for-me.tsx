@@ -129,13 +129,13 @@ export function SendOutcome({ applicationId, what, outcome }: {
 
   return (
     <div style={{ fontSize: 13, lineHeight: 1.5 }}>
-      <div className={good ? "" : "text-amber-500"}>
-        {good && <CheckCircle2 className="inline h-4 w-4 ds-accent-fg" style={{ marginRight: 6, verticalAlign: -3 }} />}
+      <div className={good ? "" : "text-warn"}>
+        {good && <CheckCircle2 className="inline h-4 w-4 ds-ok-fg" style={{ marginRight: 6, verticalAlign: -3 }} />}
         {outcome.message}
         {outcome.filled != null && good && ` It filled in ${outcome.filled} ${outcome.filled === 1 ? "answer" : "answers"}.`}
       </div>
       {outcome.not_filled.length > 0 && (
-        <div className="text-amber-500" style={{ fontSize: 12, marginTop: 4 }}>
+        <div className="text-warn" style={{ fontSize: 12, marginTop: 4 }}>
           Couldn&apos;t fill in: {outcome.not_filled.join(", ")}.
         </div>
       )}

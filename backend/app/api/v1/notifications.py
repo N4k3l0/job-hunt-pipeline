@@ -113,7 +113,7 @@ def _page(title: str, message: str) -> HTMLResponse:
         '<body style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;background:#f6f5f2;margin:0;padding:48px 16px;">'
         '<div style="max-width:480px;margin:0 auto;background:#fff;border-radius:12px;padding:28px 24px;">'
         f'<h1 style="font-size:20px;margin:0 0 8px;">{title}</h1><p style="color:#444;line-height:1.5;">{message}</p>'
-        f'<p><a href="{profile}" style="color:#1f9d7a;">Email settings on your profile</a></p></div></body>'
+        f'<p><a href="{profile}" style="color:#1f5fd1;">Email settings on your profile</a></p></div></body>'
     )
 
 

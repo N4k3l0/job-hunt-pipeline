@@ -28,7 +28,7 @@ export function AutoPrepareCard() {
     <div className="ds-card flex flex-wrap items-center justify-between" style={{ padding: 16, gap: 12 }}>
       <div style={{ maxWidth: 640 }}>
         <div className="flex items-center" style={{ gap: 8, fontWeight: 600, fontSize: 14 }}>
-          <Sparkles className="h-4 w-4 ds-accent-fg" />
+          <Sparkles className="h-4 w-4 ds-muted" />
           Let the app prepare your best matches
         </div>
         <p className="ds-muted" style={{ fontSize: 13, marginTop: 4, lineHeight: 1.5 }}>
@@ -44,7 +44,9 @@ export function AutoPrepareCard() {
             type="button"
             role="radio"
             aria-checked={data.per_day === n}
-            className={`ds-btn sm ${data.per_day === n ? "primary" : "ghost"}`}
+            // A choice, not an action: the chosen one is ink on a soft fill.
+            className={`ds-btn sm ${data.per_day === n ? "" : "ghost"}`}
+            style={data.per_day === n ? { background: "var(--ds-bg-elev-2)", borderColor: "var(--ds-fg-dim)", fontWeight: 600 } : undefined}
             disabled={update.isPending}
             onClick={() => data.per_day !== n && choose(n)}
           >

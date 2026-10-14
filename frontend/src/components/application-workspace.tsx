@@ -232,7 +232,7 @@ function AnswerMeta({ field, resume, applicationId }: { field: AutoApplyField; r
   if (field.type === "file" && field.kind === "resume" && resume) {
     return (
       <div className="ds-dim" style={{ fontSize: 12, marginTop: 6 }}>
-        <span className="ds-accent-fg">{resume.tailored ? "Tailored for this job" : "From your profile"}</span>
+        <span className="ds-muted">{resume.tailored ? "Tailored for this job" : "From your profile"}</span>
         {resume.url && (
           <>
             {" · "}
@@ -245,7 +245,7 @@ function AnswerMeta({ field, resume, applicationId }: { field: AutoApplyField; r
   if (!answer?.note && !answer?.source) return null;
   return (
     <div className="ds-dim" style={{ fontSize: 12, marginTop: 6 }}>
-      {answer.source && <span className="ds-accent-fg">{SOURCE_LABELS[answer.source] ?? answer.source}</span>}
+      {answer.source && <span className="ds-muted">{SOURCE_LABELS[answer.source] ?? answer.source}</span>}
       {answer.source && answer.note && " · "}
       {answer.note}
     </div>
@@ -315,7 +315,7 @@ function WritingCheck({
         background: "rgba(245, 158, 11, 0.06)",
       }}
     >
-      <div className="text-amber-500" style={{ fontWeight: 500 }}>Change this before it&apos;s sent</div>
+      <div className="text-warn" style={{ fontWeight: 500 }}>Change this before it&apos;s sent</div>
       <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
         {problems.map((p) => <li key={p}>{p}</li>)}
       </ul>
@@ -384,7 +384,7 @@ function Question({
       style={{
         padding: "14px 16px",
         borderTop: "1px solid var(--ds-line)",
-        background: highlighted ? "var(--ds-accent-soft)" : undefined,
+        background: highlighted ? "var(--ds-warn-soft)" : undefined,
       }}
     >
       <div className="flex items-start justify-between" style={{ gap: 12 }}>
@@ -507,8 +507,8 @@ function Documents({ id }: { id: string }) {
                 <div className="ds-dim truncate" style={{ fontSize: 12 }}>{file.note}</div>
                 {file.problems.length > 0 && (
                   <div style={{ fontSize: 12, marginTop: 6, lineHeight: 1.5 }}>
-                    <div className="text-amber-500" style={{ fontWeight: 500 }}>Change this before it&apos;s sent</div>
-                    <ul className="text-amber-500" style={{ margin: "2px 0 0", paddingLeft: 16 }}>
+                    <div className="text-warn" style={{ fontWeight: 500 }}>Change this before it&apos;s sent</div>
+                    <ul className="text-warn" style={{ margin: "2px 0 0", paddingLeft: 16 }}>
                       {file.problems.map((p) => <li key={p}>{p}</li>)}
                     </ul>
                     {!file.problems.some((p) => p.includes("long dash")) && (
@@ -811,7 +811,7 @@ export function ApplicationWorkspace({ id, inline = false, onApproved }: {
           {application.status === "queued" && application.sending?.from_browser_only && (
             <div className="space-y-3">
               <p>
-                <CheckCircle2 className="inline h-4 w-4 ds-accent-fg" style={{ marginRight: 6, verticalAlign: -3 }} />
+                <CheckCircle2 className="inline h-4 w-4 ds-ok-fg" style={{ marginRight: 6, verticalAlign: -3 }} />
                 Everything&apos;s approved. {job?.company ?? "This company"}&apos;s form emails you a code to prove a
                 person is applying, so this one goes from your own browser. It takes a minute:
               </p>
@@ -865,12 +865,12 @@ export function ApplicationWorkspace({ id, inline = false, onApproved }: {
           {(application.status === "queued" || application.status === "submitting") && !application.sending?.from_browser_only && (
             <div className="space-y-3">
               <p>
-                <CheckCircle2 className="inline h-4 w-4 ds-accent-fg" style={{ marginRight: 6, verticalAlign: -3 }} />
+                <CheckCircle2 className="inline h-4 w-4 ds-ok-fg" style={{ marginRight: 6, verticalAlign: -3 }} />
                 Everything&apos;s approved. <strong>Send it for me</strong> has the app fill in {job?.company ?? "the company"}&apos;s
                 form, attach your resume and send it, with nothing to install or paste. A practice run fills it in
                 without sending, so you can see exactly what would go.
               </p>
-              {application.error && <p className="text-amber-500" style={{ fontSize: 13 }}>{application.error}</p>}
+              {application.error && <p className="text-warn" style={{ fontSize: 13 }}>{application.error}</p>}
               <SendForMe application={application} />
               <SendOutcome applicationId={application.id} what="practice" outcome={application.sending?.practice} />
               {application.sending?.send && application.sending.send.status !== "submitted" && (

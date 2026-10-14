@@ -53,7 +53,7 @@ export function HomeCountrySelect({
                 onClick={() => onChange(c.code)}
                 className="flex items-center gap-2"
               >
-                {c.code === value && <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />}
+                {c.code === value && <CheckCircle2 className="h-3.5 w-3.5 text-ok" />}
                 {c.name}
               </DropdownMenuItem>
             ))}

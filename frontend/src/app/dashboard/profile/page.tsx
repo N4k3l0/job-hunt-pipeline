@@ -74,7 +74,7 @@ function SetupChecklist({
         <X className="h-3.5 w-3.5" />
       </button>
       <div className="flex items-center gap-2 mb-1">
-        <span className="text-xs uppercase tracking-[0.1em] text-amber-400 font-semibold">
+        <span className="text-xs uppercase tracking-[0.1em] text-warn font-semibold">
           Set up your profile
         </span>
         <span className="text-xs text-muted-foreground tabular-nums">
@@ -89,7 +89,7 @@ function SetupChecklist({
       {/* progress bar */}
       <div className="h-1 w-full rounded-full bg-white/[0.05] overflow-hidden mb-4">
         <div
-          className="h-full bg-amber-400 transition-all duration-500"
+          className="h-full bg-warn transition-all duration-500"
           style={{ width: `${pct}%` }}
         />
       </div>
@@ -101,7 +101,7 @@ function SetupChecklist({
               className="w-full flex items-center gap-2 text-left text-sm py-1.5 group"
             >
               {s.done ? (
-                <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                <CheckCircle2 className="h-4 w-4 text-ok shrink-0" />
               ) : (
                 <Circle className="h-4 w-4 text-muted-foreground/40 shrink-0" />
               )}
@@ -109,13 +109,13 @@ function SetupChecklist({
                 className={
                   s.done
                     ? "text-muted-foreground line-through decoration-emerald-500/30"
-                    : "text-foreground/80 group-hover:text-amber-400 transition-colors"
+                    : "text-foreground/80 group-hover:text-warn transition-colors"
                 }
               >
                 {s.label}
               </span>
               {!s.done && (
-                <ArrowRight className="h-3 w-3 ml-auto opacity-0 group-hover:opacity-100 text-amber-400 transition-opacity" />
+                <ArrowRight className="h-3 w-3 ml-auto opacity-0 group-hover:opacity-100 text-warn transition-opacity" />
               )}
             </button>
           </li>
@@ -512,7 +512,7 @@ export default function ProfilePage() {
                   {isSavingProfile ? "Saving..." : "Save Profile"}
                 </Button>
                 {profileSaved && (
-                  <span className="flex items-center gap-1.5 text-sm text-emerald-400">
+                  <span className="flex items-center gap-1.5 text-sm text-ok">
                     <CheckCircle2 className="h-4 w-4" /> Saved
                   </span>
                 )}
@@ -593,7 +593,7 @@ export default function ProfilePage() {
                 <Upload className="h-8 w-8 mx-auto text-muted-foreground mb-3" />
 
                 {selectedFile ? (
-                  <p className="text-sm font-medium mb-1 text-emerald-400">
+                  <p className="text-sm font-medium mb-1 text-ok">
                     {selectedFile.name} ({(selectedFile.size / 1024 / 1024).toFixed(1)} MB)
                   </p>
                 ) : (
@@ -655,7 +655,7 @@ export default function ProfilePage() {
                 </div>
 
                 {uploadResume.isSuccess && (
-                  <p className="text-sm text-emerald-400 mt-3 flex items-center justify-center gap-1.5">
+                  <p className="text-sm text-ok mt-3 flex items-center justify-center gap-1.5">
                     <CheckCircle2 className="h-4 w-4" />
                     Resume uploaded and parsed. Your inbox is being rescored and will update in about a minute.
                   </p>
@@ -701,7 +701,7 @@ export default function ProfilePage() {
                               <Badge variant="secondary" className="text-xs">Parsed</Badge>
                             )}
                             {!resume.parsed_at && (
-                              <Badge variant="outline" className="text-xs text-amber-400 border-amber-500/20">Parsing...</Badge>
+                              <Badge variant="outline" className="text-xs text-warn border-amber-500/20">Parsing...</Badge>
                             )}
                             {resume.tags?.map((tag: string) => (
                               <Badge key={tag} variant="outline" className="text-xs">{tag}</Badge>
@@ -1030,12 +1030,12 @@ export default function ProfilePage() {
                   {rescoreInbox.isPending ? "Re-scoring…" : "Re-score inbox"}
                 </Button>
                 {prefsSaved && (
-                  <span className="flex items-center gap-1.5 text-sm text-emerald-400">
+                  <span className="flex items-center gap-1.5 text-sm text-ok">
                     <CheckCircle2 className="h-4 w-4" /> Saved
                   </span>
                 )}
                 {rescoreInbox.isSuccess && (
-                  <span className="flex items-center gap-1.5 text-sm text-emerald-400">
+                  <span className="flex items-center gap-1.5 text-sm text-ok">
                     <CheckCircle2 className="h-4 w-4" /> Inbox refreshed
                   </span>
                 )}

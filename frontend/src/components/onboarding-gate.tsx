@@ -264,7 +264,7 @@ function OnboardingFlow({
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             {hasName ? (
-              <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+              <CheckCircle2 className="h-5 w-5 text-ok" />
             ) : (
               <UserIcon className="h-5 w-5" />
             )}
@@ -302,7 +302,7 @@ function OnboardingFlow({
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             {hasResume ? (
-              <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+              <CheckCircle2 className="h-5 w-5 text-ok" />
             ) : (
               <FileUp className="h-5 w-5" />
             )}
@@ -340,7 +340,7 @@ function OnboardingFlow({
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             {hasCountries ? (
-              <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+              <CheckCircle2 className="h-5 w-5 text-ok" />
             ) : (
               <Globe className="h-5 w-5" />
             )}
@@ -417,7 +417,7 @@ function OnboardingFlow({
                         className="flex items-center justify-between gap-2"
                       >
                         <span className="flex items-center gap-2">
-                          {selected && <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />}
+                          {selected && <CheckCircle2 className="h-3.5 w-3.5 text-ok" />}
                           {c.name}
                         </span>
                         <span className="text-[10px] text-muted-foreground">
@@ -469,7 +469,7 @@ function StepDot({ n, active, done }: { n: number; active: boolean; done: boolea
       className={[
         "inline-flex items-center justify-center h-6 w-6 rounded-full border text-[10px] transition-colors",
         done
-          ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300"
+          ? "bg-emerald-500/15 border-emerald-500/40 text-ok"
           : active
             ? "bg-foreground text-background border-foreground"
             : "border-white/[0.08] text-muted-foreground",

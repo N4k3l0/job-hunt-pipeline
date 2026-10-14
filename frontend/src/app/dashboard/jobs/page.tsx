@@ -131,14 +131,15 @@ function SortMenu({ value, onChange }: { value: string; onChange: (v: string) =>
                 gap: 8,
                 padding: "8px 10px",
                 borderRadius: 6,
-                color: active ? "var(--ds-accent)" : "var(--ds-fg)",
+                color: "var(--ds-fg)",
+                fontWeight: active ? 600 : 400,
                 cursor: "pointer",
               }}
             >
               <Check
                 size={13}
                 strokeWidth={2.4}
-                style={{ opacity: active ? 1 : 0, color: "var(--ds-accent)" }}
+                style={{ opacity: active ? 1 : 0, color: "var(--ds-fg)" }}
               />
               <span>{label}</span>
             </DropdownMenuItem>
@@ -626,10 +627,12 @@ export default function JobsInboxPage() {
             border-color: var(--ds-line-strong);
             background: var(--ds-bg-elev-2);
           }
+          /* Selected: ink on a soft fill. The blue is kept for what to press. */
           .inbox-chip[data-active="true"] {
-            background: var(--ds-accent-soft);
-            border-color: var(--ds-accent-edge);
-            color: var(--ds-accent);
+            background: var(--ds-bg-elev-2);
+            border-color: var(--ds-fg-dim);
+            color: var(--ds-fg);
+            font-weight: 600;
           }
           @media (max-width: 640px) {
             .inbox-chip { height: 44px; padding: 0 14px; font-size: 14px; }
@@ -659,7 +662,7 @@ function TopMatchCard({
       className="ds-editorial-card"
       style={{ textDecoration: "none", padding: 22, display: "block" }}
     >
-      <div className="ds-mono" style={{ fontSize: 10, color: "var(--ds-accent)", letterSpacing: "0.12em", marginBottom: 14, textTransform: "uppercase", fontWeight: 600 }}>
+      <div className="ds-mono" style={{ fontSize: 10, color: "var(--ds-fg-muted)", letterSpacing: "0.12em", marginBottom: 14, textTransform: "uppercase", fontWeight: 600 }}>
         ◆ TOP MATCH · LIVE
       </div>
 
@@ -790,14 +793,14 @@ function TopMatchCard({
           }}
           style={
             job.status === "shortlisted"
-              ? { color: "var(--ds-accent)", borderColor: "var(--ds-accent-edge)" }
+              ? { color: "var(--ds-fg)", borderColor: "var(--ds-line-strong)" }
               : undefined
           }
           aria-pressed={job.status === "shortlisted"}
         >
           <Star
             className="h-3.5 w-3.5"
-            fill={job.status === "shortlisted" ? "var(--ds-accent)" : "none"}
+            fill={job.status === "shortlisted" ? "currentColor" : "none"}
             strokeWidth={2}
           />
           {job.status === "shortlisted" ? "Shortlisted" : "Shortlist"}
@@ -976,7 +979,7 @@ function DenseRow({
           style={{
             width: 36, height: 36,
             display: "inline-flex", alignItems: "center", justifyContent: "center",
-            color: job.status === "shortlisted" ? "var(--ds-accent)" : "var(--ds-fg-muted)",
+            color: job.status === "shortlisted" ? "var(--ds-fg)" : "var(--ds-fg-muted)",
             borderRadius: "var(--ds-r-pill)",
             background: "transparent",
             transition: "all 120ms ease",
@@ -984,7 +987,7 @@ function DenseRow({
         >
           <Star
             className="h-4 w-4"
-            fill={job.status === "shortlisted" ? "var(--ds-accent)" : "none"}
+            fill={job.status === "shortlisted" ? "currentColor" : "none"}
             strokeWidth={2}
           />
         </button>

@@ -101,7 +101,7 @@ export function MessageStep({ jobId }: { jobId: string }) {
     body = (
       <div className="space-y-2" style={{ fontSize: 14 }}>
         <p>
-          <CheckCircle2 className="inline h-4 w-4" style={{ color: "var(--ds-accent)", verticalAlign: -3 }} /> You sent a
+          <CheckCircle2 className="inline h-4 w-4" style={{ color: "var(--ds-ok)", verticalAlign: -3 }} /> You sent a
           note{contact?.name ? ` to ${contact.name}` : ""}
           {note.sent_at ? ` on ${new Date(note.sent_at).toLocaleDateString()}` : ""}. If they reply, move the
           application to Interviewing on the Applications page.
@@ -134,7 +134,7 @@ export function MessageStep({ jobId }: { jobId: string }) {
           from your real work. It uses about 15 cents of AI.
         </p>
         {prepare.isError && (
-          <p className="text-amber-500" style={{ fontSize: 13 }}>{prepare.error.message}</p>
+          <p className="text-warn" style={{ fontSize: 13 }}>{prepare.error.message}</p>
         )}
         <div className="flex flex-wrap" style={{ gap: 8 }}>
           <button type="button" className="ds-btn primary" onClick={() => write()}>
@@ -155,7 +155,7 @@ export function MessageStep({ jobId }: { jobId: string }) {
             <div style={{ fontSize: 15, fontWeight: 600 }}>{contact.name ?? `Someone at ${company}`}</div>
             {contact.title && <div className="ds-muted" style={{ fontSize: 13 }}>{contact.title}</div>}
             {contact.confidence === "low" && (
-              <p className="text-amber-500" style={{ fontSize: 13 }}>
+              <p className="text-warn" style={{ fontSize: 13 }}>
                 The app isn&apos;t sure this is the right person. Check their profile first.
               </p>
             )}
@@ -189,13 +189,13 @@ export function MessageStep({ jobId }: { jobId: string }) {
           />
           <div className="flex flex-wrap justify-between" style={{ gap: 8, fontSize: 12 }}>
             <span className="ds-dim">Edit anything. It&apos;s your note.</span>
-            <span className={tooLong ? "text-amber-500" : "ds-dim"}>
+            <span className={tooLong ? "text-warn" : "ds-dim"}>
               {text.length} / {note.max_chars}
               {tooLong ? ". LinkedIn cuts off the rest" : ""}
             </span>
           </div>
           {!edited && note.problems.length > 0 && (
-            <ul className="text-amber-500" style={{ fontSize: 13, paddingLeft: 18, listStyle: "disc" }}>
+            <ul className="text-warn" style={{ fontSize: 13, paddingLeft: 18, listStyle: "disc" }}>
               {note.problems.map((p) => <li key={p}>{p}</li>)}
             </ul>
           )}
@@ -262,7 +262,7 @@ export function MessageStep({ jobId }: { jobId: string }) {
         <h2 className="ds-h3">Next: message someone at {company}</h2>
         <span className="ds-dim" style={{ fontSize: 12 }}>From your own LinkedIn</span>
       </div>
-      <div className="ds-card" style={{ padding: 16, borderColor: "var(--ds-accent-edge)" }}>
+      <div className="ds-card" style={{ padding: 16, borderColor: "var(--ds-line-strong)" }}>
         {update.isPending && note.status !== "sent" && (
           <Loader2 className="h-3.5 w-3.5 animate-spin ds-dim" style={{ float: "right" }} />
         )}

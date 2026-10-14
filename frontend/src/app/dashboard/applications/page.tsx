@@ -121,12 +121,13 @@ const STATUS_LABELS: Record<string, string> = {
 
 const STATUS_ORDER = ["follow_up_due", "interviewing", "approved", "applied", "offered", "rejected", "ghosted", "archived"];
 
-// One accent, no traffic lights: teal marks what's live or needs you,
-// grey marks what's waiting, faint marks what's closed.
+// Status colors, never the action blue: green for good news (they're
+// talking to you), amber for a follow-up that's due, grey for waiting,
+// faint for closed. The label always says it in words too.
 const STATUS_DOT: Record<string, string> = {
-  follow_up_due: "var(--ds-accent)",
-  interviewing: "var(--ds-accent)",
-  offered: "var(--ds-accent)",
+  follow_up_due: "var(--ds-warn)",
+  interviewing: "var(--ds-ok)",
+  offered: "var(--ds-ok)",
   approved: "var(--ds-fg-muted)",
   applied: "var(--ds-fg-muted)",
   rejected: "var(--ds-fg-faint)",
@@ -135,8 +136,8 @@ const STATUS_DOT: Record<string, string> = {
 };
 
 const DUE_COLOR = {
-  due: "var(--ds-accent)",
-  past: "#f59e0b", // overdue
+  due: "var(--ds-warn)",
+  past: "var(--ds-warn)", // overdue
   soon: "var(--ds-fg-muted)",
   neutral: "var(--ds-fg-dim)",
 };

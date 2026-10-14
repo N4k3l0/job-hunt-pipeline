@@ -5,6 +5,7 @@ import Link from "next/link";
 import { CheckCircle2, ExternalLink, Loader2, Send } from "lucide-react";
 import { useApplyPicks, usePickedElsewhere, usePrepareBatch } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/toast";
+import { scoreWord } from "@/components/ds/score";
 import type { ApplyPick } from "@/lib/types";
 
 const SHOWN = 10;
@@ -19,10 +20,11 @@ function PickRow({ pick, children }: { pick: ApplyPick; children: React.ReactNod
       <span
         className="ds-mono"
         title="How well it matches your profile"
-        style={{ width: 30, textAlign: "right", fontSize: 13, fontWeight: 600, color: "var(--ds-accent)" }}
+        style={{ width: 30, textAlign: "right", fontSize: 13, fontWeight: 700, color: "var(--ds-fg)" }}
       >
         {pick.score}
       </span>
+      <span className="ds-dim" style={{ width: 46, fontSize: 12 }}>{scoreWord(pick.score)}</span>
       <div className="min-w-0" style={{ flex: "1 1 240px" }}>
         <Link
           href={`/dashboard/jobs/${pick.job_id}`}
@@ -37,7 +39,7 @@ function PickRow({ pick, children }: { pick: ApplyPick; children: React.ReactNod
           {pick.company}
           {pick.location ? ` · ${pick.location}` : ""}
           {pick.applied_recently && (
-            <span className="text-amber-500"> · You started one with {pick.company} this month</span>
+            <span className="text-warn"> · You started one with {pick.company} this month</span>
           )}
         </div>
       </div>

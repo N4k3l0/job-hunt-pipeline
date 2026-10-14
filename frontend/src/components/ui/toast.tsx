@@ -247,10 +247,10 @@ function ToastItemView({
     : Info;
 
   const accent =
-    toast.variant === "success" ? "text-emerald-400"
-    : toast.variant === "error" ? "text-red-400"
+    toast.variant === "success" ? "text-ok"
+    : toast.variant === "error" ? "text-err"
     : toast.variant === "loading" ? "text-muted-foreground"
-    : toast.variant === "action" ? "text-amber-400"
+    : toast.variant === "action" ? "text-warn"
     : "text-blue-400";
 
   return (
@@ -270,7 +270,7 @@ function ToastItemView({
         {isAction && (
           <button
             onClick={() => onUndo(toast.id)}
-            className="toast-btn text-xs font-semibold text-amber-400 hover:text-amber-300 px-2 py-1 -my-1 rounded-md hover:bg-amber-500/10"
+            className="toast-btn text-xs font-semibold text-warn hover:text-warn px-2 py-1 -my-1 rounded-md hover:bg-amber-500/10"
           >
             {(toast as ActionToast).actionLabel}
           </button>
@@ -336,7 +336,7 @@ function CountdownBar({ duration }: { duration: number }) {
   return (
     <div className="h-0.5 bg-amber-500/10 overflow-hidden">
       <div
-        className="h-full bg-amber-400 origin-left"
+        className="h-full bg-warn origin-left"
         style={{
           animation: `toast-countdown ${duration}ms linear forwards`,
         }}

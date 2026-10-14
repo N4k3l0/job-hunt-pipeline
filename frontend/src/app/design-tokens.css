@@ -37,15 +37,21 @@
   /* Text */
   --ds-fg: var(--fg, #e8eaf0);
   --ds-fg-muted: var(--fg-muted, #a0a6b3);
-  --ds-fg-dim: var(--fg-dim, #6a7180);
+  --ds-fg-dim: var(--fg-dim, #7d8494);
   --ds-fg-faint: var(--fg-faint, #4a5161);
 
-  /* Accent — single teal. Tweakable. */
-  --ds-accent: var(--accent, #1ed8b7);
-  --ds-accent-hover: var(--accent-hover, #2ce6c5);
-  --ds-accent-soft: var(--accent-soft, rgba(30, 216, 183, 0.10));
-  --ds-accent-edge: var(--accent-edge, rgba(30, 216, 183, 0.30));
-  --ds-accent-glow: var(--accent-glow, rgba(30, 216, 183, 0.18));
+  /* Accent: the action blue, for the main action and links only. */
+  --ds-accent: var(--accent, #8ab4ff);
+  --ds-accent-hover: var(--accent-hover, #a6c5ff);
+  --ds-accent-soft: var(--accent-soft, rgba(138, 180, 255, 0.12));
+  --ds-accent-edge: var(--accent-edge, rgba(138, 180, 255, 0.34));
+  --ds-accent-glow: var(--accent-glow, rgba(138, 180, 255, 0.18));
+
+  /* Status: a different hue from the action color. */
+  --ds-warn: var(--warn, #fbbf24);
+  --ds-warn-soft: var(--warn-soft, rgba(251, 191, 36, 0.10));
+  --ds-ok: var(--ok, #34d399);
+  --ds-err: var(--err, #f87171);
 
   /* Radii */
   --ds-r-pill: 6px;
@@ -120,7 +126,9 @@
 .ds-root .ds-muted { color: var(--ds-fg-muted); }
 .ds-root .ds-dim   { color: var(--ds-fg-dim); }
 .ds-root .ds-faint { color: var(--ds-fg-faint); }
-.ds-root .ds-accent-fg { color: var(--ds-accent); }
+.ds-root .ds-accent-fg { color: var(--ds-accent); } /* links and actions only */
+.ds-root .ds-ok-fg { color: var(--ds-ok); }
+.ds-root .ds-warn-fg { color: var(--ds-warn); }
 .ds-root .ds-tap44 { min-width: 44px; min-height: 44px; }
 
 /* ─────────── Headings ─────────── */
@@ -241,10 +249,13 @@
   font-size: 12px;
   color: var(--ds-fg-muted);
 }
+/* A pill that matters (needs you, follow-ups due): stronger ink, not the
+   action color, which is kept for what to press. */
 .ds-root .ds-pill.accent {
-  background: var(--ds-accent-soft);
-  border-color: var(--ds-accent-edge);
-  color: var(--ds-accent);
+  background: var(--ds-bg-elev-2);
+  border-color: var(--ds-line-strong);
+  color: var(--ds-fg);
+  font-weight: 600;
 }
 
 /* ─────────── Cards ─────────── */
@@ -427,8 +438,9 @@
   margin-top: 2px;
 }
 
-/* Score colors — teal only for ≥80; neutral grays for the rest */
-.ds-root .ds-s-top { color: var(--ds-accent); }
+/* Score colors: ink for 80 and up, then muted, then dim. Never the action
+   color, so the button stays the one thing in blue. */
+.ds-root .ds-s-top { color: var(--ds-fg); font-weight: 700; }
 .ds-root .ds-s-mid { color: var(--ds-fg); }
 .ds-root .ds-s-low { color: var(--ds-fg-dim); }
 

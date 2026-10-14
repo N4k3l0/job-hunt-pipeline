@@ -30,7 +30,7 @@ export function TailoredBulletsPanel({ jobId }: { jobId: string }) {
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <p className="text-sm font-medium flex items-center gap-2">
-            <Wand2 className="h-3.5 w-3.5 text-amber-400" />
+            <Wand2 className="h-3.5 w-3.5 text-warn" />
             Bullets re-ranked for this role
           </p>
           <p className="text-xs text-muted-foreground mt-1 max-w-md leading-relaxed">
@@ -115,7 +115,7 @@ function RelevanceStars({ value }: { value: number }) {
         <Star
           key={i}
           className={`h-3 w-3 ${
-            i <= value ? "fill-amber-400 text-amber-400" : "text-white/[0.12]"
+            i <= value ? "fill-amber-400 text-warn" : "text-white/[0.12]"
           }`}
         />
       ))}
@@ -152,7 +152,7 @@ function BulletRow({ bullet }: { bullet: TailoredBullet }) {
         <Button variant="ghost" size="sm" onClick={onCopy}>
           {copied ? (
             <>
-              <Check className="h-3.5 w-3.5 text-emerald-400" /> Copied
+              <Check className="h-3.5 w-3.5 text-ok" /> Copied
             </>
           ) : (
             <>
@@ -171,7 +171,7 @@ function BulletRow({ bullet }: { bullet: TailoredBullet }) {
           </p>
         </div>
         <div>
-          <p className="text-[10px] uppercase tracking-wider text-amber-400/80 mb-1">
+          <p className="text-[10px] uppercase tracking-wider text-warn/80 mb-1">
             Tailored for this role
           </p>
           <p className="text-sm leading-relaxed text-foreground">
@@ -181,7 +181,7 @@ function BulletRow({ bullet }: { bullet: TailoredBullet }) {
       </div>
       {bullet.why_it_matches && bullet.relevance > 0 && (
         <p className="flex gap-2 text-xs text-muted-foreground italic pt-1 border-t border-white/[0.04]">
-          <span className="text-amber-400/70 not-italic">Why:</span>
+          <span className="text-warn/70 not-italic">Why:</span>
           <span>{bullet.why_it_matches}</span>
         </p>
       )}

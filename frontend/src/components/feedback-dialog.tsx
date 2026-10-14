@@ -95,7 +95,7 @@ export function FeedbackDialog({ trigger }: { trigger: React.ReactElement }) {
 
         {submitted ? (
           <div className="py-8 text-center space-y-2">
-            <CheckCircle2 className="h-10 w-10 text-emerald-400 mx-auto" />
+            <CheckCircle2 className="h-10 w-10 text-ok mx-auto" />
             <p className="text-sm font-medium">Got it — thank you.</p>
             <p className="text-xs text-muted-foreground">
               Admin will see this in the queue.

@@ -7,7 +7,7 @@
 
 body[data-page="home"] {
   background:
-    radial-gradient(60% 50% at 50% -5%, rgba(30, 216, 183, 0.04), transparent 65%),
+    radial-gradient(60% 50% at 50% -5%, rgba(31, 95, 209, 0.04), transparent 65%),
     var(--bg);
   min-height: 100vh;
 }
@@ -472,7 +472,7 @@ body[data-page="home"] {
   border-left: 2px solid var(--accent);
   border-radius: 8px;
   background:
-    radial-gradient(120% 100% at 0% 0%, rgba(30, 216, 183, 0.06), transparent 50%),
+    radial-gradient(120% 100% at 0% 0%, rgba(31, 95, 209, 0.06), transparent 50%),
     var(--bg-elev-1);
   padding: 16px;
 }
@@ -806,7 +806,7 @@ body[data-page="home"] {
 }
 .hp .hp-invite-card {
   background:
-    radial-gradient(80% 60% at 0% 0%, rgba(30, 216, 183, 0.05), transparent 60%),
+    radial-gradient(80% 60% at 0% 0%, rgba(31, 95, 209, 0.05), transparent 60%),
     var(--bg-elev-1);
   border: 1px solid var(--line);
   border-radius: 16px;

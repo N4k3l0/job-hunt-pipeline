@@ -123,7 +123,7 @@ export default function LoginPage() {
             mirrors the "balloon with shape even when deflated" rule. */}
         <div className="text-center space-y-3">
           <div className="login-stagger-pop inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-amber-500/20 bg-amber-500/5 shadow-[0_0_24px_rgba(251,191,36,0.15)]">
-            <Sparkles className="h-5 w-5 text-amber-400" />
+            <Sparkles className="h-5 w-5 text-warn" />
           </div>
           <div className="space-y-1">
             <h1 className="login-stagger font-display text-3xl font-semibold tracking-tight [animation-delay:80ms]">Job Hunt Pipeline</h1>
@@ -140,7 +140,7 @@ export default function LoginPage() {
                 <div className="relative">
                   <div className="absolute inset-0 rounded-full bg-emerald-500/20 blur-xl" />
                   <div className="relative inline-flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500/10 border border-emerald-500/20">
-                    <CheckCircle2 className="h-7 w-7 text-emerald-400" />
+                    <CheckCircle2 className="h-7 w-7 text-ok" />
                   </div>
                 </div>
                 <div className="space-y-1">
