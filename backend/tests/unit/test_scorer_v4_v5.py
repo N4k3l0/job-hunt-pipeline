@@ -39,8 +39,8 @@ def _score(job, version, profile=PROFILE):
 
 
 def test_version_6_is_live():
-    assert SCORE_VERSION == 6 and PROPOSED_SCORE_VERSION == 6
-    assert set(KNOWN_VERSIONS) == {2, 3, 4, 5, 6}
+    assert SCORE_VERSION == 6 and PROPOSED_SCORE_VERSION == 7
+    assert set(KNOWN_VERSIONS) == {2, 3, 4, 5, 6, 7}
     job = _job("Senior AI Engineer", ["Python", "RAG"], seniority="senior")
     assert compute_job_score(*job, PROFILE) == _score(job, 6)
     # Version 2 titles still give half marks for sharing the role noun.
@@ -107,7 +107,8 @@ FACTORY = (
 AI_JOB = (
     "Join our team as an AI Engineer. You will build LLM applications in Python with LangChain and RAG, "
     "serve them with FastAPI, automate workflows with n8n, and work with SQL data. You will take features "
-    "from prototype to production with our customers and keep improving them as you learn what works."
+    "from prototype to production with our customers and keep improving them as you learn what works. "
+    "You will pair with designers and product managers, and share what you learn with the wider team."
 )
 
 
@@ -129,11 +130,66 @@ def test_version_6_reads_the_description_when_skills_arent_listed():
     assert v6["overall_fit"] < 70 and "skills" in v6["reasoning"]["counted"]
 
     # A job that does want their skills keeps its place.
-    ai = _described("AI Engineer", AI_JOB)
-    assert _score(ai, 6, AUTOMATION_PROFILE)["overall_fit"] >= 85
-    assert _score(ai, 6, AUTOMATION_PROFILE)["reasoning"]["skills_matched"]
+    ai = _score(_described("AI Engineer", AI_JOB), 6, AUTOMATION_PROFILE)
+    assert len(AI_JOB) >= 300 and "skills" in ai["reasoning"]["counted"]
+    assert ai["overall_fit"] >= 85 and ai["reasoning"]["skills_matched"]
 
 
 def test_version_6_changes_nothing_without_a_real_description():
     for job in (_described("Automation Engineer", "Automation Engineer, Ohio."), _job("AI Engineer", ["Python", "RAG", "SQL"])):
         assert _score(job, 6, AUTOMATION_PROFILE)["overall_fit"] == _score(job, 5, AUTOMATION_PROFILE)["overall_fit"]
+
+
+NIGERIA = {
+    **AUTOMATION_PROFILE,
+    "home_country": "NG",
+    "visa_statuses": {"US": "need_sponsorship", "GB": "need_sponsorship"},
+    "skills": AUTOMATION_PROFILE["skills"] + [{"skill_name": s} for s in ("Communication", "Slack", "Google Workspace")],
+}
+
+
+def _placed(country, remote_type, sponsorship=None, description=AI_JOB):
+    job_data, entities = _described("AI Engineer", description)
+    return {**job_data, "country": country, "remote_type": remote_type}, {**entities, "sponsorship_available": sponsorship}
+
+
+def test_version_7_leaves_out_skills_every_job_mentions():
+    """Seen on 2026-10-14: "communication", "slack" and "google workspace"
+    were 3 of the 5 skills a job matched on."""
+    office = (
+        "You will keep our office running: answer the phones, book travel and order supplies. Strong "
+        "communication and teamwork matter here, and we use Slack and Google Workspace every day. You will "
+        "also look after visitors, keep the calendar and help the team with whatever comes up each week."
+    )
+    job = _described("Office Coordinator", office)
+    v6, v7 = _score(job, 6, NIGERIA), _score(job, 7, NIGERIA)
+    assert {"communication", "slack", "google workspace"} <= set(v6["reasoning"]["skills_matched"])
+    assert v7["reasoning"]["skills_matched"] == []
+    assert v7["skill_score"] < v6["skill_score"]
+
+
+def test_version_7_scores_jobs_needing_a_sponsor_a_little_lower():
+    remote = _score(_placed(None, "full_remote"), 7, NIGERIA)
+    home = _score(_placed("NG", "onsite"), 7, NIGERIA)
+    sponsors = _score(_placed("US", "onsite", sponsorship=True), 7, NIGERIA)
+    unknown = _score(_placed("US", "onsite"), 7, NIGERIA)
+    assert remote["overall_fit"] == home["overall_fit"] > sponsors["overall_fit"] > unknown["overall_fit"]
+    # A little: a few points, not a different league.
+    assert 2 <= remote["overall_fit"] - unknown["overall_fit"] <= 6
+    assert unknown["reasoning"]["work_rights"] == "needs_sponsor"
+    # Version 6 doesn't look at work rights.
+    assert len({_score(_placed(c, r), 6, NIGERIA)["overall_fit"] for c, r in ((None, "full_remote"), ("US", "onsite"))}) == 1
+    # Without any work rights on the profile, nothing changes.
+    plain = {**NIGERIA, "home_country": None, "visa_statuses": {}}
+    assert _score(_placed("US", "onsite"), 7, plain)["overall_fit"] == _score(_placed(None, "full_remote"), 7, plain)["overall_fit"]
+
+
+def test_the_level_the_user_chose_is_theirs():
+    """The user said: "mid, not beginner, not senior"."""
+    founder = {**NIGERIA, "work_history": [
+        {"title": "Founder", "start_date": "2024-01-01", "end_date": None, "skills": [], "domain_tags": []},
+    ]}
+    senior_job = _job("Senior AI Engineer", ["Python", "RAG", "SQL"], seniority="senior")
+    chosen = _score(senior_job, 6, {**founder, "level": "mid"})
+    assert chosen["reasoning"]["candidate_level"] == "mid"
+    assert chosen["seniority_score"] == 0.7 * 15  # one step up

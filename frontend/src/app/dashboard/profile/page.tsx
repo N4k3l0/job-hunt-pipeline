@@ -184,6 +184,7 @@ export default function ProfilePage() {
   const [salaryCurrency, setSalaryCurrency] = useState("USD");
   const [homeCountry, setHomeCountry] = useState<string | null>(null);
   const [remotePref, setRemotePref] = useState("any");
+  const [level, setLevel] = useState("");
   const [searchKeywords, setSearchKeywords] = useState<string[]>([]);
   const [blockedSources, setBlockedSources] = useState<string[]>([]);
   const [newRole, setNewRole] = useState("");
@@ -213,6 +214,7 @@ export default function ProfilePage() {
       setSalaryMax(profile.salary_max?.toString() || "");
       setSalaryCurrency(profile.salary_currency || "USD");
       setRemotePref(profile.remote_preference || "any");
+      setLevel(profile.level || "");
       setSearchKeywords(profile.search_keywords || []);
       setBlockedSources(profile.blocked_sources || []);
     }
@@ -281,7 +283,8 @@ export default function ProfilePage() {
     };
 
     if (profile) {
-      updateProfile.mutate(data as any, { onSuccess: () => { setPrefsSaved(true); setTimeout(() => setPrefsSaved(false), 3000); } });
+      // The level is saved with an existing profile only.
+      updateProfile.mutate({ ...data, level } as any, { onSuccess: () => { setPrefsSaved(true); setTimeout(() => setPrefsSaved(false), 3000); } });
     } else {
       createProfile.mutate(data as any, { onSuccess: () => { setPrefsSaved(true); setTimeout(() => setPrefsSaved(false), 3000); } });
     }
@@ -980,6 +983,31 @@ export default function ProfilePage() {
                       onClick={() => setRemotePref(pref.value)}
                     >
                       {pref.label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+              <Separator className="my-4" />
+              <div className="space-y-2">
+                <Label>Your level</Label>
+                <p className="text-sm text-muted-foreground">
+                  Jobs a step above or below your level score a little lower. &quot;Work it out&quot; lets the app judge
+                  from your work history.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { label: "Work it out", value: "" },
+                    { label: "Entry", value: "entry" },
+                    { label: "Mid", value: "mid" },
+                    { label: "Senior", value: "senior" },
+                    { label: "Lead", value: "lead" },
+                  ].map((choice) => (
+                    <Button
+                      key={choice.value || "auto"}
+                      variant={level === choice.value ? "default" : "outline"}
+                      onClick={() => setLevel(choice.value)}
+                    >
+                      {choice.label}
                     </Button>
                   ))}
                 </div>

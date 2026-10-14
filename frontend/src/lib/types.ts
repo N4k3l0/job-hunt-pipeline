@@ -439,6 +439,9 @@ export interface CandidateProfile {
   open_to_relocation?: boolean | null;
   languages?: string[] | null;
   remote_preference: string | null;
+  /** The level the user chose (entry, mid, senior, lead); null lets the app
+   *  work it out from their work history. */
+  level?: string | null;
   salary_min: number | null;
   salary_max: number | null;
   salary_currency: string;

@@ -173,8 +173,14 @@ async def load_scoring_profile(db, user_id: str) -> dict | None:
     profile = result.scalar_one_or_none()
     if not profile:
         return None
+    from app.models.user import User
+    from app.services.scoring.matching import CAREER_LEVEL_KEY
+
+    user = await db.get(User, profile.user_id)
 
     return {
+        # The level the user chose, if any; otherwise scoring works it out.
+        "level": ((user.preferences if user else None) or {}).get(CAREER_LEVEL_KEY),
         "target_roles": profile.target_roles or [],
         "search_keywords": profile.search_keywords or [],
         "preferred_countries": profile.preferred_countries or [],

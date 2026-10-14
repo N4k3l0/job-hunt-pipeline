@@ -59,6 +59,10 @@ _NON_WORD_RE = re.compile(r"[^a-z0-9+#]+")
 _PAREN_RE = re.compile(r"\(([^)]*)\)")
 
 SENIORITY_LEVELS = ["entry", "mid", "senior", "lead", "director", "vp", "c_level"]
+# The levels a user can choose on their profile (users.preferences
+# "career_level"); otherwise it's worked out from their work history.
+CAREER_LEVELS = ("entry", "mid", "senior", "lead")
+CAREER_LEVEL_KEY = "career_level"
 
 # Only the start of a description is searched for skill mentions.
 DESCRIPTION_SEARCH_CHARS = 6000
@@ -192,15 +196,37 @@ def _skill_matches(job_skill: str, candidate_key: tuple[str, ...]) -> bool:
     return False
 
 
+# Skills nearly every job mentions, so they say nothing about fit: soft
+# skills, and the office tools every company uses. Seen on 2026-10-14:
+# "communication", "slack" and "google workspace" were 3 of the 5 skills
+# a job matched on.
+GENERIC_SKILLS = frozenset(normalize_skill(s) for s in (
+    "communication", "communication skills", "written communication", "verbal communication",
+    "teamwork", "team player", "collaboration", "leadership", "problem solving", "critical thinking",
+    "time management", "attention to detail", "adaptability", "creativity", "interpersonal skills",
+    "organization", "organisation", "organizational skills", "organisational skills", "multitasking",
+    "work ethic", "self motivated", "presentation skills", "english",
+    "slack", "google workspace", "g suite", "gsuite", "microsoft teams", "zoom", "microsoft office",
+    "office 365", "microsoft 365", "email",
+))
+
+
 def skill_match(
     job_skills: list[str] | None,
     job_description: str | None,
     candidate_skills: list[str] | None,
     nice_to_have: list[str] | None = None,
+    *,
+    ignore_generic: bool = False,
 ) -> tuple[float, list[str], list[str]]:
     """Share of the job's skills the candidate has, blended with how many
-    of the candidate's skills the description mentions. Returns
-    (score, matched, missing)."""
+    of the candidate's skills the description mentions. `ignore_generic`
+    leaves GENERIC_SKILLS out on both sides. Returns (score, matched,
+    missing)."""
+    if ignore_generic:
+        candidate_skills = [s for s in candidate_skills or () if s and normalize_skill(s) not in GENERIC_SKILLS]
+        job_skills = [s for s in job_skills or () if s and normalize_skill(s) not in GENERIC_SKILLS]
+        nice_to_have = [s for s in nice_to_have or () if s and normalize_skill(s) not in GENERIC_SKILLS]
     candidate_key = tuple(candidate_skills or ())
     names, _ = _candidate_skill_index(candidate_key)
     if not names:
@@ -313,10 +339,15 @@ def seniority_match(
     years_required_min: int | None,
     work_history: list[dict] | None,
     gap_scores: tuple[float, float, float, float] = LEVEL_GAP_SCORES,
+    *,
+    chosen_level: str | None = None,
 ) -> tuple[float, dict]:
+    """How the job's level compares with the candidate's: the level they
+    chose on their profile, or else one worked out from their latest title
+    and years of experience."""
     years = candidate_years(work_history)
-    candidate_level = None
-    if work_history:
+    candidate_level = chosen_level if chosen_level in SENIORITY_LEVELS else None
+    if candidate_level is None and work_history:
         candidate_level = level_from_title(work_history[0].get("title")) or level_from_years(years)
 
     job_level = job_seniority if job_seniority in SENIORITY_LEVELS else level_from_title(job_title)

@@ -36,6 +36,16 @@ router = APIRouter()
 # ── Profile ──────────────────────────────────────────────────────────────────
 
 
+async def _with_level(db, profile: CandidateProfile) -> CandidateProfile:
+    """The profile, with the level the user chose (kept in their settings)."""
+    from app.models.user import User
+    from app.services.scoring.matching import CAREER_LEVEL_KEY
+
+    user = await db.get(User, profile.user_id)
+    profile.level = ((user.preferences if user else None) or {}).get(CAREER_LEVEL_KEY)
+    return profile
+
+
 @router.get("/profile", response_model=ProfileResponse | None)
 async def get_profile(user_id: CurrentUserId, db: DbSession):
     result = await db.execute(
@@ -50,7 +60,7 @@ async def get_profile(user_id: CurrentUserId, db: DbSession):
     profile = result.scalar_one_or_none()
     if not profile:
         return None
-    return profile
+    return await _with_level(db, profile)
 
 
 @router.post("/profile", response_model=ProfileResponse, status_code=status.HTTP_201_CREATED)
@@ -100,6 +110,23 @@ async def update_profile(data: ProfileUpdate, user_id: CurrentUserId, db: DbSess
     new_roles = sorted(update_data.get("target_roles", profile.target_roles) or [])
     roles_changed = "target_roles" in update_data and old_roles != new_roles
 
+    # The level lives with the user's settings; a new one changes every
+    # score's level part, so it rescores like new roles do.
+    level_changed = False
+    if "level" in update_data:
+        from app.models.user import User
+        from app.services.scoring.matching import CAREER_LEVEL_KEY
+
+        level = update_data.pop("level")
+        user = await db.get(User, user_id)
+        preferences = dict(user.preferences or {})
+        level_changed = preferences.get(CAREER_LEVEL_KEY) != level
+        if level:
+            preferences[CAREER_LEVEL_KEY] = level
+        else:
+            preferences.pop(CAREER_LEVEL_KEY, None)
+        user.preferences = preferences
+
     for field, value in update_data.items():
         setattr(profile, field, value)
 
@@ -112,15 +139,15 @@ async def update_profile(data: ProfileUpdate, user_id: CurrentUserId, db: DbSess
         await fill_profile_links(db, user_id)
         await db.refresh(profile)
 
-    if roles_changed:
+    if roles_changed or level_changed:
         from app.workers.scoring_tasks import _batch_score_async
         try:
             await _batch_score_async(str(user_id), rescore_all=True)
         except Exception as e:  # noqa: BLE001
             import logging
-            logging.getLogger(__name__).error("Rescore after target_roles change failed: %s", e)
+            logging.getLogger(__name__).error("Rescore after a target_roles or level change failed: %s", e)
 
-    return profile
+    return await _with_level(db, profile)
 
 
 # ── Work History ─────────────────────────────────────────────────────────────

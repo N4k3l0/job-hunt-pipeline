@@ -19,13 +19,16 @@ logger = logging.getLogger(__name__)
 # a change is measured against the user's own ratings before it replaces
 # the stored scores.
 SCORE_VERSION = 6
-PROPOSED_SCORE_VERSION = 6
+PROPOSED_SCORE_VERSION = 7
 # Every version the scorer can compute. The Rate matches comparison can
 # score a user's ratings with any of them (?compare=3,4).
-KNOWN_VERSIONS = (2, 3, 4, 5, 6)
+KNOWN_VERSIONS = (2, 3, 4, 5, 6, 7)
 
-# Weights of the rule-based components; they sum to 1.
-WEIGHTS = {"title": 0.30, "skills": 0.35, "seniority": 0.20, "domain": 0.05, "remote": 0.10}
+# Weights of the rule-based components. The first five sum to 1; version 7
+# adds work rights. A score is the weighted average of the parts it counts.
+WEIGHTS = {
+    "title": 0.30, "skills": 0.35, "seniority": 0.20, "domain": 0.05, "remote": 0.10, "work_rights": 0.05,
+}
 
 # Version 3 gives no points for what isn't known. A component the job
 # doesn't state (its level, its remote policy) counts as 0; a component the
@@ -59,6 +62,47 @@ SKILLS_MIN_LISTED = 3
 # hadn't listed their skills yet; their descriptions mention none of the
 # candidate's skills. A job with no description still goes by what's known.
 DESCRIPTION_MIN_CHARS = 300
+# Version 7 is version 6 with three changes the user asked for on
+# 2026-10-14:
+# - Skills nearly every job mentions (communication, Slack, Google
+#   Workspace: matching.GENERIC_SKILLS) don't count as a match.
+# - Work rights count (WORK_RIGHTS): a job the candidate can take where
+#   they are scores a little higher than one where they'd need a visa
+#   sponsor, most of all when the job doesn't say it sponsors.
+# - The level the user chose on their profile is theirs, not a guess (all
+#   versions read it: it's part of the profile).
+WORK_RIGHTS = {"allowed": 1.0, "sponsors": 0.7, "remote_needs_sponsor": 0.6, "needs_sponsor": 0.3, "no_sponsor": 0.0}
+
+
+def work_rights_match(
+    job_country: str | None,
+    remote_type: str | None,
+    sponsorship: bool | None,
+    home_country: str | None,
+    visa_statuses: dict | None,
+) -> tuple[float | None, str | None]:
+    """Whether the candidate can take the job where they are: a value from
+    WORK_RIGHTS and its name, or (None, None) when it isn't known."""
+    if not home_country and not visa_statuses:
+        return None, None
+    country = (job_country or "").strip().upper()
+    if not country:
+        # Remote with no country named: work it from anywhere.
+        return (WORK_RIGHTS["allowed"], "allowed") if remote_type == "full_remote" else (None, None)
+    if home_country and country == home_country.strip().upper():
+        return WORK_RIGHTS["allowed"], "allowed"
+    status = (visa_statuses or {}).get(country)
+    if status in ("citizen", "permanent_resident", "work_visa"):
+        return WORK_RIGHTS["allowed"], "allowed"
+    if status == "need_sponsorship":
+        if sponsorship is True:
+            return WORK_RIGHTS["sponsors"], "sponsors"
+        if sponsorship is False:
+            return WORK_RIGHTS["no_sponsor"], "no_sponsor"
+        if remote_type == "full_remote":
+            return WORK_RIGHTS["remote_needs_sponsor"], "remote_needs_sponsor"
+        return WORK_RIGHTS["needs_sponsor"], "needs_sponsor"
+    return None, None
 
 # Axis maxima the dashboard displays each component against.
 AXIS_MAX = {"title": 20, "skills": 25, "seniority": 15, "domain": 10}
@@ -121,11 +165,13 @@ def compute_job_score(
     candidate_skills = [s.get("skill_name", "") for s in profile.get("skills") or []]
     for entry in work_history:
         candidate_skills.extend(entry.get("skills") or [])
+    ignore_generic = version >= 7
     skills_value, skills_matched, skills_missing = skill_match(
         job_entities.get("skills"),
         description,
         candidate_skills,
         nice_to_have=job_entities.get("nice_to_have"),
+        ignore_generic=ignore_generic,
     )
 
     seniority_value, seniority_detail = seniority_match(
@@ -134,6 +180,7 @@ def compute_job_score(
         job_entities.get("years_experience_min"),
         work_history,
         gap_scores=STRICT_LEVEL_GAP_SCORES if strict else LEVEL_GAP_SCORES,
+        chosen_level=profile.get("level"),
     )
 
     domain_tags: list[str] = []
@@ -187,7 +234,9 @@ def compute_job_score(
         has_skills = bool(expand_skills(candidate_skills))
         skills_known = len(listed) >= SKILLS_MIN_LISTED and has_skills
         if not skills_known and version >= 6 and has_skills and len(description.strip()) >= DESCRIPTION_MIN_CHARS:
-            skills_value, skills_matched, skills_missing = skill_match(None, description, candidate_skills)
+            skills_value, skills_matched, skills_missing = skill_match(
+                None, description, candidate_skills, ignore_generic=ignore_generic,
+            )
             skills_known = True
         components = {
             "title": title_value if has_roles else None,
@@ -200,6 +249,11 @@ def compute_job_score(
             "domain": domain_value if any(t and len(t.strip()) >= 3 for t in domain_tags) else None,
             "remote": remote_value if remote_preference != "any" and job_data.get("remote_type") else None,
         }
+        if version >= 7:
+            components["work_rights"], work_rights = work_rights_match(
+                job_data.get("country"), job_data.get("remote_type"), job_entities.get("sponsorship_available"),
+                profile.get("home_country"), profile.get("visa_statuses"),
+            )
 
     counted = {name: value for name, value in components.items() if value is not None}
     counted_weight = sum(WEIGHTS[name] for name in counted)
@@ -246,6 +300,7 @@ def compute_job_score(
             "skills_matched": skills_matched,
             "skills_missing": skills_missing,
             "domain_matches": domain_hits,
+            **({"work_rights": work_rights} if version >= 7 and known_only else {}),
             **seniority_detail,
             **geo.get("reasoning", {}),
         },
