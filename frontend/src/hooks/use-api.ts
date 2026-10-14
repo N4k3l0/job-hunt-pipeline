@@ -15,6 +15,7 @@ import type {
   AutoApplyDocuments,
   AutoApplyValue,
   AutoPrepareSettings,
+  ApplyPicks,
   JobAlertForwarding,
   JobAlertStatus,
   NotificationSettings,
@@ -600,8 +601,45 @@ export function useAutoApplications() {
     queryKey: ["auto-apply"],
     queryFn: () => api.get<AutoApplication[]>("/api/v1/auto-apply"),
     staleTime: 30 * 1000,
-    // While the app is sending one, check back until it's done.
-    refetchInterval: (query) => (query.state.data?.some((a) => a.sending?.waiting) ? 15_000 : false),
+    // While the app is sending or preparing one, check back until it's done.
+    refetchInterval: (query) =>
+      query.state.data?.some((a) => a.sending?.waiting || a.status === "preparing") ? 15_000 : false,
+  });
+}
+
+/** The user's best matches not started yet, to apply to from one page. */
+export function useApplyPicks() {
+  return useQuery({
+    queryKey: ["auto-apply-picks"],
+    queryFn: () => api.get<ApplyPicks>("/api/v1/auto-apply/picks"),
+    staleTime: 60 * 1000,
+  });
+}
+
+/** Prepare applications for these jobs, a few at a time in the background. */
+export function usePrepareBatch() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (jobIds: string[]) =>
+      api.post<{ queued: number; skipped: number }>("/api/v1/auto-apply/batch", { job_ids: jobIds }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["auto-apply"], exact: true });
+      qc.invalidateQueries({ queryKey: ["auto-apply-picks"] });
+    },
+  });
+}
+
+/** A job on another site: the user applied there, or doesn't want it. */
+export function usePickedElsewhere() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ jobId, action }: { jobId: string; action: "mark-applied" | "dismiss" }) =>
+      api.post(`/api/v1/jobs/${jobId}/${action}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["auto-apply-picks"] });
+      qc.invalidateQueries({ queryKey: ["tracking"] });
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+    },
   });
 }
 

@@ -186,6 +186,29 @@ export interface AutoApplicationDetail extends AutoApplication {
   result: Record<string, unknown> | null;
 }
 
+/** A job to apply to, on the Applications page's list. */
+export interface ApplyPick {
+  job_id: string;
+  title: string;
+  company: string;
+  location: string | null;
+  score: number;
+  /** The company's page for the job: its form, or where to apply. */
+  url: string | null;
+  /** The user started an application with this company in the last month. */
+  applied_recently: boolean;
+}
+
+/** The user's best matches not started yet (backend services/auto_apply/batch.py). */
+export interface ApplyPicks {
+  /** On a form the app fills in: tick and prepare together. */
+  fill: ApplyPick[];
+  /** On other sites: open, apply there, mark applied. */
+  elsewhere: ApplyPick[];
+  cost_each_usd: number;
+  max_batch: number;
+}
+
 /** After applying: the person to write to, and a note the user sends from
  *  their own LinkedIn (backend services/outreach/message.py). */
 export interface OutreachNote {
