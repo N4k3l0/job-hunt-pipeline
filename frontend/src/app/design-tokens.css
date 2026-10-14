@@ -314,6 +314,54 @@
   .ds-root .ds-btn.sm { height: 36px; padding: 0 12px; }
 }
 
+/* How a button answers the user (Material, Apple HIG, IBM Carbon: every
+   button has hover, pressed, focus, disabled and busy states). Hover is
+   above; focus is the ring in `.ds-root :focus-visible`. */
+
+/* Pressed: it gives a little under the finger, and the main button darkens. */
+.ds-root .ds-btn:active:not(:disabled) { transform: translateY(1px); }
+.ds-root .ds-btn.primary:active:not(:disabled) { filter: brightness(0.92); }
+
+/* Can't be used yet (Prepare with nothing ticked): it says so. Flat grey,
+   no hover, no hand cursor, instead of looking ready to press. */
+.ds-root .ds-btn:disabled,
+.ds-root .ds-btn:disabled:hover {
+  cursor: not-allowed;
+  background: var(--ds-bg-elev-2);
+  border-color: var(--ds-line);
+  color: var(--ds-fg-dim);
+  filter: none;
+  transform: none;
+}
+.ds-root .ds-btn.ghost:disabled,
+.ds-root .ds-btn.ghost:disabled:hover { background: transparent; border-color: transparent; }
+
+/* Busy: a button turned off while it works shows its spinner and keeps its
+   colors, so it reads as working, not as unavailable. */
+.ds-root .ds-btn:disabled:has(.animate-spin) { cursor: progress; }
+.ds-root .ds-btn.primary:disabled:has(.animate-spin) {
+  background: var(--ds-accent);
+  border-color: transparent;
+  color: var(--accent-on, #06101f);
+  opacity: 0.85;
+}
+.ds-root .ds-btn:not(.primary):not(.ghost):disabled:has(.animate-spin) {
+  background: var(--ds-bg-elev-1);
+  color: var(--ds-fg);
+}
+
+/* Touch screens: every button at least 44px tall, the size Apple
+   recommends for a finger. */
+@media (pointer: coarse) {
+  .ds-root .ds-btn,
+  .ds-root .ds-btn.sm { min-height: 44px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ds-root .ds-btn { transition: none; }
+  .ds-root .ds-btn:active:not(:disabled) { transform: none; }
+}
+
 /* ─────────── Inputs ─────────── */
 .ds-root .ds-input {
   display: flex;
