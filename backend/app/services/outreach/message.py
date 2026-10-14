@@ -8,6 +8,16 @@ enough for a LinkedIn connection request. The app never sends it: LinkedIn
 doesn't allow that, and the user reads it first. They copy it, send it
 from their own LinkedIn and press "I sent it", or "Skip".
 
+What the note is for: the application is one of hundreds, and the note's
+one job is to get this person to open it. Three moves: say they applied
+and for which role, give one reason they fit what this role does (from the
+posting, shown with real work that matches it), and ask for something
+small. On 2026-10-14 the Palantir note talked about the user's proudest
+project instead, a job search pipeline: nothing to do with the role, and
+it invites the question of whether the application came from a tool. So
+the note-writer gets the posting, not the proudest project, and a note
+that talks about job searching is flagged.
+
 One OutreachLog row per user and job, `status` drafted, sent or skipped.
 The note gets the same writing check as application answers, and never
 says an app wrote or sent anything: the user doesn't want employers to
@@ -19,6 +29,7 @@ so the site only starts one by itself for an application sent in the last
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote, urlparse
@@ -27,10 +38,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.llm.client import LLMCreditsExhausted
-from app.llm.prompts.tailor_resume import OUTREACH_PROMPT, SYSTEM_PROMPT
-from app.llm.style import plain_english, read_through, revise_plainly, without_dashes, writing_problems
-from app.models.job import Job, JobContact
-from app.models.tailoring import TailoredApplication
+from app.llm.style import (
+    STYLE_RULES, plain_english, read_through, revise_plainly, without_dashes, writing_problems,
+)
+from app.models.job import Job, JobContact, JobEntity
 from app.models.tracking import ApplicationTracking, OutreachLog
 from app.models.user import User
 
@@ -44,30 +55,53 @@ WAITING = ("applied", "follow_up_due")
 AUTO_DAYS = 7
 FIX_ROUNDS = 3
 
-NOTE_RULES = """
+DESCRIPTION_CHARS = 4000
+FACTS_CHARS = 6000
 
-## When
-The candidate has just applied for this role. Say so in a few words.
+NOTE_SYSTEM = (
+    "You write the short note a job seeker sends on LinkedIn to someone at a company, right after applying "
+    "there. You write as the candidate, in their voice, from their real experience only.\n\n" + STYLE_RULES
+)
 
-## How it reads
-- Start with "Hi" and their first name ("Hi there," if you don't have one).
+NOTE_PROMPT = """Write the note {name} sends to {who} after applying for {role} at {company}.
+
+## What the note is for
+Their application is one of hundreds. The note has one job: get this person to open it. It does that in
+three moves, in this order:
+1. Say they just applied, and for which role, so the reader can find it.
+2. One reason they fit what this role actually does (see the role below), shown with real work from their
+   experience. Pick the work that matches the role best, not their favourite project.
+3. Ask for something small that's easy to say yes to: a look at their application, or a short chat. Ask
+   about the reader's time, not "how I fit": the note has already shown the fit.
+
+## The role
+{role} at {company}
+{requirements}{description}
+
+## The candidate's experience (the only facts you may use)
+{facts}
+
+## Rules
+- Start with "Hi" and the reader's first name ("Hi there," if you don't have one).
 - Full sentences, with "I". Every sentence has a verb. No note-taking style.
-- One example of their work, said so a stranger gets it: what it does and
-  for whom. No internal terms or counts only someone on the project would
-  follow (shots, clusters, manifests).
-- End with a simple question, like asking for a short chat, then their first
-  name on its own. No dash or hyphen before the name.
+- Use the experience as written: the same numbers and names. Don't move a skill from the summary into a
+  job: if a job doesn't mention RAG, don't say they built RAG there.
+- Say the work so a stranger gets it: what it does and for whom. No internal terms or counts only someone
+  on the project would follow.
+- Never talk about job searching, job postings or applying for jobs as their work, even if they built
+  software for it: the reader may wonder whether the application came from a tool.
+- Never say or hint that an app, a tool or AI wrote, filled in or sent the application or this note.
+- At most 300 characters, counting spaces and the name.
+- End with the ask, then a blank line and their first name on its own. No dash or hyphen before the name.
 
-## Facts
-- If the profile names a proudest project, that's the example to use.
-- Only what the experience section says, in its words. Don't move a skill
-  from the summary into a job: if a job doesn't mention RAG, don't say the
-  candidate built RAG there.
+Return only the note."""
 
-## Never
-- Never say or hint that an app, a tool or AI wrote, filled in or sent the
-  application or this note. Talking about software the candidate built is fine.
-- At most 300 characters, counting spaces. Shorter is better."""
+# A note about job searching tells the reader the wrong thing (see above).
+_JOB_SEARCH = re.compile(
+    r"\bjob[- ]?(search|hunt|seek|board|posting|listing)\w*|\bpostings?\b|\bapply(ing)? (to|for) jobs\b"
+    r"|\bjob applications?\b",
+    re.IGNORECASE,
+)
 
 
 class NotSentYet(RuntimeError):
@@ -138,44 +172,59 @@ def note_problems(text: str | None) -> list[str]:
         problems.append(
             f"It's {length} characters. LinkedIn only allows {MAX_CHARS} in a connection note, so make it shorter."
         )
+    if text and _JOB_SEARCH.search(text):
+        problems.append(
+            "It talks about job searching. Use work that matches what this role does instead, so the reader "
+            "doesn't wonder whether the application came from a tool."
+        )
     return problems
 
 
+def _readable(description: str | None) -> str:
+    """The posting as plain text: no images, links or tags."""
+    text = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", description or "")
+    text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)
+    text = re.sub(r"<[^>]+>", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
 async def write_note(db: AsyncSession, user_id: uuid.UUID, job: Job, contact: JobContact | None, llm=None) -> str:
-    """A short note from the user's real work, checked like an answer."""
+    """A short note that gets the application opened: from the posting and
+    the user's real work, checked like an answer."""
     if llm is None:
         from app.llm.client import llm_client as llm
     from app.services.auto_apply.prepare import load_applicant
 
     user = await db.get(User, user_id)
-    tailored = (await db.execute(
-        select(TailoredApplication)
-        .where(TailoredApplication.user_id == user_id, TailoredApplication.job_id == job.id)
-        .order_by(TailoredApplication.created_at.desc()).limit(1)
-    )).scalar_one_or_none()
     _facts, facts_text, _resume, _saved = await load_applicant(db, user_id)
-    summary = (tailored.tailored_summary if tailored else None) or facts_text[:1500]
-    role = job.title_en or job.title or ""
-    prompt = OUTREACH_PROMPT.format(
-        job_title=role,
-        job_company=job.company or "",
-        candidate_name=(user.name if user else "") or "",
-        candidate_summary=summary,
-        top_experience=facts_text[:5000],
-        strongest_matches=", ".join((tailored.tailored_resume_json or {}).get("strongest_matches", []))
-        if tailored and tailored.tailored_resume_json else "",
-    ) + NOTE_RULES
-    if contact is not None and contact.name:
-        prompt += f"\n\n## Who it's going to\n{contact.name}"
-        if contact.title:
-            prompt += f", {contact.title}"
-        prompt += "\nOpen with their first name."
+    # The proudest project is for "favourite project" questions. Here the
+    # work has to match the role.
+    facts_text = "\n".join(line for line in facts_text.splitlines() if not line.startswith("Proudest project"))
+    entity = (await db.execute(select(JobEntity).where(JobEntity.job_id == job.id))).scalar_one_or_none()
+    requirements = (entity.requirements or [])[:12] if entity is not None else []
+    description = _readable(job.raw_description_en or job.raw_description)[:DESCRIPTION_CHARS]
 
-    drafted = await llm.generate(task_type="tailoring", system_prompt=SYSTEM_PROMPT, user_prompt=prompt, max_tokens=500)
+    role = job.title_en or job.title or ""
+    who = f"{contact.name}, {contact.title}" if contact is not None and contact.name and contact.title else (
+        contact.name if contact is not None and contact.name else f"someone at {job.company}"
+    )
+    prompt = NOTE_PROMPT.format(
+        name=(user.name if user else "") or "the candidate",
+        who=who,
+        role=role,
+        company=job.company or "",
+        requirements=("Requirements:\n" + "\n".join(f"- {r}" for r in requirements) + "\n") if requirements else "",
+        description=f"From the posting: {description}" if description else "(No description: go by the title.)",
+        facts=facts_text[:FACTS_CHARS],
+    )
+    drafted = await llm.generate(task_type="tailoring", system_prompt=NOTE_SYSTEM, user_prompt=prompt, max_tokens=500)
     text = (await without_dashes(drafted.strip(), llm)).strip()
 
-    who = f"{contact.name}, {contact.title}" if contact is not None and contact.name else "someone at the company"
-    what = f"a short LinkedIn note to {who}, sent after applying for {role} at {job.company}"
+    what = (
+        f"a short LinkedIn note to {who}, sent after applying for {role} at {job.company}. Its one job is to get "
+        "them to open the application: say they applied, give one reason they fit what this role does, and ask "
+        "for something small"
+    )
     for round_ in range(FIX_ROUNDS):
         try:
             found = await read_through(text, what=what)
