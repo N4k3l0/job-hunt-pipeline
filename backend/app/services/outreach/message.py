@@ -49,6 +49,16 @@ NOTE_RULES = """
 ## When
 The candidate has just applied for this role. Say so in a few words.
 
+## How it reads
+- Start with "Hi" and their first name ("Hi there," if you don't have one).
+- Full sentences, with "I". Every sentence has a verb. No note-taking style.
+- End with a simple question, like asking for a short chat.
+
+## Facts
+- Only what the experience section says, in its words. Don't move a skill
+  from the summary into a job: if a job doesn't mention RAG, don't say the
+  candidate built RAG there.
+
 ## Never
 - Never say or hint that an app, a tool or AI wrote, filled in or sent the
   application or this note. Talking about software the candidate built is fine.
@@ -179,15 +189,17 @@ async def write_note(db: AsyncSession, user_id: uuid.UUID, job: Job, contact: Jo
 
 
 async def prepare_note(
-    db: AsyncSession, user_id: uuid.UUID, job_id: uuid.UUID, *, look_again: bool = False, llm=None,
+    db: AsyncSession, user_id: uuid.UUID, job_id: uuid.UUID, *, look_again: bool = False, rewrite: bool = False,
+    llm=None,
 ) -> OutreachLog:
     """Find the person and write the note. A note already written is kept
-    unless the user asks to look again, so opening the page twice costs
-    nothing. If no one is found, the note is still written."""
+    unless the user asks to look again (a new search) or to write it again
+    (the same person, no search), so opening the page twice costs nothing.
+    If no one is found, the note is still written."""
     if await sent_application(db, user_id, job_id) is None:
         raise NotSentYet("Send the application first, then write to someone about it.")
     log = await note_for(db, user_id, job_id)
-    if log is not None and log.message and not look_again:
+    if log is not None and log.message and not (look_again or rewrite):
         return log
 
     job = await db.get(Job, job_id)

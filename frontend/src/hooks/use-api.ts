@@ -654,8 +654,8 @@ export function useOutreachNote(jobId: string | undefined, enabled = true) {
 export function usePrepareOutreachNote(jobId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ lookAgain = false }: { lookAgain?: boolean } = {}) =>
-      api.post<OutreachNote>(`/api/v1/outreach/${jobId}/prepare`, { look_again: lookAgain }),
+    mutationFn: ({ lookAgain = false, rewrite = false }: { lookAgain?: boolean; rewrite?: boolean } = {}) =>
+      api.post<OutreachNote>(`/api/v1/outreach/${jobId}/prepare`, { look_again: lookAgain, rewrite }),
     onSuccess: (note) => {
       qc.setQueryData(["outreach", jobId], note);
       qc.invalidateQueries({ queryKey: ["jobs", jobId, "contact"] });

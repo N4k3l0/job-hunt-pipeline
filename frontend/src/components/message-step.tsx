@@ -71,9 +71,9 @@ export function MessageStep({ jobId }: { jobId: string }) {
   const edited = draft !== null && draft !== (note.message ?? "");
   const tooLong = text.length > note.max_chars;
 
-  const write = (lookAgain = false) =>
+  const write = (how: { lookAgain?: boolean; rewrite?: boolean } = {}) =>
     prepare.mutate(
-      { lookAgain },
+      how,
       {
         onSuccess: () => setDraft(null),
         onError: (e) => toast.error("Couldn't write the note", { description: e.message }),
@@ -232,10 +232,19 @@ export function MessageStep({ jobId }: { jobId: string }) {
           <button
             type="button"
             className="ds-btn ghost"
-            onClick={() => write(true)}
-            title="Another search and a new note, about 15 cents of AI"
+            onClick={() => write({ rewrite: true })}
+            title="A new note to the same person, about 2 cents of AI"
           >
             <RefreshCw className="h-4 w-4" />
+            Write it again
+          </button>
+          <button
+            type="button"
+            className="ds-btn ghost"
+            onClick={() => write({ lookAgain: true })}
+            title="Another search and a new note, about 15 cents of AI"
+          >
+            <UserSearch className="h-4 w-4" />
             Look for someone else
           </button>
         </div>
