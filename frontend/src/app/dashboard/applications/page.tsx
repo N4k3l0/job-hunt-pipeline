@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Bell, Briefcase, ChevronDown, FileText, Loader2, Send } from "lucide-react";
+import { Bell, Briefcase, ChevronDown, FileText, Loader2, MessageSquare, Send } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -262,6 +262,24 @@ export default function ApplicationsPage() {
           >
             {due.tone === "past" ? `Follow up: ${due.text}` : due.text}
           </span>
+        )}
+        {/* Waiting to hear back: a note to someone there, until it's sent or skipped. */}
+        {["applied", "follow_up_due"].includes(status) && item.message !== "skipped" && (
+          item.message === "sent" ? (
+            <span className="ds-dim flex items-center" style={{ fontSize: 12, gap: 4 }}>
+              <MessageSquare className="h-3 w-3" />
+              Messaged
+            </span>
+          ) : (
+            <Link
+              href={`/dashboard/jobs/${item.job_id}#message`}
+              className="ds-btn sm"
+              title="Who to write to at the company, and a short note to send from your LinkedIn"
+            >
+              <MessageSquare className="h-3 w-3" />
+              Message someone
+            </Link>
+          )
         )}
         <span style={{ flex: 1 }} />
         {status === "approved" && (

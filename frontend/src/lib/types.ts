@@ -184,8 +184,33 @@ export interface AutoApplySending {
 export interface AutoApplicationDetail extends AutoApplication {
   fields: AutoApplyField[];
   result: Record<string, unknown> | null;
-  /** The message drafted after sending, when the user asked for one. */
-  follow_up: { message: string; drafted_at: string } | null;
+}
+
+/** After applying: the person to write to, and a note the user sends from
+ *  their own LinkedIn (backend services/outreach/message.py). */
+export interface OutreachNote {
+  job_id: string;
+  company: string;
+  /** Sent, and still waiting to hear back. */
+  can_message: boolean;
+  /** Sent in the last week and nothing written yet: the page writes it. */
+  auto: boolean;
+  status: "drafted" | "sent" | "skipped" | null;
+  message: string | null;
+  chars: number;
+  max_chars: number;
+  problems: string[];
+  sent_at: string | null;
+  contact: {
+    name: string | null;
+    title: string | null;
+    linkedin_url: string | null;
+    confidence: "low" | "medium" | "high" | null;
+    source_notes: string | null;
+  } | null;
+  people_search_url: string;
+  /** The job on LinkedIn, where "Meet the hiring team" may name who posted it. */
+  linkedin_job_url: string | null;
 }
 
 /** The files an application attaches. */
@@ -475,6 +500,8 @@ export interface ApplicationTracking {
   follow_up_date: string | null;
   notes: string | null;
   created_at: string;
+  /** The note to someone at the company. */
+  message?: "drafted" | "sent" | "skipped" | null;
   job?: Job;
 }
 

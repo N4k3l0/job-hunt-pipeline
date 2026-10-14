@@ -18,6 +18,7 @@ import type {
   JobAlertForwarding,
   JobAlertStatus,
   NotificationSettings,
+  OutreachNote,
   Skill,
   SkillCategory,
   WorkHistoryEntry,
@@ -640,11 +641,38 @@ export function useApplicationDocuments(id: string, enabled = true) {
 
 /** Draft a message to a person about a sent application. Costs a Claude
  *  call, so it only runs when the user asks. */
-export function useDraftFollowUp(id: string) {
+/** After applying: who to write to, and the note. */
+export function useOutreachNote(jobId: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: ["outreach", jobId],
+    queryFn: () => api.get<OutreachNote>(`/api/v1/outreach/${jobId}`),
+    enabled: !!jobId && enabled,
+  });
+}
+
+/** Find the person and write the note (about a minute), or look again. */
+export function usePrepareOutreachNote(jobId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => api.post<{ message: string; drafted_at: string }>(`/api/v1/auto-apply/${id}/follow-up`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["auto-apply", id] }),
+    mutationFn: ({ lookAgain = false }: { lookAgain?: boolean } = {}) =>
+      api.post<OutreachNote>(`/api/v1/outreach/${jobId}/prepare`, { look_again: lookAgain }),
+    onSuccess: (note) => {
+      qc.setQueryData(["outreach", jobId], note);
+      qc.invalidateQueries({ queryKey: ["jobs", jobId, "contact"] });
+    },
+  });
+}
+
+/** Save the note, or mark it sent, skipped, or not sent after all. */
+export function useUpdateOutreachNote(jobId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { message?: string; status?: "drafted" | "sent" | "skipped" }) =>
+      api.put<OutreachNote>(`/api/v1/outreach/${jobId}`, body),
+    onSuccess: (note) => {
+      qc.setQueryData(["outreach", jobId], note);
+      qc.invalidateQueries({ queryKey: ["tracking"] });
+    },
   });
 }
 

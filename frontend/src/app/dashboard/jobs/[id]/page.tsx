@@ -17,6 +17,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 import { OperationProgress } from "@/components/operation-progress";
 import { ClosedNote } from "@/components/closed-note";
+import { MessageStep } from "@/components/message-step";
 import { jobFreshness } from "@/lib/freshness";
 
 /** Normalize an axis sub-score (raw 0..max) to a 0–100 percentage so
@@ -690,6 +691,9 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
           ]}
         />
       </div>
+
+      {/* Applied: who to write to, and a note to send from their LinkedIn. */}
+      {isAlreadyApplied && <MessageStep jobId={id} />}
 
       {generateTailored.isSuccess && (
         <div className="ds-card" style={{

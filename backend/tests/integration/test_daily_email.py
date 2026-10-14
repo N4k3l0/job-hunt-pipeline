@@ -145,7 +145,9 @@ async def test_daily_email_content_and_schedule(setup):
     ids = setup["ids"]
     assert str(ids["best"]) in email["html"] and "Globex" in email["html"]
     for left_out in ("low", "old", "dismissed", "applied"):
-        assert f"/dashboard/jobs/{ids[left_out]}" not in email["html"], left_out
+        assert f'/dashboard/jobs/{ids[left_out]}"' not in email["html"], left_out
+    # The follow-up goes straight to the message step on its job page.
+    assert f'/dashboard/jobs/{ids["old"]}#message"' in email["html"]
     # Jobs the app has read come first; a title-only one only after them.
     assert email["html"].index(str(ids["best"])) < email["html"].index(str(ids["title_only"]))
     assert "1 question to answer" in email["html"]
