@@ -235,7 +235,7 @@ function OnboardingFlow({
             width: 36, height: 36,
             borderRadius: 8,
             background: "var(--ds-accent)",
-            color: "#04140f",
+            color: "var(--accent-on)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",

@@ -290,7 +290,10 @@
 }
 .ds-root .ds-btn.primary {
   background: var(--ds-accent);
-  color: #04140f;
+  /* The theme's text-on-accent: white on the light theme's blue (5.8 to 1),
+     dark on the dark theme's (9.1 to 1). A fixed dark color read 3.3 to 1
+     on the light blue. */
+  color: var(--accent-on, #06101f);
   border-color: transparent;
   font-weight: 600;
 }
