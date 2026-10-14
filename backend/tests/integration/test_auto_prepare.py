@@ -203,3 +203,116 @@ async def test_the_daily_number_is_the_users_to_set(seeded):
             assert (await client.put("/api/v1/auto-apply/settings", json={"per_day": 50})).status_code == 422
     finally:
         app.dependency_overrides.clear()
+
+
+async def _as_me():
+    from fastapi import Header
+
+    from app.api.deps import get_current_user_id
+    from app.main import app
+
+    async def me(x_test_user: str = Header(default=str(ME))) -> uuid.UUID:
+        return uuid.UUID(x_test_user)
+
+    app.dependency_overrides[get_current_user_id] = me
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+
+
+async def test_the_applications_page_lists_both_kinds_of_job(seeded):
+    """One list to apply from: forms the app fills in, to tick and prepare
+    together, and jobs on other sites, to open and mark applied."""
+    from app.core.database import engine
+    from app.main import app
+
+    await seeded()
+    async with engine.begin() as conn:
+        # The same job posted twice shows once.
+        await conn.execute(text(
+            "INSERT INTO jobs (id, company, title, apply_url, job_url, status, discovered_at, last_seen_at) "
+            "VALUES (:id, 'Acme', 'Product Manager', :url, :url, 'enriched', now() - interval '3 days', now())"
+        ), {"id": job_id(20), "url": "https://job-boards.greenhouse.io/acme/jobs/20"})
+        await conn.execute(text(
+            "INSERT INTO job_scores (id, job_id, user_id, role_path, title_score, skill_score, seniority_score, "
+            "industry_score, geo_score, remote_score, salary_score, visa_score, overall_fit, priority, score_version) "
+            "VALUES (gen_random_uuid(), :job, :me, 'general', 1, 1, 0, 0, 0, 0, 0, 0, 75, 'high', 5)"
+        ), {"job": job_id(20), "me": ME})
+
+    try:
+        async with await _as_me() as client:
+            r = await client.get("/api/v1/auto-apply/picks")
+    finally:
+        app.dependency_overrides.clear()
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # Best first. Unlike the app's own daily picks, the user may take two
+    # from one company. Below 70, not listed for 10 days, dismissed,
+    # already started and closed jobs are left out.
+    assert [item["job_id"] for item in body["fill"]] == [str(job_id(n)) for n in (1, 2, 3)]
+    assert [item["job_id"] for item in body["elsewhere"]] == [str(job_id(5))]
+    first = body["fill"][0]
+    assert (first["company"], first["title"], first["score"]) == ("Acme", "Product Manager", 90)
+    assert body["elsewhere"][0]["url"] == "https://delta.wd1.myworkdayjobs.com/jobs/5"
+    assert body["max_batch"] == 25 and body["cost_each_usd"] == 0.15
+
+
+async def test_a_batch_is_prepared_a_few_at_a_time(seeded):
+    from sqlalchemy import select
+
+    from app.core.database import async_session
+    from app.main import app
+    from app.models.auto_apply import AutoApplication
+    from app.services.auto_apply import batch
+    from app.services.auto_apply.prepare import QUEUED
+
+    await seeded(per_day=0)
+    calls: list = []
+    started: list = []
+
+    async def record(user_id, job_ids):
+        started.append(job_ids)
+
+    original = batch.prepare_queued
+    batch.prepare_queued = record
+    try:
+        async with await _as_me() as client:
+            r = await client.post("/api/v1/auto-apply/batch", json={"job_ids": [
+                str(job_id(1)), str(job_id(3)), str(job_id(8)), str(uuid.uuid4()),
+            ]})
+    finally:
+        batch.prepare_queued = original
+        app.dependency_overrides.clear()
+    # Job 8 already has an application, and one job doesn't exist.
+    assert r.status_code == 200, r.text
+    assert r.json() == {"queued": 2, "skipped": 2}
+    assert started == [[job_id(1), job_id(3)]]
+
+    async with async_session() as db:
+        rows = {a.job_id: a for a in (await db.execute(select(AutoApplication).where(AutoApplication.user_id == ME))).scalars()}
+        assert (rows[job_id(1)].status, rows[job_id(1)].error) == ("preparing", QUEUED)
+        # Stopped while it waited its turn: it stays stopped.
+        rows[job_id(3)].status = "cancelled"
+        await db.commit()
+
+    outcome = await batch.prepare_queued(ME, started[0], preparer=fake_preparer(calls), session_factory=async_session)
+    assert outcome == {"prepared": 1, "failed": 0}
+    assert [job for _user, job, _by in calls] == [job_id(1)]
+
+
+async def test_the_scheduler_leaves_a_batch_alone_while_it_runs(seeded):
+    from app.core.database import async_session, engine
+    from app.services.auto_apply.auto_prepare import run
+    from app.services.auto_apply.prepare import QUEUED
+
+    await seeded(per_day=0)
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "INSERT INTO auto_applications (id, user_id, job_id, status, answers, error) "
+            "VALUES (gen_random_uuid(), :me, :job, 'preparing', '{}', :queued)"
+        ), {"me": ME, "job": job_id(1), "queued": QUEUED})
+    calls: list = []
+    now = datetime.now(timezone.utc)
+    soon = await run(limit=3, now=now + timedelta(minutes=20), preparer=fake_preparer(calls), session_factory=async_session)
+    assert soon["finished"] == 0 and calls == []
+    # Left behind (the server restarted): the scheduler finishes it.
+    later = await run(limit=3, now=now + timedelta(minutes=50), preparer=fake_preparer(calls), session_factory=async_session)
+    assert later["finished"] == 1 and [job for _user, job, _by in calls] == [job_id(1)]

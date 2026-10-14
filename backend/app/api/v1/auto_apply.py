@@ -9,7 +9,7 @@ user's own browser, and the user presses Submit there.
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -185,6 +185,31 @@ async def list_applications(user_id: CurrentUserId, db: DbSession, job_id: UUID 
     applications = (await db.execute(query)).scalars().all()
     code_boards = await email_codes.boards_asking_for_codes(db)
     return [serialize(a, detail=False, code_boards=code_boards) for a in applications]
+
+
+@router.get("/picks")
+async def apply_picks(user_id: CurrentUserId, db: DbSession):
+    """The user's best matches they haven't started: ones the app fills in,
+    to tick and prepare together, and ones on other sites."""
+    from app.services.auto_apply.batch import picks
+
+    return await picks(db, user_id)
+
+
+class BatchBody(BaseModel):
+    job_ids: list[UUID] = Field(min_length=1, max_length=25)
+
+
+@router.post("/batch")
+async def prepare_batch(body: BatchBody, background: BackgroundTasks, user_id: CurrentUserId, db: DbSession):
+    """Prepare applications for these jobs, a few at a time after this
+    answers (about a minute and $0.15 each). Each lands in Needs you."""
+    from app.services.auto_apply.batch import prepare_queued, queue_jobs
+
+    queued = await queue_jobs(db, user_id, body.job_ids)
+    if queued:
+        background.add_task(prepare_queued, user_id, queued)
+    return {"queued": len(queued), "skipped": len(body.job_ids) - len(queued)}
 
 
 @router.post("/jobs/{job_id}")

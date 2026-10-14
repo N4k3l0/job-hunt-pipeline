@@ -13,6 +13,8 @@ import { ClosedNote } from "@/components/closed-note";
 import { FillInFormButton } from "@/components/fill-in-form-button";
 import { SendForMe, useSendFinished } from "@/components/send-for-me";
 import { AutoPrepareCard } from "@/components/auto-prepare-card";
+import { ApplyPicks } from "@/components/apply-picks";
+import { ApplyQueue, autoDetail, type SentToday } from "@/components/apply-queue";
 import { useToast } from "@/components/ui/toast";
 import { EmptyState } from "@/components/ui/empty-state";
 import type { ApplicationTracking, AutoApplication, TailoredApplication } from "@/lib/types";
@@ -86,24 +88,6 @@ function Column({ title, hint, count, children }: {
       {children}
     </section>
   );
-}
-
-function autoDetail(a: AutoApplication) {
-  if (a.status === "needs_you" && a.prepared_by === "app") {
-    return `Picked for you by the app. ${a.open_count} ${a.open_count === 1 ? "question needs" : "questions need"} you`;
-  }
-  if (a.status === "needs_you") return `${a.open_count} ${a.open_count === 1 ? "question needs" : "questions need"} you`;
-  // A job the app waits to prepare says why, in plain words.
-  if (a.status === "preparing") return a.error ?? "Reading the form and filling in your answers";
-  if (a.status === "queued" && a.sending?.from_browser_only) {
-    return "Their form emails you a code, so send this one from your browser.";
-  }
-  if (a.status === "queued") {
-    // The last try didn't go through: say so where it can't be missed.
-    if (a.error) return <span className="text-amber-500">{a.error}</span>;
-    return "Everything's approved. Send it when you're ready.";
-  }
-  return a.error ?? "";
 }
 
 /** Format a date string ("YYYY-MM-DD") relative to today: "Today",
@@ -192,10 +176,24 @@ export default function ApplicationsPage() {
   const reminderCount = reminders?.length ?? 0;
 
   const autos = autoApplications ?? [];
-  // A sent application is tracked below with everything else that's sent.
-  const needsYou = autos.filter((a) => a.status === "needs_you" || a.status === "preparing");
-  const readyToSend = autos.filter((a) => a.status === "queued" || a.status === "submitting");
+  // In progress: the queue at the top, where each one is checked, approved
+  // and sent in place. Sent ones are tracked below with everything else.
+  const inQueue = autos.filter((a) => ["preparing", "needs_you", "queued", "submitting"].includes(a.status));
   const stopped = autos.filter((a) => ["failed", "unsupported", "cancelled"].includes(a.status));
+  // Sent in the last day, through the app or on their site: next is a note.
+  const recent = (iso: string | null | undefined) => !!iso && daysSince(iso) < 1;
+  const messageFor = new Map((tracking ?? []).map((t) => [t.job_id, t.message]));
+  const sentToday: SentToday[] = [];
+  for (const a of autos) {
+    if (a.status === "submitted" && recent(a.submitted_at)) {
+      sentToday.push({ job_id: a.job_id, company: a.job?.company ?? null, title: a.job?.title ?? null, message: messageFor.get(a.job_id) });
+    }
+  }
+  for (const t of tracking ?? []) {
+    if (["applied", "follow_up_due"].includes(t.status) && recent(t.applied_at) && !sentToday.some((s) => s.job_id === t.job_id)) {
+      sentToday.push({ job_id: t.job_id, company: t.job?.company ?? null, title: t.job?.title ?? null, message: t.message });
+    }
+  }
   // Resumes written for a job with an application are shown on that
   // application, so only the others are listed on their own.
   const jobsWithApplication = new Set(autos.map((a) => a.job_id));
@@ -205,7 +203,7 @@ export default function ApplicationsPage() {
   const unsentResumes = resumes.filter((t) => ["ready", "generating", "pending"].includes(t.approval_status));
   const resumesToCheck = unsentResumes.filter(current);
   const olderResumes = unsentResumes.filter((t) => !current(t));
-  const inProgress = needsYou.length + resumesToCheck.length;
+  const inProgress = resumesToCheck.length;
 
   const changeStatus = (item: ApplicationTracking, status: string) => {
     updateStatus.mutate(
@@ -360,6 +358,7 @@ export default function ApplicationsPage() {
   );
 
   const nothingYet = items.length === 0 && autos.length === 0 && resumes.length === 0;
+  const boardEmpty = items.length === 0 && stopped.length === 0 && resumes.length === 0;
 
   return (
     <div className="ds-root ds-page-fade" style={{ background: "var(--ds-bg)" }}>
@@ -368,7 +367,8 @@ export default function ApplicationsPage() {
           <div>
             <h1 className="ds-h1">Applications</h1>
             <p className="ds-muted" style={{ marginTop: 6, maxWidth: 620 }}>
-              Every application, from the questions that still need you to the ones you&apos;ve heard back on.
+              Apply from here: pick jobs, check what the app filled in, and send, without leaving this page. Below
+              is everything you&apos;ve sent and heard back on.
             </p>
           </div>
           {reminderCount > 0 && (
@@ -379,17 +379,22 @@ export default function ApplicationsPage() {
           )}
         </div>
 
-        <AutoPrepareCard />
+        <div className="space-y-8" style={{ maxWidth: 1080 }}>
+          <ApplyQueue applications={inQueue} sentToday={sentToday} />
+          <ApplyPicks />
+          <AutoPrepareCard />
+        </div>
 
-        {nothingYet ? (
-          <div className="ds-card">
-            <EmptyState
-              icon={Briefcase}
-              title="Nothing here yet"
-              description="Open a job in your inbox and press Apply for me, or mark a job as applied. It shows up here until you hear back."
-              action={{ label: "Go to inbox", href: "/dashboard/jobs" }}
-            />
-          </div>
+        {boardEmpty ? (
+          nothingYet ? (
+            <div className="ds-card">
+              <EmptyState
+                icon={Briefcase}
+                title="Nothing sent yet"
+                description="Pick jobs above and prepare them, or mark a job as applied. Everything you send shows up here until you hear back."
+              />
+            </div>
+          ) : null
         ) : (
           <div
             style={{
@@ -399,16 +404,14 @@ export default function ApplicationsPage() {
           >
             {/* Only stages with something in them. */}
             {inProgress > 0 && (
-              <Column title="Needs you" hint="Answer the questions or check the resume" count={inProgress}>
-                {needsYou.map(autoCard)}
+              <Column title="Resumes to check" hint="Written for jobs you apply to on their site" count={inProgress}>
                 {resumesToCheck.map((t) =>
                   resumeCard(t, t.approval_status === "ready" ? "Resume and cover letter ready to check" : "Writing your resume", true),
                 )}
               </Column>
             )}
-            {readyToSend.length + approvedToApply.length > 0 && (
-              <Column title="Ready to send" hint="Everything checked and approved" count={readyToSend.length + approvedToApply.length}>
-                {readyToSend.map(autoCard)}
+            {approvedToApply.length > 0 && (
+              <Column title="Ready to apply" hint="Resume approved. Apply on their site" count={approvedToApply.length}>
                 {approvedToApply.map((item) => trackedCard(item, item.status))}
               </Column>
             )}

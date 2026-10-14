@@ -50,6 +50,8 @@ MAX_AGE_DAYS = 30
 SAME_COMPANY_DAYS = 30
 # Left alone this long, a "preparing" application isn't being worked on.
 WAITING_MINUTES = 10
+# A batch from the Applications page takes longer to get through.
+QUEUED_MINUTES = 45
 COST_EACH_USD = 0.15
 
 # Forms the app fills in, as a database pattern; detect_ats has the last word.
@@ -78,18 +80,17 @@ async def prepared_today(db, user_id: uuid.UUID, now: datetime) -> int:
     )).scalar() or 0
 
 
-async def pick_jobs_to_prepare(db, user_id: uuid.UUID, *, limit: int, now: datetime | None = None) -> list[uuid.UUID]:
-    """The user's best new matches that the app can apply to: in their
-    inbox (same filters), scoring MIN_SCORE or more, listed in the last
-    week, on a form the app fills in, not dismissed, not applied to, no
-    application yet, and at most one per company."""
-    if limit <= 0:
-        return []
-    now = now or datetime.now(timezone.utc)
+async def best_matches(
+    db, user_id: uuid.UUID, *, limit: int, now: datetime, fillable_only: bool = True,
+) -> list:
+    """The user's best new matches, best first: in their inbox (same
+    filters), scoring MIN_SCORE or more, listed in the last week, not
+    dismissed, not applied to, no application yet. `fillable_only` keeps
+    the ones on a form the app fills in. Rows of (Job, score, form URL)."""
     profile = (await db.execute(
         select(CandidateProfile).where(CandidateProfile.user_id == user_id)
     )).scalar_one_or_none()
-    if profile is None:
+    if profile is None or limit <= 0:
         return []
     skills = (await db.execute(
         select(CandidateSkill.skill_name).where(
@@ -102,7 +103,7 @@ async def pick_jobs_to_prepare(db, user_id: uuid.UUID, *, limit: int, now: datet
     tracked = select(ApplicationTracking.job_id).where(ApplicationTracking.user_id == user_id)
     form_url = func.coalesce(Job.apply_url, Job.job_url)
     query = (
-        select(Job.id, Job.company, form_url)
+        select(Job, JobScore.overall_fit, form_url)
         .join(JobScore, and_(JobScore.job_id == Job.id, JobScore.user_id == user_id))
         .outerjoin(JobSource, JobSource.id == Job.source_id)
         .outerjoin(JobEntity, JobEntity.job_id == Job.id)
@@ -112,7 +113,6 @@ async def pick_jobs_to_prepare(db, user_id: uuid.UUID, *, limit: int, now: datet
             Job.discovered_at >= now - timedelta(days=MAX_AGE_DAYS),
             func.coalesce(Job.last_seen_at, Job.discovered_at) >= now - timedelta(days=FRESH_DAYS),
             JobScore.overall_fit >= MIN_SCORE,
-            form_url.op("~*")(_SUPPORTED_FORM),
             or_(UserJobState.status.is_(None), UserJobState.status != "dismissed"),
             Job.id.notin_(has_application),
             Job.id.notin_(tracked),
@@ -131,11 +131,16 @@ async def pick_jobs_to_prepare(db, user_id: uuid.UUID, *, limit: int, now: datet
         salary_currency=profile.salary_currency,
         user_id=user_id,
     )
-    candidates = (await db.execute(
-        query.order_by(JobScore.overall_fit.desc(), Job.discovered_at.desc()).limit(limit * 10)
+    if fillable_only:
+        query = query.where(form_url.op("~*")(_SUPPORTED_FORM))
+    return (await db.execute(
+        query.order_by(JobScore.overall_fit.desc(), Job.discovered_at.desc()).limit(limit)
     )).all()
 
-    recent_companies = {
+
+async def recent_companies(db, user_id: uuid.UUID, now: datetime) -> set[str]:
+    """Companies the user started an application with in SAME_COMPANY_DAYS."""
+    return {
         (company or "").strip().lower()
         for company in (await db.execute(
             select(Job.company)
@@ -147,14 +152,24 @@ async def pick_jobs_to_prepare(db, user_id: uuid.UUID, *, limit: int, now: datet
             )
         )).scalars().all()
     }
+
+
+async def pick_jobs_to_prepare(db, user_id: uuid.UUID, *, limit: int, now: datetime | None = None) -> list[uuid.UUID]:
+    """The user's best new matches that the app can apply to (best_matches
+    on a form the app fills in), at most one per company."""
+    if limit <= 0:
+        return []
+    now = now or datetime.now(timezone.utc)
+    candidates = await best_matches(db, user_id, limit=limit * 10, now=now)
+    seen = await recent_companies(db, user_id, now)
     picked: list[uuid.UUID] = []
-    for job_id, company, url in candidates:
-        key = (company or "").strip().lower()
+    for job, _score, url in candidates:
+        key = (job.company or "").strip().lower()
         target = detect_ats(url)
-        if target is None or target.board is None or not key or key in recent_companies:
+        if target is None or target.board is None or not key or key in seen:
             continue
-        recent_companies.add(key)
-        picked.append(job_id)
+        seen.add(key)
+        picked.append(job.id)
         if len(picked) == limit:
             break
     return picked
@@ -173,7 +188,7 @@ async def run(
     budget is spent; the next run carries on."""
     from app.llm.client import credits_paused
     from app.services.ai_credit import RESERVE_USD, budget_left
-    from app.services.auto_apply.prepare import prepare_application
+    from app.services.auto_apply.prepare import QUEUED, prepare_application
 
     preparer = preparer or prepare_application
     session_factory = session_factory or create_worker_session()
@@ -193,7 +208,13 @@ async def run(
             select(AutoApplication.user_id, AutoApplication.job_id)
             .where(
                 AutoApplication.status == "preparing",
-                AutoApplication.updated_at < now - timedelta(minutes=WAITING_MINUTES),
+                or_(
+                    and_(
+                        func.coalesce(AutoApplication.error, "") != QUEUED,
+                        AutoApplication.updated_at < now - timedelta(minutes=WAITING_MINUTES),
+                    ),
+                    AutoApplication.updated_at < now - timedelta(minutes=QUEUED_MINUTES),
+                ),
             )
             .order_by(AutoApplication.updated_at)
             .limit(limit)

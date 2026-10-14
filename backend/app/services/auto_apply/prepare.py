@@ -36,6 +36,9 @@ WAITING_FOR_AI = (
     "The app's AI is paused for now. It finishes preparing this by itself once it's back, "
     "so there's nothing you need to do."
 )
+# A job the user put in line to be prepared from the Applications page
+# (services/auto_apply/batch.py), waiting its turn.
+QUEUED = "Waiting its turn. The app prepares these a few at a time, about a minute each."
 # Not "previous_company_contact": whether someone interviewed or applied
 # somewhere before is never in their profile, so a draft could only guess.
 DRAFTABLE_KINDS = {"question", "years_experience", "salary"}
