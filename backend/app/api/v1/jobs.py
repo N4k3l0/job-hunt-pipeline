@@ -1183,40 +1183,21 @@ async def find_contact(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    contact_result = await db.execute(
-        select(JobContact).where(JobContact.job_id == job_id)
-    )
-    contact = contact_result.scalar_one_or_none()
+    from app.llm.client import LLMCreditsExhausted
+    from app.services.outreach.message import find_contact as look_up_contact
 
-    if contact and not force:
-        return {"contact": _serialize_contact(contact)}
-
-    from app.services.outreach.contact_finder import find_contact_for_job
+    cached = (await db.execute(
+        select(JobContact.id).where(JobContact.job_id == job_id)
+    )).scalar_one_or_none()
     try:
-        result = await find_contact_for_job(
-            company=job.company,
-            role=job.title,
-            location=job.location,
-        )
+        contact = await look_up_contact(db, job, force=force)
+    except LLMCreditsExhausted:
+        raise
     except Exception as e:  # noqa: BLE001
         logger.error("find_contact_for_job failed for %s: %s", job_id, e)
         raise HTTPException(status_code=502, detail=f"Contact lookup failed: {e}")
-
-    if contact is None:
-        contact = JobContact(job_id=job_id)
-        db.add(contact)
-
-    contact.name = result.get("name")
-    contact.title = result.get("title")
-    contact.linkedin_url = result.get("linkedin_url")
-    contact.email_guess = result.get("email_guess")
-    contact.confidence = result.get("confidence")
-    contact.source_notes = result.get("source_notes")
-    contact.citations = result.get("citations") or []
-    contact.searched_at = datetime.now(timezone.utc)
-
-    await db.commit()
-    await db.refresh(contact)
+    if cached is not None and not force:
+        return {"contact": _serialize_contact(contact)}
     payload = _serialize_contact(contact)
     payload["cached"] = False
     return {"contact": payload}

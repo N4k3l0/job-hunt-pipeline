@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 from app.api.deps import CurrentUserId, DbSession
 from app.models.tracking import ApplicationTracking, PipelineEvent
 from app.services.job_freshness import closed_note
+from app.services.outreach.message import notes_for
 
 router = APIRouter()
 
@@ -42,12 +43,15 @@ async def get_pipeline(user_id: CurrentUserId, db: DbSession):
         .order_by(ApplicationTracking.updated_at.desc())
     )
     trackings = result.scalars().all()
+    notes = await notes_for(db, user_id, [t.job_id for t in trackings])
 
     return [
         {
             "id": str(t.id),
             "job_id": str(t.job_id),
             "status": t.status,
+            # The note to someone at the company: drafted, sent, skipped or None.
+            "message": notes[t.job_id].status if t.job_id in notes else None,
             "applied_at": t.applied_at.isoformat() if t.applied_at else None,
             "follow_up_date": str(t.follow_up_date) if t.follow_up_date else None,
             "notes": t.notes,
@@ -131,12 +135,15 @@ async def get_reminders(user_id: CurrentUserId, db: DbSession):
         .order_by(ApplicationTracking.follow_up_date)
     )
     trackings = result.scalars().all()
+    notes = await notes_for(db, user_id, [t.job_id for t in trackings])
 
     return [
         {
             "id": str(t.id),
             "job_id": str(t.job_id),
             "status": t.status,
+            # The note to someone at the company: drafted, sent, skipped or None.
+            "message": notes[t.job_id].status if t.job_id in notes else None,
             "follow_up_date": str(t.follow_up_date),
             "notes": t.notes,
             "job": {

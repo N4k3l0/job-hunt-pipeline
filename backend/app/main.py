@@ -11,7 +11,7 @@ from app.core.logging import setup_logging
 from app.llm.client import LLMCreditsExhausted
 from app.api.v1 import (
     auth, candidates, jobs, tailoring, tracking, analytics, cron, feedback,
-    invite_requests, auto_apply, ratings, job_alerts, notifications,
+    invite_requests, auto_apply, ratings, job_alerts, notifications, outreach,
 )
 
 settings = get_settings()
@@ -78,6 +78,7 @@ def create_app() -> FastAPI:
     app.include_router(ratings.router, prefix="/api/v1/ratings", tags=["ratings"])
     app.include_router(job_alerts.router, prefix="/api/v1/job-alerts", tags=["job-alerts"])
     app.include_router(notifications.router, prefix="/api/v1/notifications", tags=["notifications"])
+    app.include_router(outreach.router, prefix="/api/v1/outreach", tags=["outreach"])
 
     @app.get("/health")
     async def health_check():

@@ -5,23 +5,24 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft, Check, CheckCircle2, ChevronDown, Copy, ExternalLink, FileText, Loader2, Pencil, RefreshCw, Search,
-  Sparkles, UserSearch, Wand2,
+  ArrowLeft, Check, CheckCircle2, ChevronDown, Copy, ExternalLink, FileText, Loader2, Pencil, RefreshCw,
+  Sparkles, Wand2,
 } from "lucide-react";
 import {
-  useApplicationDocuments, useAutoApplication, useCancelAutoApplication, useDraftFollowUp,
-  useFindJobContact, useJobContact, useKeepDocumentWording, useKeepWording, useMarkAutoApplicationSent,
+  useApplicationDocuments, useAutoApplication, useCancelAutoApplication,
+  useKeepDocumentWording, useKeepWording, useMarkAutoApplicationSent,
   useFirstGo, usePrepareAutoApplication,
   useRewriteAnswer, useSaveAutoApplyAnswers,
 } from "@/hooks/use-api";
 import { useExtensionInstalled } from "@/hooks/use-extension";
+import { MessageStep } from "@/components/message-step";
 import { SendForMe, SendOutcome, useSendFinished } from "@/components/send-for-me";
 import { useToast } from "@/components/ui/toast";
 import { api } from "@/lib/api-client";
 import { askExtension } from "@/lib/extension";
 import { AutoApplyStatusPill } from "@/components/auto-apply-status";
 import { OperationProgress } from "@/components/operation-progress";
-import type { AutoApplicationDetail, AutoApplyField, AutoApplyDocuments, AutoApplyFill, AutoApplyValue } from "@/lib/types";
+import type { AutoApplyField, AutoApplyDocuments, AutoApplyFill, AutoApplyValue } from "@/lib/types";
 
 // How long the page keeps checking whether the form was sent.
 const WATCH_MS = 20 * 60 * 1000;
@@ -450,130 +451,6 @@ function Section({ title, hint, children }: { title: string; hint?: string; chil
         <div style={{ marginTop: -1 }}>{children}</div>
       </div>
     </section>
-  );
-}
-
-/** After the application is sent: who to write to, and what to say. The
- *  app never sends it. LinkedIn doesn't allow that, so the user pastes it. */
-function FollowUp({ application }: { application: AutoApplicationDetail }) {
-  const toast = useToast();
-  const { data: contactData, isLoading } = useJobContact(application.job_id);
-  const findContact = useFindJobContact(application.job_id);
-  const draft = useDraftFollowUp(application.id);
-  const [message, setMessage] = useState("");
-  const [copied, setCopied] = useState(false);
-
-  const contact = contactData?.contact ?? null;
-  const saved = application.follow_up?.message ?? "";
-  useEffect(() => setMessage(saved), [saved]);
-
-  const company = application.job?.company ?? "";
-  const searchUrl = `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(company)}`;
-
-  function copy() {
-    navigator.clipboard.writeText(message).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  }
-
-  return (
-    <Section title="Follow up" hint="After applying, a message to a person">
-      <div className="space-y-3" style={{ padding: "14px 0" }}>
-        {isLoading ? (
-          <Loader2 className="h-4 w-4 animate-spin ds-dim" />
-        ) : contact ? (
-          <div className="space-y-1">
-            <div style={{ fontSize: 14, fontWeight: 500 }}>{contact.name ?? "Someone at " + company}</div>
-            {contact.title && <div className="ds-muted" style={{ fontSize: 13 }}>{contact.title}</div>}
-            <div className="flex flex-wrap items-center" style={{ gap: 10, fontSize: 13, paddingTop: 2 }}>
-              {contact.linkedin_url && (
-                <a href={contact.linkedin_url} target="_blank" rel="noopener noreferrer" className="ds-accent-fg">
-                  Their LinkedIn
-                </a>
-              )}
-              {contact.confidence && <span className="ds-dim">Confidence: {contact.confidence}</span>}
-              <button
-                type="button"
-                className="ds-btn ghost sm"
-                onClick={() => findContact.mutate({ force: true })}
-                disabled={findContact.isPending}
-              >
-                {findContact.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                Look again
-              </button>
-            </div>
-            {contact.source_notes && (
-              <p className="ds-dim" style={{ fontSize: 12, marginTop: 4 }}>{contact.source_notes}</p>
-            )}
-          </div>
-        ) : (
-          <div className="space-y-2">
-            <p className="ds-muted" style={{ fontSize: 14 }}>
-              A short note to a person at {company || "the company"} gets your application looked at more often than
-              waiting does. The app searches for the hiring manager for this role, then the department head, then a
-              recruiter.
-            </p>
-            <button
-              type="button"
-              className="ds-btn"
-              onClick={() =>
-                findContact.mutate({}, { onError: (e) => toast.error("Couldn't find anyone", { description: e.message }) })
-              }
-              disabled={findContact.isPending}
-            >
-              {findContact.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserSearch className="h-4 w-4" />}
-              Find someone to message
-            </button>
-          </div>
-        )}
-
-        {message ? (
-          <div className="space-y-2">
-            <textarea
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              rows={6}
-              style={{ ...inputStyle, borderRadius: "var(--ds-r-card)", resize: "vertical", lineHeight: 1.5 }}
-            />
-            <div className="flex flex-wrap" style={{ gap: 8 }}>
-              <button type="button" className="ds-btn primary" onClick={copy}>
-                {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                {copied ? "Copied" : "Copy the message"}
-              </button>
-              <a
-                href={contact?.linkedin_url ?? searchUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="ds-btn"
-              >
-                {contact?.linkedin_url ? <ExternalLink className="h-4 w-4" /> : <Search className="h-4 w-4" />}
-                {contact?.linkedin_url ? "Open their LinkedIn" : "Search LinkedIn"}
-              </a>
-              <button type="button" className="ds-btn ghost" onClick={() => draft.mutate()} disabled={draft.isPending}>
-                {draft.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                Write it again
-              </button>
-            </div>
-            <p className="ds-dim" style={{ fontSize: 12 }}>
-              Paste it yourself. LinkedIn doesn&apos;t allow apps to send messages for you.
-            </p>
-          </div>
-        ) : (
-          <button
-            type="button"
-            className="ds-btn"
-            onClick={() =>
-              draft.mutate(undefined, { onError: (e) => toast.error("Couldn't write it", { description: e.message }) })
-            }
-            disabled={draft.isPending}
-          >
-            {draft.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
-            Write the message
-          </button>
-        )}
-      </div>
-    </Section>
   );
 }
 
@@ -1052,9 +929,9 @@ export default function AutoApplicationPage({ params }: { params: Promise<{ id: 
           />
         </div>
 
-        <Documents id={id} />
+        {application.status === "submitted" && <MessageStep jobId={application.job_id} />}
 
-        {application.status === "submitted" && <FollowUp application={application} />}
+        <Documents id={id} />
 
         {groups.needsYou.length > 0 && (
           <Section title="Needs you" hint="Answer these, or confirm what's suggested">

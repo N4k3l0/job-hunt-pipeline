@@ -78,6 +78,9 @@ class FollowUp:
     title: str
     company: str
     due: date
+    job_id: UUID | None = None
+    # Still waiting, and no note sent to anyone at the company (or skipped).
+    suggest_note: bool = False
 
 
 @dataclass
@@ -170,7 +173,9 @@ async def build_digest(db, user: User, *, since: datetime) -> Digest:
         )
     )).scalar() or 0
 
-    for tracking, job in (await db.execute(
+    from app.services.outreach.message import WAITING, notes_for
+
+    due = (await db.execute(
         select(ApplicationTracking, Job)
         .join(Job, Job.id == ApplicationTracking.job_id)
         .where(
@@ -180,8 +185,13 @@ async def build_digest(db, user: User, *, since: datetime) -> Digest:
             ApplicationTracking.status.notin_(["rejected", "ghosted", "archived"]),
         )
         .order_by(ApplicationTracking.follow_up_date)
-    )).all():
-        digest.follow_ups.append(FollowUp(title=job.title_en or job.title, company=job.company, due=tracking.follow_up_date))
+    )).all()
+    notes = await notes_for(db, user_id, [job.id for _tracking, job in due])
+    for tracking, job in due:
+        digest.follow_ups.append(FollowUp(
+            title=job.title_en or job.title, company=job.company, due=tracking.follow_up_date, job_id=job.id,
+            suggest_note=tracking.status in WAITING and (job.id not in notes or notes[job.id].status == "drafted"),
+        ))
     return digest
 
 
@@ -264,11 +274,17 @@ def render_digest(digest: Digest, *, unsubscribe: str | None) -> tuple[str, str,
             items.append(f'<li style="margin:6px 0;"><a href="{escape(link)}" style="color:{ACCENT};">{escape(label)}</a> <span style="color:#666;">ready to review</span></li>')
             text_parts.append(f"- {label} ready to review: {link}")
         for follow_up in digest.follow_ups:
-            link = f"{app}/dashboard/applications"
+            if follow_up.job_id:
+                link = f"{app}/dashboard/jobs/{follow_up.job_id}#message"
+            else:
+                link = f"{app}/dashboard/applications"
+            hint = " No reply yet, and you haven't written to anyone there." if follow_up.suggest_note else ""
             items.append(
-                f'<li style="margin:6px 0;">Follow up on <a href="{escape(link)}" style="color:{ACCENT};">{escape(follow_up.title)} at {escape(follow_up.company)}</a></li>'
+                f'<li style="margin:6px 0;">Follow up on <a href="{escape(link)}" style="color:{ACCENT};">{escape(follow_up.title)} at {escape(follow_up.company)}</a>'
+                + (f' <span style="color:#666;">{escape(hint.strip())}</span>' if hint else "")
+                + "</li>"
             )
-            text_parts.append(f"- Follow up: {follow_up.title} at {follow_up.company} {link}")
+            text_parts.append(f"- Follow up: {follow_up.title} at {follow_up.company}.{hint} {link}")
         html_parts.append('<ul style="padding-left:18px;margin:0;font-size:14px;color:#111;">' + "".join(items) + "</ul>")
         text_parts.append("")
 

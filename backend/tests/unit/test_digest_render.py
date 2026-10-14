@@ -54,3 +54,16 @@ def test_unsubscribe_tokens(monkeypatch):
     assert not valid_unsubscribe_token(user, tampered)
     monkeypatch.setattr(get_settings(), "supabase_jwt_secret", "")
     assert not valid_unsubscribe_token(user, token)
+
+
+def test_a_follow_up_suggests_a_note_when_no_one_was_written_to(monkeypatch):
+    monkeypatch.setattr(digest_module, "frontend_url", lambda: "https://app.example")
+    job_id = uuid.uuid4()
+    _subject, html, text = render_digest(_digest(follow_ups=[
+        FollowUp("AI Engineer", "Palantir", None, job_id=job_id, suggest_note=True),
+        FollowUp("PM", "Globex", None, job_id=uuid.uuid4()),
+    ]), unsubscribe=None)
+    # Straight to the message step on the job page.
+    assert f"https://app.example/dashboard/jobs/{job_id}#message" in html
+    assert text.count("you haven't written to anyone there") == 1
+    assert "Follow up: AI Engineer at Palantir. No reply yet" in text

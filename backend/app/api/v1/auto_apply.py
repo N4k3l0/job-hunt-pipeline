@@ -33,7 +33,6 @@ from app.services.auto_apply.prepare import (
     write_first_go,
 )
 from app.services.job_freshness import closed_note
-from app.services.outreach.follow_up import NotSentYet, draft_follow_up
 from app.llm.style import has_dashes, read_through, revise_plainly, saved_read, writing_problems
 from app.services.auto_apply.drafting import rewrite_plainly
 from app.services.auto_apply.resume_pdf import tailored_for_job
@@ -99,7 +98,6 @@ def serialize(
             for item in application.form or []
         ]
         body["result"] = application.result
-        body["follow_up"] = application.follow_up
     return body
 
 
@@ -443,17 +441,6 @@ async def sent_by_extension(application_id: UUID, body: ExtensionReport, db: DbS
     except AnswerError as e:
         raise _answer_error(e) from e
     return {"status": application.status}
-
-
-@router.post("/{application_id}/follow-up")
-async def follow_up(application_id: UUID, user_id: CurrentUserId, db: DbSession):
-    """Draft a message to a person about this application. The app never
-    sends it: the user copies it into LinkedIn or their email."""
-    application = await _load(db, user_id, application_id)
-    try:
-        return await draft_follow_up(db, application)
-    except NotSentYet as e:
-        raise HTTPException(status_code=409, detail=str(e)) from e
 
 
 @router.post("/{application_id}/cancel")
