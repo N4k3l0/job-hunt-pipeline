@@ -52,9 +52,14 @@ The candidate has just applied for this role. Say so in a few words.
 ## How it reads
 - Start with "Hi" and their first name ("Hi there," if you don't have one).
 - Full sentences, with "I". Every sentence has a verb. No note-taking style.
-- End with a simple question, like asking for a short chat.
+- One example of their work, said so a stranger gets it: what it does and
+  for whom. No internal terms or counts only someone on the project would
+  follow (shots, clusters, manifests).
+- End with a simple question, like asking for a short chat, then their first
+  name on its own. No dash or hyphen before the name.
 
 ## Facts
+- If the profile names a proudest project, that's the example to use.
 - Only what the experience section says, in its words. Don't move a skill
   from the summary into a job: if a job doesn't mention RAG, don't say the
   candidate built RAG there.
@@ -156,7 +161,7 @@ async def write_note(db: AsyncSession, user_id: uuid.UUID, job: Job, contact: Jo
         job_company=job.company or "",
         candidate_name=(user.name if user else "") or "",
         candidate_summary=summary,
-        top_experience=facts_text[:2000],
+        top_experience=facts_text[:5000],
         strongest_matches=", ".join((tailored.tailored_resume_json or {}).get("strongest_matches", []))
         if tailored and tailored.tailored_resume_json else "",
     ) + NOTE_RULES
