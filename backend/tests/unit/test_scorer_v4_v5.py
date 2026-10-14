@@ -40,7 +40,7 @@ def _score(job, version, profile=PROFILE):
 
 def test_version_6_is_live():
     assert SCORE_VERSION == 6 and PROPOSED_SCORE_VERSION == 7
-    assert set(KNOWN_VERSIONS) == {2, 3, 4, 5, 6, 7}
+    assert set(KNOWN_VERSIONS) == {2, 3, 4, 5, 6, 7, 8}
     job = _job("Senior AI Engineer", ["Python", "RAG"], seniority="senior")
     assert compute_job_score(*job, PROFILE) == _score(job, 6)
     # Version 2 titles still give half marks for sharing the role noun.
@@ -168,20 +168,22 @@ def test_version_7_leaves_out_skills_every_job_mentions():
     assert v7["skill_score"] < v6["skill_score"]
 
 
-def test_version_7_scores_jobs_needing_a_sponsor_a_little_lower():
-    remote = _score(_placed(None, "full_remote"), 7, NIGERIA)
-    home = _score(_placed("NG", "onsite"), 7, NIGERIA)
-    sponsors = _score(_placed("US", "onsite", sponsorship=True), 7, NIGERIA)
-    unknown = _score(_placed("US", "onsite"), 7, NIGERIA)
+def test_version_8_scores_jobs_needing_a_sponsor_a_little_lower():
+    remote = _score(_placed(None, "full_remote"), 8, NIGERIA)
+    home = _score(_placed("NG", "onsite"), 8, NIGERIA)
+    sponsors = _score(_placed("US", "onsite", sponsorship=True), 8, NIGERIA)
+    unknown = _score(_placed("US", "onsite"), 8, NIGERIA)
     assert remote["overall_fit"] == home["overall_fit"] > sponsors["overall_fit"] > unknown["overall_fit"]
     # A little: a few points, not a different league.
     assert 2 <= remote["overall_fit"] - unknown["overall_fit"] <= 6
     assert unknown["reasoning"]["work_rights"] == "needs_sponsor"
-    # Version 6 doesn't look at work rights.
-    assert len({_score(_placed(c, r), 6, NIGERIA)["overall_fit"] for c, r in ((None, "full_remote"), ("US", "onsite"))}) == 1
+    # Versions 6 and 7 don't look at work rights.
+    for version in (6, 7):
+        places = ((None, "full_remote"), ("US", "onsite"))
+        assert len({_score(_placed(c, r), version, NIGERIA)["overall_fit"] for c, r in places}) == 1
     # Without any work rights on the profile, nothing changes.
     plain = {**NIGERIA, "home_country": None, "visa_statuses": {}}
-    assert _score(_placed("US", "onsite"), 7, plain)["overall_fit"] == _score(_placed(None, "full_remote"), 7, plain)["overall_fit"]
+    assert _score(_placed("US", "onsite"), 8, plain)["overall_fit"] == _score(_placed(None, "full_remote"), 8, plain)["overall_fit"]
 
 
 def test_the_level_the_user_chose_is_theirs():

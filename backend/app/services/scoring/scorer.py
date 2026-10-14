@@ -22,9 +22,9 @@ SCORE_VERSION = 6
 PROPOSED_SCORE_VERSION = 7
 # Every version the scorer can compute. The Rate matches comparison can
 # score a user's ratings with any of them (?compare=3,4).
-KNOWN_VERSIONS = (2, 3, 4, 5, 6, 7)
+KNOWN_VERSIONS = (2, 3, 4, 5, 6, 7, 8)
 
-# Weights of the rule-based components. The first five sum to 1; version 7
+# Weights of the rule-based components. The first five sum to 1; version 8
 # adds work rights. A score is the weighted average of the parts it counts.
 WEIGHTS = {
     "title": 0.30, "skills": 0.35, "seniority": 0.20, "domain": 0.05, "remote": 0.10, "work_rights": 0.05,
@@ -62,13 +62,16 @@ SKILLS_MIN_LISTED = 3
 # hadn't listed their skills yet; their descriptions mention none of the
 # candidate's skills. A job with no description still goes by what's known.
 DESCRIPTION_MIN_CHARS = 300
-# Version 7 is version 6 with three changes the user asked for on
-# 2026-10-14:
-# - Skills nearly every job mentions (communication, Slack, Google
-#   Workspace: matching.GENERIC_SKILLS) don't count as a match.
-# - Work rights count (WORK_RIGHTS): a job the candidate can take where
-#   they are scores a little higher than one where they'd need a visa
-#   sponsor, most of all when the job doesn't say it sponsors.
+# The user asked for three changes on 2026-10-14. Measured together on
+# their ratings they did worse than version 6, so each is its own version
+# to see which one costs what:
+# - Version 7 is version 6 where skills nearly every job mentions
+#   (communication, Slack, Google Workspace: matching.GENERIC_SKILLS) don't
+#   count as a match.
+# - Version 8 is version 7 where work rights count (WORK_RIGHTS): a job the
+#   candidate can take where they are scores a little higher than one where
+#   they'd need a visa sponsor, most of all when the job doesn't say it
+#   sponsors.
 # - The level the user chose on their profile is theirs, not a guess (all
 #   versions read it: it's part of the profile).
 WORK_RIGHTS = {"allowed": 1.0, "sponsors": 0.7, "remote_needs_sponsor": 0.6, "needs_sponsor": 0.3, "no_sponsor": 0.0}
@@ -249,7 +252,7 @@ def compute_job_score(
             "domain": domain_value if any(t and len(t.strip()) >= 3 for t in domain_tags) else None,
             "remote": remote_value if remote_preference != "any" and job_data.get("remote_type") else None,
         }
-        if version >= 7:
+        if version >= 8:
             components["work_rights"], work_rights = work_rights_match(
                 job_data.get("country"), job_data.get("remote_type"), job_entities.get("sponsorship_available"),
                 profile.get("home_country"), profile.get("visa_statuses"),
@@ -300,7 +303,7 @@ def compute_job_score(
             "skills_matched": skills_matched,
             "skills_missing": skills_missing,
             "domain_matches": domain_hits,
-            **({"work_rights": work_rights} if version >= 7 and known_only else {}),
+            **({"work_rights": work_rights} if version >= 8 and known_only else {}),
             **seniority_detail,
             **geo.get("reasoning", {}),
         },
