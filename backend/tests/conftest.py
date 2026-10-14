@@ -68,3 +68,8 @@ def _read_through_finds_nothing(monkeypatch):
     monkeypatch.setattr(writing, "revise_plainly", keeps_lines)
     monkeypatch.setattr(message, "read_through", reads_fine)
     monkeypatch.setattr(message, "revise_plainly", keeps_lines)
+
+    async def note_is_fine(text, *, role, company, facts, llm=None):
+        return []
+
+    monkeypatch.setattr(message, "check_note", note_is_fine)

@@ -182,6 +182,34 @@ async def test_a_note_about_job_searching_is_sent_back(client, monkeypatch):
     assert "job search" not in view["message"] and view["problems"] == []
 
 
+async def test_the_note_is_checked_against_the_experience_and_its_job(client, monkeypatch):
+    """The second Palantir note said "voice receptionists" for one, and
+    ended "Happy to share details if useful", which asks for nothing."""
+    from app.services.outreach import message
+
+    client.llm.note = "Hi Dana, I just applied for the Product Manager role. I built voice receptionists. Happy to share details. Ada"
+    checked: list[tuple[str, str]] = []
+    asked: list[list[str]] = []
+
+    async def checks(text, *, role, company, facts, llm=None):
+        checked.append((role, company))
+        return ['"voice receptionists": the experience has one, so say "a voice receptionist".'] if not asked else []
+
+    async def fixes(lines, problems, *, what, llm=None):
+        asked.append(problems)
+        return ["Hi Dana, I just applied for the Product Manager role. I built a voice receptionist for a gym. "
+                "Would you take a look at my application?\n\nAda"]
+
+    monkeypatch.setattr(message, "check_note", checks)
+    monkeypatch.setattr(message, "revise_plainly", fixes)
+    await client.post(f"/api/v1/jobs/{JOB}/mark-applied")
+    view = (await client.post(f"/api/v1/outreach/{JOB}/prepare")).json()
+    assert checked[0] == ("Product Manager", "Stripe")
+    assert any("doesn't ask for anything" in p for p in asked[0])
+    assert any("a voice receptionist" in p for p in asked[0])
+    assert view["message"].endswith("Would you take a look at my application?\n\nAda") and view["problems"] == []
+
+
 async def test_when_no_one_is_found_the_note_is_still_written(client, monkeypatch):
     from app.services.outreach import contact_finder
 
