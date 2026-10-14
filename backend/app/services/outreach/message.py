@@ -39,7 +39,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.llm.client import LLMCreditsExhausted
 from app.llm.style import (
-    STYLE_RULES, plain_english, read_through, revise_plainly, without_dashes, writing_problems,
+    READ_THROUGH_TOOL, STYLE_RULES, _problems_from, plain_english, read_through, revise_plainly, without_dashes,
+    writing_problems,
 )
 from app.models.job import Job, JobContact, JobEntity
 from app.models.tracking import ApplicationTracking, OutreachLog
@@ -84,17 +85,37 @@ three moves, in this order:
 ## Rules
 - Start with "Hi" and the reader's first name ("Hi there," if you don't have one).
 - Full sentences, with "I". Every sentence has a verb. No note-taking style.
-- Use the experience as written: the same numbers and names. Don't move a skill from the summary into a
-  job: if a job doesn't mention RAG, don't say they built RAG there.
+- Use the experience as written: the same numbers and names. One thing stays one thing: "an AI voice
+  receptionist for a gym" is "a voice receptionist", never "voice receptionists". Don't move a skill from
+  the summary into a job: if a job doesn't mention RAG, don't say they built RAG there.
 - Say the work so a stranger gets it: what it does and for whom. No internal terms or counts only someone
   on the project would follow.
 - Never talk about job searching, job postings or applying for jobs as their work, even if they built
   software for it: the reader may wonder whether the application came from a tool.
 - Never say or hint that an app, a tool or AI wrote, filled in or sent the application or this note.
 - At most 300 characters, counting spaces and the name.
+- The ask is a question to the reader ("Would you take a look at my application?"). An offer like
+  "Happy to share more" is not an ask.
 - End with the ask, then a blank line and their first name on its own. No dash or hyphen before the name.
 
 Return only the note."""
+
+NOTE_CHECK_SYSTEM = """You check a short LinkedIn note a job seeker is about to send to someone at a company,
+right after applying there: that it does its job, and that every claim is true to their experience.
+
+Its job is to get the reader to open the application, in three moves:
+1. It says they applied, and for which role.
+2. It gives one reason they fit what this role does, shown with real work.
+3. It ends with a small question for the reader that's easy to say yes to, like whether they'd take a look
+   at the application or have a short chat. An offer ("happy to share more") is not a question.
+
+Flag only real problems:
+- a missing move
+- a claim the experience doesn't support, or makes bigger: one thing said as several, a number rounded up,
+  a skill put into a job that doesn't mention it
+- job searching or job applications talked about as their work
+Quote the exact words (under 12) and say in plain English what to do instead. If it does its job and every
+claim is supported, record no problems."""
 
 # A note about job searching tells the reader the wrong thing (see above).
 _JOB_SEARCH = re.compile(
@@ -172,12 +193,30 @@ def note_problems(text: str | None) -> list[str]:
         problems.append(
             f"It's {length} characters. LinkedIn only allows {MAX_CHARS} in a connection note, so make it shorter."
         )
+    if text and "?" not in text:
+        problems.append(
+            "It doesn't ask for anything. End with a small question, like whether they'd take a look at your "
+            "application."
+        )
     if text and _JOB_SEARCH.search(text):
         problems.append(
             "It talks about job searching. Use work that matches what this role does instead, so the reader "
             "doesn't wonder whether the application came from a tool."
         )
     return problems
+
+
+async def check_note(text: str, *, role: str, company: str, facts: str, llm=None) -> list[str]:
+    """What stops the note doing its job, or isn't true to the user's
+    experience. The style read-through can't see either."""
+    if llm is None:
+        from app.llm.client import llm_client as llm
+    result = await llm.generate_structured(
+        "review", NOTE_CHECK_SYSTEM,
+        f"The role: {role} at {company}\n\nTheir experience:\n{facts}\n\nThe note:\n{text}",
+        tools=[READ_THROUGH_TOOL], max_tokens=1200,
+    )
+    return _problems_from(result.get("problems"))
 
 
 def _readable(description: str | None) -> str:
@@ -226,12 +265,17 @@ async def write_note(db: AsyncSession, user_id: uuid.UUID, job: Job, contact: Jo
         "for something small"
     )
     for round_ in range(FIX_ROUNDS):
-        try:
-            found = await read_through(text, what=what)
-        except LLMCreditsExhausted:
-            raise
-        except Exception:  # noqa: BLE001
-            found = []
+        found = []
+        for check in (
+            lambda: read_through(text, what=what),
+            lambda: check_note(text, role=role, company=job.company or "", facts=facts_text[:FACTS_CHARS]),
+        ):
+            try:
+                found += await check()
+            except LLMCreditsExhausted:
+                raise
+            except Exception:  # noqa: BLE001
+                pass
         problems = note_problems(text) + found
         if not problems or round_ == FIX_ROUNDS - 1:
             break
