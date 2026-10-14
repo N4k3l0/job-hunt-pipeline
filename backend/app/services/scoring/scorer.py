@@ -19,7 +19,8 @@ logger = logging.getLogger(__name__)
 # a change is measured against the user's own ratings before it replaces
 # the stored scores.
 SCORE_VERSION = 6
-PROPOSED_SCORE_VERSION = 7
+# 7 and 8 were measured on 2026-10-14 and not taken (see below).
+PROPOSED_SCORE_VERSION = 6
 # Every version the scorer can compute. The Rate matches comparison can
 # score a user's ratings with any of them (?compare=3,4).
 KNOWN_VERSIONS = (2, 3, 4, 5, 6, 7, 8)
@@ -62,9 +63,12 @@ SKILLS_MIN_LISTED = 3
 # hadn't listed their skills yet; their descriptions mention none of the
 # candidate's skills. A job with no description still goes by what's known.
 DESCRIPTION_MIN_CHARS = 300
-# The user asked for three changes on 2026-10-14. Measured together on
-# their ratings they did worse than version 6, so each is its own version
-# to see which one costs what:
+# The user asked for three changes on 2026-10-14. Measured on their 183
+# ratings, neither scoring change beat version 6, and the user chose to keep
+# it (v6, v7, v8: ranking 0.879, 0.883, 0.866; good jobs below 50 24, 29,
+# 29). Generic skills were helping more good jobs than bad ones, and their
+# ratings like plenty of jobs that need a sponsor. Kept so they can be
+# measured again on more ratings (?compare=7,8):
 # - Version 7 is version 6 where skills nearly every job mentions
 #   (communication, Slack, Google Workspace: matching.GENERIC_SKILLS) don't
 #   count as a match.
