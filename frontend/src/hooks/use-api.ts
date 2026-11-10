@@ -970,6 +970,25 @@ export function useUpdateStatus() {
   });
 }
 
+/** Cards cleared off the Closed column. They're hidden, not deleted. */
+export function useClearedCards() {
+  return useQuery({
+    queryKey: ["tracking", "cleared"],
+    queryFn: () => api.get<{ ids: string[] }>("/api/v1/tracking/cleared"),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** Clear cards off the Closed column, or put them back (Undo). */
+export function useClearCards() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ids, restore }: { ids: string[]; restore?: boolean }) =>
+      api.post<{ ids: string[] }>(`/api/v1/tracking/cleared${restore ? "/restore" : ""}`, { ids }),
+    onSuccess: (data) => qc.setQueryData(["tracking", "cleared"], data),
+  });
+}
+
 export function useReminders() {
   return useQuery({
     queryKey: ["tracking", "reminders"],
