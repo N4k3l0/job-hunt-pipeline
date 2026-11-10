@@ -4,11 +4,11 @@ from datetime import date, datetime, timedelta, timezone
 DEFAULT_FOLLOW_UP_DAYS = 7
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import CurrentUserId, DbSession
+from app.api.deps import CurrentUser, CurrentUserId, DbSession
 from app.models.tracking import ApplicationTracking, PipelineEvent
 from app.services.job_freshness import closed_note
 from app.services.outreach.message import notes_for
@@ -25,6 +25,17 @@ VALID_TRANSITIONS = {
     # A reply after all: back to waiting, or straight to what happened.
     "ghosted": ["applied", "interviewing", "rejected", "archived"],
 }
+
+
+# Cards the user cleared off the Closed column of the Applications board:
+# hidden there, never deleted, so the history still counts (the app won't
+# offer a job again that they were turned down for).
+CLEARED_KEY = "cleared_from_board"
+CLEARED_MAX = 2000
+
+
+class Cards(BaseModel):
+    ids: list[UUID] = Field(max_length=500)
 
 
 class StatusUpdate(BaseModel):
@@ -66,6 +77,34 @@ async def get_pipeline(user_id: CurrentUserId, db: DbSession):
         }
         for t in trackings
     ]
+
+
+@router.get("/cleared")
+async def get_cleared(user: CurrentUser):
+    """The cards cleared off the Closed column."""
+    return {"ids": (user.preferences or {}).get(CLEARED_KEY, [])}
+
+
+@router.post("/cleared")
+async def clear_cards(body: Cards, user: CurrentUser, db: DbSession):
+    """Take cards off the Closed column. Nothing is deleted."""
+    cleared = (user.preferences or {}).get(CLEARED_KEY, [])
+    new = [str(i) for i in body.ids if str(i) not in cleared]
+    cleared = (cleared + new)[-CLEARED_MAX:]
+    # A new dict, so the change to the JSON column is saved.
+    user.preferences = {**(user.preferences or {}), CLEARED_KEY: cleared}
+    await db.commit()
+    return {"ids": cleared}
+
+
+@router.post("/cleared/restore")
+async def restore_cards(body: Cards, user: CurrentUser, db: DbSession):
+    """Put cleared cards back on the Closed column (Undo)."""
+    back = {str(i) for i in body.ids}
+    cleared = [i for i in (user.preferences or {}).get(CLEARED_KEY, []) if i not in back]
+    user.preferences = {**(user.preferences or {}), CLEARED_KEY: cleared}
+    await db.commit()
+    return {"ids": cleared}
 
 
 @router.put("/{tracking_id}/status")

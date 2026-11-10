@@ -6,7 +6,8 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  useApplicationPipeline, useAutoApplications, useReminders, useReviewQueue, useUpdateStatus,
+  useApplicationPipeline, useAutoApplications, useClearCards, useClearedCards, useReminders, useReviewQueue,
+  useUpdateStatus,
 } from "@/hooks/use-api";
 import { AutoApplyStatusPill } from "@/components/auto-apply-status";
 import { ClosedNote } from "@/components/closed-note";
@@ -67,8 +68,8 @@ function BoardCard({ href, company, title, detail, note, children }: {
 const COLUMN_MIN = 250;
 
 /** One stage of applying, as a column. */
-function Column({ title, hint, count, children }: {
-  title: string; hint?: string; count: number; children: React.ReactNode;
+function Column({ title, hint, count, action, children }: {
+  title: string; hint?: string; count: number; action?: React.ReactNode; children: React.ReactNode;
 }) {
   return (
     <section
@@ -81,7 +82,10 @@ function Column({ title, hint, count, children }: {
       <header style={{ padding: "2px 4px 4px" }}>
         <div className="flex items-baseline justify-between" style={{ gap: 8 }}>
           <h2 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>{title}</h2>
-          <span className="ds-mono ds-dim" style={{ fontSize: 12 }}>{count}</span>
+          <span className="flex items-center" style={{ gap: 8 }}>
+            {action}
+            <span className="ds-mono ds-dim" style={{ fontSize: 12 }}>{count}</span>
+          </span>
         </div>
         {hint && <div className="ds-dim" style={{ fontSize: 12, marginTop: 2 }}>{hint}</div>}
       </header>
@@ -171,6 +175,8 @@ export default function ApplicationsPage() {
   const { data: tailored } = useReviewQueue();
   const { data: reminders } = useReminders();
   const updateStatus = useUpdateStatus();
+  const { data: clearedCards } = useClearedCards();
+  const clearCards = useClearCards();
   const toast = useToast();
 
   const items = tracking ?? [];
@@ -224,8 +230,37 @@ export default function ApplicationsPage() {
   const approvedToApply = trackedIn("approved");
   const sent = trackedIn("follow_up_due", "applied");
   const talking = trackedIn("interviewing", "offered");
-  const closed = trackedIn("rejected", "ghosted", "archived");
-  const closedCount = closed.length + stopped.length + olderResumes.length;
+  // Cards the user cleared off the Closed column stay saved, just not shown.
+  const cleared = new Set(clearedCards?.ids ?? []);
+  const shown = <T extends { id: string }>(cards: T[]) => cards.filter((c) => !cleared.has(c.id));
+  const closed = shown(trackedIn("rejected", "ghosted", "archived"));
+  const closedStopped = shown(stopped);
+  const closedResumes = shown(olderResumes);
+  const closedCount = closed.length + closedStopped.length + closedResumes.length;
+  const anyColumn = inProgress + approvedToApply.length + sent.length + talking.length + closedCount > 0;
+
+  const clearClosed = () => {
+    const ids = [...closed, ...closedStopped, ...closedResumes].map((c) => c.id);
+    clearCards.mutate(
+      { ids },
+      {
+        onSuccess: () =>
+          toast.action({
+            message: `Cleared ${ids.length} from Closed`,
+            description: "They're off your board. Nothing is deleted.",
+            actionLabel: "Undo",
+            duration: 8000,
+            onCommit: () => {},
+            onUndo: () =>
+              clearCards.mutate(
+                { ids, restore: true },
+                { onError: (err) => toast.error("Couldn't bring them back", { description: err.message }) },
+              ),
+          }),
+        onError: (err) => toast.error("Couldn't clear them", { description: err.message }),
+      },
+    );
+  };
 
   if (isLoading || autoLoading) {
     return (
@@ -359,7 +394,7 @@ export default function ApplicationsPage() {
   );
 
   const nothingYet = items.length === 0 && autos.length === 0 && resumes.length === 0;
-  const boardEmpty = items.length === 0 && stopped.length === 0 && resumes.length === 0;
+  const boardEmpty = !anyColumn;
 
   return (
     <div className="ds-root ds-page-fade" style={{ background: "var(--ds-bg)" }}>
@@ -427,10 +462,25 @@ export default function ApplicationsPage() {
               </Column>
             )}
             {closedCount > 0 && (
-              <Column title="Closed" hint="Heard no, stopped, or put away" count={closedCount}>
+              <Column
+                title="Closed"
+                hint="Heard no, stopped, or put away"
+                count={closedCount}
+                action={
+                  <button
+                    type="button"
+                    className="ds-btn ghost sm"
+                    onClick={clearClosed}
+                    disabled={clearCards.isPending}
+                    title="Take these off your board. Nothing is deleted."
+                  >
+                    Clear
+                  </button>
+                }
+              >
                 {closed.map((item) => trackedCard(item, item.status))}
-                {stopped.map(autoCard)}
-                {olderResumes.map((t) =>
+                {closedStopped.map(autoCard)}
+                {closedResumes.map((t) =>
                   resumeCard(t, t.job?.closed ? "Resume written. The job closed before it was sent." : "Resume written, never sent", false),
                 )}
               </Column>
