@@ -64,3 +64,39 @@ def test_missing_settings(monkeypatch):
     monkeypatch.setenv("CRON_SECRET", "s")
     monkeypatch.setattr("sys.argv", ["scheduled_tasks.py"])
     assert scheduled_tasks.main() == 2
+
+
+def _answers(monkeypatch, *answers):
+    """The backend answers each request in turn; waits are recorded, not slept."""
+    asked, waits = [], []
+    replies = iter(answers)
+
+    def fake_request(base_url, secret, path, timeout):
+        asked.append(path)
+        return next(replies)
+
+    monkeypatch.setattr(scheduled_tasks, "_request", fake_request)
+    monkeypatch.setattr(scheduled_tasks.time, "sleep", waits.append)
+    return asked, waits
+
+
+RATE_LIMITED = (False, 429, "HTTP 429: rate limited")
+
+
+def test_rate_limited_by_railway_is_asked_again(monkeypatch):
+    asked, waits = _answers(monkeypatch, RATE_LIMITED, RATE_LIMITED, (True, 200, '{"checked": 10}'))
+    assert scheduled_tasks.call("https://b", "s", "/api/v1/cron/expire-stale", 5) is True
+    assert len(asked) == 3 and waits == [15, 45]
+
+
+def test_still_rate_limited_after_three_tries_fails(monkeypatch):
+    asked, waits = _answers(monkeypatch, RATE_LIMITED, RATE_LIMITED, RATE_LIMITED)
+    assert scheduled_tasks.call("https://b", "s", "/api/v1/cron/expire-stale", 5) is False
+    assert len(asked) == 3
+
+
+def test_other_failures_are_not_repeated(monkeypatch):
+    # A 500 may have run part of the step, so it isn't run again.
+    asked, waits = _answers(monkeypatch, (False, 500, "HTTP 500: oops"))
+    assert scheduled_tasks.call("https://b", "s", "/api/v1/cron/enrich", 5) is False
+    assert len(asked) == 1 and waits == []

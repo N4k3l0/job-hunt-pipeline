@@ -36,22 +36,35 @@ TASK_TIMEOUT = 180
 PREPARE_TIMEOUT = 240
 
 
-def call(base_url: str, secret: str, path: str, timeout: int) -> bool:
-    started = time.monotonic()
+# Railway's edge now and then answers "429 rate limited" at once, without
+# passing the request on to the backend. Nothing ran, so asking again is
+# safe: wait a little and try twice more before calling the step failed.
+RATE_LIMITED_WAITS = (15, 45)
+
+
+def _request(base_url: str, secret: str, path: str, timeout: int) -> tuple[bool, int | None, str]:
     request = urllib.request.Request(
         f"{base_url.rstrip('/')}{path}",
         headers={"Authorization": f"Bearer {secret}", "User-Agent": "job-hunt-scheduler"},
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            body = response.read().decode("utf-8", "replace")
-            ok = True
+            return True, response.status, response.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as e:
-        body = f"HTTP {e.code}: {e.read().decode('utf-8', 'replace')[:500]}"
-        ok = False
+        return False, e.code, f"HTTP {e.code}: {e.read().decode('utf-8', 'replace')[:500]}"
     except (urllib.error.URLError, TimeoutError, OSError) as e:
-        body = f"{type(e).__name__}: {e}"
-        ok = False
+        return False, None, f"{type(e).__name__}: {e}"
+
+
+def call(base_url: str, secret: str, path: str, timeout: int) -> bool:
+    started = time.monotonic()
+    ok, status, body = _request(base_url, secret, path, timeout)
+    for wait in RATE_LIMITED_WAITS:
+        if status != 429:
+            break
+        print(f"[rate limited] {path.split('?')[0]}: trying again in {wait}s", flush=True)
+        time.sleep(wait)
+        ok, status, body = _request(base_url, secret, path, timeout)
     elapsed = time.monotonic() - started
     try:
         body = json.dumps(json.loads(body))[:2000]
